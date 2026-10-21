@@ -34,7 +34,10 @@
   for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)||shape(pack.config)!==want||best&&gap>=best.gap)continue;best={pack,gap,chart};}
   if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)});
   try{for(const a of hand.actionLog)proxy.act({kind:a.kind,target:a.target});}catch{return null;}
-  proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,controlActions.map(a=>({...a})));if(!result)return null;
+  proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
+  // The chart's all-in stands for this hand's all-in, whatever its depth.
+  const chartJam=proxy.legal().allInTo,jam=hand.legal().allInTo;for(const a of result.actions)if(a.kind==='raise'&&a.target===chartJam){a.target=jam;a.label='Raise to '+G.bb(jam)+' bb · all-in';}
+  for(const a of controlActions)if(!result.actions.some(b=>b.kind===a.kind&&(!['raise','bet'].includes(a.kind)||b.target===a.target))){result.actions.push({...a});result.reference.push(null);}result.probs=result.reference;
   result.depthMatch={chart:best.chart,actual:depth};result.referenceKey+='|depth:'+depth;return result;
  }
  function isResult(r){return !!(r?.supported&&r.referenceOnly&&r.referenceVersion===1&&r.referenceSource?.kind==='imported-preflop'&&typeof r.referenceSource.name==='string'&&/^https:\/\//.test(r.referenceSource.url)&&Array.isArray(r.actions)&&r.actions.length>=2&&r.actions.length===r.reference?.length&&r.reference.every(x=>x===null||Number.isFinite(x)&&x>=0&&x<=1)&&Math.abs(sum(r.reference.map(x=>x||0))-1)<1e-6);}
