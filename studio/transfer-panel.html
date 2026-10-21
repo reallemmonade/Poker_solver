@@ -1,0 +1,29 @@
+<section class="view" id="savedSpots">
+  <div class="eyebrow">Practice without recalculating</div><h2>Your saved solver spots</h2>
+  <p class="help">Use results solved on this device or imported from your laptop. Answers stay hidden until you choose an action. Each drill covers the saved decision; later decisions need their own solution.</p>
+  <div class="row gap"><label class="toggle"><input type="checkbox" id="savedReliableOnly" checked>Only spots with a usable assessment</label><button class="btn secondary" id="savedRefresh">Refresh saved spots</button><button class="btn secondary" id="savedTransfer">Import from iCloud / Files</button></div>
+  <p id="savedSpotStatus" class="status" role="status"></p>
+  <div id="savedSpotDrill" class="hide">
+    <h3 id="savedDrillTitle"></h3><p id="savedDrillScope" class="help"></p>
+    <details open><summary>How this spot was reached</summary><div id="savedDrillHistory" class="log"></div></details>
+    <div id="savedDrillTable" class="felt" aria-label="Saved study spot"></div>
+    <div id="savedDrillActions" class="actions"></div><div id="savedDrillFeedback" class="result" aria-live="polite">Choose your action to reveal the saved analysis.</div>
+    <button class="btn secondary" id="savedNextSpot">Next saved spot</button>
+  </div>
+  <div id="savedSpotList" class="gap"></div>
+</section>
+<section class="view" id="transfer">
+  <div class="eyebrow">Take your study data with you</div><h2>iCloud Drive &amp; Files</h2>
+  <p>Save a study backup to iCloud Drive on your laptop, then open it here on your iPhone. Your backup includes saved solver results and their hands, ranges and bet sizes, strategy models, hand histories, assessments and settings.</p>
+  <div class="notice">Transfers use a file you save and open yourself. There is no automatic iCloud sign-in or background sync. A completed solver result is included; the temporary betting tree and an unfinished calculation are not stored.</div>
+  <div id="transferCounts" class="stats"></div>
+  <div class="transfer-steps"><h3>Save from this device</h3><p class="help">Prepare the backup first. Then share it to Files and choose iCloud Drive, or download it and move the file to iCloud Drive. A download alone does not confirm an iCloud copy.</p>
+    <div class="field"><label for="backupContents">Backup contents</label><select class="input" id="backupContents"><option value="study">Study file · solved spots, hands &amp; progress</option><option value="complete">Complete backup · also include strategy models</option></select><p class="help">The study file is smaller for your phone. Saved-spot drills do not need the larger strategy models.</p></div>
+    <div class="row"><button class="btn" id="backupPrepare">Prepare study backup</button><button class="btn secondary" id="backupShare" disabled>Share to Files</button><button class="btn secondary" id="backupDownload" disabled>Download backup</button></div><p id="backupReady" class="help"></p>
+  </div>
+  <div class="transfer-steps"><h3>Open on another device</h3><p class="help">Choose your backup from Files → iCloud Drive. You can also open an exported spot-analysis JSON. Import merges records; it does not delete this device's data. Existing device settings stay in place. After importing, use Saved spots to practice.</p>
+    <button class="btn" id="backupImport">Open backup / analysis from Files</button><input class="hide" type="file" id="backupFile" accept=".json,application/json"><button class="btn secondary hide" id="backupReload">Reload to apply imported settings</button>
+  </div>
+  <p id="transferStatus" class="status" role="status" aria-live="polite"></p>
+  <p class="help">A backup is a snapshot. After studying on either device, export a new backup to transfer that progress. Browser data can be removed by clearing website data; keep a copy in Files.</p>
+</section>

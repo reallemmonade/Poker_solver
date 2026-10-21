@@ -31,4 +31,8 @@
 !/studio/table.js
 !/studio/trainer.js
 !/studio/worker.js
+!/studio/transfer.js
+!/studio/transfer-panel.html
+!/studio/mobile.css
+!/studio/verify-transfer.cjs
 /studio/render-site/

@@ -1,0 +1,131 @@
+'use strict';
+const transferUI={file:null,busy:false,rows:[],drill:null,generation:0};
+const studyStores=['models','hands','grades','meta','solves'];
+const backupFormat='range-lab-device-backup-v1';
+function transferMessage(message,error=false){$('transferStatus').textContent=message;$('transferStatus').classList.toggle('error',error);}
+function readStudyStores(includeModels=true){return openDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readonly'),out={models:[]};for(const name of studyStores){if(name==='models'&&!includeModels)continue;const request=tx.objectStore(name).getAll();request.onsuccess=()=>{out[name]=request.result;};}tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(tx.error||Error('Could not read study data.'));tx.onerror=()=>{};}));}
+function validRecordId(value){return typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(value);}
+function rowDate(row){return Date.parse(row.updatedAt||row.createdAt||'')||0;}
+function archiveSavedSpot(row){if(row.archived===true&&row.id==='archive-'+hash(row.key))return row;const key=typeof row.key==='string'?row.key:JSON.stringify(['legacy',row.id]);return{id:'archive-'+hash(key),key,archived:true,record:row,updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};}
+function savedSpotContext(row){
+ const key=JSON.parse(row.key);if(!Array.isArray(key)||key[0]!=='spot-v3'||typeof key[1]!=='string')throw Error('Unsupported saved spot key.');
+ const base=JSON.parse(key[1]);if(!Array.isArray(base)||base.length!==5||!Array.isArray(base[4]))throw Error('Invalid saved spot history.');
+ const observed=row.observed||{config:base[0],actor:base[1],heroCards:base[2],board:base[3],actions:base[4].map((a,i)=>({seat:a[0],street:a[1],kind:a[2],target:a[3],id:'restored-'+i}))};
+ if(!observed||!Number.isInteger(observed.actor)||!Array.isArray(observed.heroCards)||!Array.isArray(observed.board)||observed.board.length>5||!Array.isArray(observed.actions)||observed.actions.length>300||!observed.heroCards.concat(observed.board).every(c=>Number.isInteger(c)&&c>=0&&c<52))throw Error('Invalid saved spot cards or actions.');
+ if(PokerSpot.publicKey(observed)!==key[1])throw Error('Saved spot context does not match its cache key.');
+ const config=G.normalize(observed.config);if(observed.actor<0||observed.actor>=config.seats||observed.heroCards.length!==config.rules.hole)throw Error('Invalid saved spot actor.');
+ const holes=Array(config.seats).fill(null);holes[observed.actor]=observed.heroCards;
+ const hand=PokerSpot.reconstruct(observed,holes,G.rng(9181)),options=row.options||key[2];PokerSpot.options(options);
+ return{observed,hand,options,extraAction:row.extraAction??key[3]??null};
+}
+function normalizeSavedSpot(row){
+ if(!row||typeof row.key!=='string'||row.key.length>2000000||row.id!=='spot-'+hash(row.key)||!validSpotResult(row.result))throw Error('Invalid saved solver result.');
+ const context=savedSpotContext(row);for(const action of row.result.actions)context.hand.clone().act(action);
+ return{id:row.id,key:row.key,result:row.result,observed:context.observed,options:context.options,extraAction:context.extraAction,updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};
+}
+function portableSpot(observed,options,result,extraAction=null){
+ if(!validSpotResult(result))throw Error('This analysis is not a supported saved result.');
+ const opts=PokerSpot.options(options),holes=Array(observed.config.seats).fill(null);holes[observed.actor]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(9181));
+ if(!extraAction){const regular=PokerSpot.actionsAt(hand,hand,opts,null),extra=result.actions.filter(a=>T.matchAction(regular,a)<0);if(extra.length>1)throw Error('The analysis contains unrecorded custom actions. Export a full study backup instead.');extraAction=extra[0]||null;}
+ const key=JSON.stringify(['spot-v3',PokerSpot.publicKey(observed),opts,extraAction]);return normalizeSavedSpot({id:'spot-'+hash(key),key,result,observed,options:opts,extraAction,updatedAt:new Date().toISOString()});
+}
+function exportPortableSpot(){try{const result=state.hand&&!state.hand.done?activeSpotResult(state.hand):null;if(!result)return;const key=spotUI.last.cacheKey,row=key?normalizeSavedSpot({id:'spot-'+hash(key),key,result,observed:observedData(state.hand),options:spotUI.last.options,updatedAt:new Date().toISOString()}):portableSpot(observedData(state.hand),spotUI.last.options,result);exportJSON({format:'range-lab-spot-solve-v1',...row},'range-lab-spot-analysis.json');}catch(error){status(error.message,true);}}
+async function refreshTransferCounts(){
+ try{const db=await openDB(),counts=await new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readonly'),out={};for(const name of studyStores){const r=tx.objectStore(name).count();r.onsuccess=()=>{out[name]=r.result;};}tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(tx.error);});$('transferCounts').innerHTML=[['Solver results',counts.solves],['Saved models',counts.models],['Hand histories',counts.hands],['Assessments',counts.grades]].map(([label,count])=>'<div class="stat"><small>'+label+'</small><strong>'+fmt(count,0)+'</strong></div>').join('');}catch(error){transferMessage('Local data could not be read: '+error.message,true);}
+}
+function invalidatePreparedBackup(){transferUI.file=null;$('backupShare').disabled=true;$('backupDownload').disabled=true;$('backupReady').textContent='';}
+async function prepareStudyBackup(){
+ if(transferUI.busy||state.busy){transferMessage('Finish or cancel the current calculation before preparing a backup.',true);return;}
+ transferUI.busy=true;$('backupPrepare').disabled=true;invalidatePreparedBackup();transferMessage('Preparing your saved analyses and study data…');
+ try{
+  const includeModels=$('backupContents').value==='complete';if(includeModels)await saveModel(false);const stores=await readStudyStores(includeModels);if(!includeModels)stores.meta=stores.meta.filter(row=>row.id!=='lastModel');let legacy=0;
+  stores.solves=stores.solves.map(row=>{try{return normalizeSavedSpot(row);}catch{legacy++;return archiveSavedSpot(row);}});
+  const exportedAt=new Date().toISOString(),data={format:backupFormat,version:1,contents:includeModels?'complete':'study',exportedAt,stores},text=JSON.stringify(data),name='range-lab-study-'+exportedAt.replace(/[:.]/g,'-')+'.json';
+  transferUI.file=new File([text],name,{type:'application/json'});$('backupDownload').disabled=false;
+  let canShare=false;try{canShare=!!navigator.canShare?.({files:[transferUI.file]});}catch{}$('backupShare').disabled=!canShare;
+  $('backupReady').textContent=fmt(transferUI.file.size/1048576,2)+' MB prepared at '+new Date(exportedAt).toLocaleTimeString()+'. '+(canShare?'Use Share to Files and choose iCloud Drive.':'Download the backup, then move it into iCloud Drive.');
+  transferMessage('Backup ready: '+stores.solves.length+' saved analyses, '+stores.models.length+' models, '+stores.hands.length+' hands and '+stores.grades.length+' assessments.'+(legacy?' '+legacy+' older analyses are preserved as records but may not support practice.':''));await refreshTransferCounts();
+ }catch(error){transferMessage('Backup could not be prepared: '+error.message,true);}finally{transferUI.busy=false;$('backupPrepare').disabled=false;}
+}
+function shareStudyBackup(){
+ const file=transferUI.file;if(!file)return;
+ navigator.share({files:[file],title:'Range Lab study backup'}).then(()=>transferMessage('Share sheet closed. Your backup is in the destination you selected; this app cannot confirm an iCloud upload.')).catch(error=>{if(error.name!=='AbortError')transferMessage('Sharing failed. Use Download backup instead. '+error.message,true);});
+}
+function downloadStudyBackup(){if(!transferUI.file)return;const url=URL.createObjectURL(transferUI.file),a=document.createElement('a');a.href=url;a.download=transferUI.file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);transferMessage('Download requested. Save or move the file into iCloud Drive to access it on your other device.');}
+function validateBackupRow(store,row){
+ if(!row||!validRecordId(row.id))throw Error('Invalid '+store+' record ID.');
+ if(store==='solves'){if(row.archived===true){if(typeof row.key!=='string'||row.key.length>2000000||row.id!=='archive-'+hash(row.key)||!row.record||typeof row.record!=='object')throw Error('Invalid archived analysis.');return{id:row.id,key:row.key,archived:true,record:row.record,updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};}return normalizeSavedSpot(row);}
+ if(store==='models'){const model=T.Model.load(row.snapshot);if(typeof row.name!=='string'||row.name.length>300)throw Error('Invalid model name.');return{id:row.id,name:row.name,snapshot:row.snapshot,summary:model.summary(),updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};}
+ if(store==='hands'){const record=H.pack(H.validate(row.record));return{id:row.id,record,createdAt:new Date(rowDate(row)||Date.now()).toISOString()};}
+ if(store==='grades'){
+  const config=G.normalize(row.config);if(!Number.isInteger(row.hero)||row.hero<0||row.hero>=config.seats||!Number.isInteger(row.street)||row.street<0||row.street>3||typeof row.hand!=='string'||typeof row.action!=='string'||row.action.length>200||typeof row.position!=='string'||row.position.length>80||!Array.isArray(row.actions)||!Number.isFinite(Date.parse(row.createdAt)))throw Error('Invalid saved assessment.');
+  for(const key of ['loss','lossSE','estimatedLoss','estimatedLossSE','effectiveSamples','coverage','referenceVisits','referenceUpdates'])if(row[key]!==undefined&&row[key]!==null&&!Number.isFinite(row[key]))throw Error('Invalid assessment number: '+key);
+  const holes=Array(config.seats).fill(null);holes[row.hero]=row.hand;H.validate({format:'range-lab-hand-v1',chipScale:G.U,config,holes,board:row.board,actions:row.actions,notes:[]});
+  return scrubSavedGrade({...row,config,mode:config.mode,variant:config.variant,units:config.mode==='cash'?'bb':'prize units',createdAt:new Date(row.createdAt).toISOString()});
+ }
+ if(store==='meta'){
+  const allowed=['lastModel','spotSizing','spotDealBudget','autoAnalyze','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
+  if(row.id==='lastModel'&&!validRecordId(row.value))throw Error('Invalid model selection.');
+  if(row.id==='autoAnalyze'&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
+  if(row.id==='spotDealBudget'&&![20000,50000,100000,200000].includes(row.value))throw Error('Invalid deal limit.');
+  if(row.id==='spotSizing')T.normalizeAbstraction(row.value);
+  if(row.id==='preflopReferences-v1'){if(!Array.isArray(row.value)||row.value.length>1000)throw Error('Invalid preflop reference collection.');for(const pack of row.value)PokerPreflop.validate(pack);}
+  return{id:row.id,value:row.value};
+ }
+ throw Error('Unsupported backup record.');
+}
+async function validateStudyImport(data){
+ if(data?.format==='range-lab-spot-solve-v1'){
+  const row=data.key?normalizeSavedSpot({...data,id:'spot-'+hash(data.key)}):portableSpot(data.observed,data.options,data.result,data.extraAction);
+  return Object.fromEntries(studyStores.map(name=>[name,name==='solves'?[row]:[]]));
+ }
+ if(data?.format!==backupFormat||data.version!==1||!data.stores||typeof data.stores!=='object')throw Error('Choose a Range Lab study backup or exported spot analysis.');
+ const out={};let total=0;
+ for(const name of studyStores){const rows=data.stores[name];if(!Array.isArray(rows)||rows.length>100000)throw Error('Invalid or oversized '+name+' collection.');total+=rows.length;}
+ if(total>200000)throw Error('This backup has too many records for a browser import.');
+ for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id))throw Error('Duplicate '+name+' record in backup.');ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
+ return out;
+}
+function mergeStudyRows(existing,incoming){
+ const updates={};let count=0,kept=0;
+ for(const name of studyStores){updates[name]=[];const known=new Map(existing[name].map(row=>[row.id,row]));for(const row of incoming[name]){const old=known.get(row.id);let use=!old;
+   if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');use=validSpotResult(row.result)&&(!validSpotResult(old.result)||T.assessmentEvidence(row.result).usable&&!T.assessmentEvidence(old.result).usable||rowDate(row)>rowDate(old));}
+   else if(old&&name==='models')use=row.snapshot.episodes>old.snapshot.episodes||row.snapshot.episodes===old.snapshot.episodes&&rowDate(row)>rowDate(old);
+   else if(old&&name==='meta'&&row.id==='preflopReferences-v1'){const values=Array.isArray(old.value)?old.value:[],seen=new Set(values.map(v=>JSON.stringify(v))),add=row.value.filter(v=>!seen.has(JSON.stringify(v)));if(add.length){updates[name].push({id:row.id,value:values.concat(add)});count++;}else kept++;continue;}
+   else if(old&&name!=='meta'&&name!=='solves'&&name!=='models')use=rowDate(row)>rowDate(old);
+   if(use){updates[name].push(row);count++;}else kept++;
+  }}return{updates,count,kept};
+}
+async function importStudyData(data){
+ const incoming=await validateStudyImport(data),existing=await readStudyStores(),plan=mergeStudyRows(existing,incoming),db=await openDB();
+ await new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readwrite');tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||Error('Import was rolled back.'));tx.onerror=()=>{};try{for(const name of studyStores)for(const row of plan.updates[name])tx.objectStore(name).put(row);}catch(error){tx.abort();reject(error);}});
+ spotUI.cache.clear();spotUI.last=null;const stores=await readStudyStores();state.models=stores.models;state.histories=stores.hands.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));state.grades=stores.grades.map(scrubSavedGrade).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));renderLibrary();renderSavedHands();renderProgress();invalidatePreparedBackup();await refreshTransferCounts();
+ return plan;
+}
+async function importStudyFile(file){
+ if(!file||transferUI.busy)return;if(state.busy){transferMessage('Finish or cancel the current calculation before importing.',true);return;}if(file.size>250*1048576){transferMessage('This file exceeds the 250 MB browser import limit. Export a smaller set of data for your phone.',true);return;}
+ transferUI.busy=true;lock('dataImport');$('stop').disabled=true;$('backupImport').disabled=true;$('backupPrepare').disabled=true;transferMessage('Reading '+file.name+'…');
+ try{const data=JSON.parse(await file.text()),plan=await importStudyData(data);transferMessage('Imported '+fmt(plan.count,0)+' new or newer records; kept '+fmt(plan.kept,0)+' existing records. Open Saved spots to practice without recalculating.');$('backupReload').classList.remove('hide');}
+ catch(error){transferMessage('Import failed: '+error.message,true);}finally{transferUI.busy=false;$('backupImport').disabled=false;$('backupPrepare').disabled=false;$('backupFile').value='';lock();}
+}
+async function refreshSavedSpots(){
+ const generation=++transferUI.generation;try{const rows=await dbAll('solves');if(generation!==transferUI.generation)return;let skipped=0;transferUI.rows=[];for(const row of rows){try{const normalized=normalizeSavedSpot(row);transferUI.rows.push(normalized);}catch{skipped++;}}transferUI.rows.sort((a,b)=>rowDate(b)-rowDate(a));const only=$('savedReliableOnly').checked,eligible=transferUI.rows.filter(row=>!only||T.assessmentEvidence(row.result).usable);
+ $('savedSpotStatus').textContent=eligible.length+' saved spots available'+(skipped?' · '+skipped+' older records cannot be replayed':'')+'. No new solve is needed.';
+ $('savedSpotList').innerHTML=eligible.slice(0,200).map(row=>{const data=row.observed,labels=G.positions(data.config.seats,data.config.button),quality=T.assessmentEvidence(row.result).usable?'Assessment target reached':'Study only · accuracy target not reached';return'<div class="item saved-spot-row"><div><strong>'+esc(data.config.variant)+' · '+data.config.seats+' seats · '+esc(G.STREET[data.board.length===5?3:data.board.length===4?2:data.board.length===3?1:0])+'</strong><div class="small muted">'+esc(labels[data.actor])+' · '+esc(data.heroCards.map(C.cardName).join(' '))+' · '+quality+'</div><div class="small muted">'+esc(dateLabel(row.updatedAt))+'</div></div><button class="btn secondary" data-saved-spot="'+row.id+'">Practice spot</button></div>';}).join('')||'<div class="notice">'+(rows.length?'No spots match this filter. Turn off the assessment filter to review other saved results.':'Analyze a spot on your laptop, prepare a study backup, save it to iCloud Drive, and open it here.')+'</div>';
+ document.querySelectorAll('[data-saved-spot]').forEach(button=>button.onclick=()=>startSavedSpot(button.dataset.savedSpot));
+ }catch(error){$('savedSpotStatus').textContent='Could not load saved analyses: '+error.message;}
+}
+function startSavedSpot(id){
+ try{const row=transferUI.rows.find(r=>r.id===id);if(!row)return;const {hand}=savedSpotContext(row),hero=hand.actor,labels=G.positions(hand.n,hand.button),known=Array(hand.n).fill(false);known[hero]=true;transferUI.drill={row,hand,answered:false};
+ $('savedSpotDrill').classList.remove('hide');$('savedDrillTitle').textContent=hand.config.variant+' · '+hand.n+' seats · '+labels[hero]+' · '+G.STREET[hand.street];$('savedDrillScope').textContent='Saved result under the recorded ranges and bet tree. This drill uses the saved decision only; imported data has not been recalculated on this device.';
+ const sb=hand.n===2?hand.button:(hand.button+1)%hand.n,bb=(hand.button+(hand.n===2?1:2))%hand.n,origin=hand.config.startStreet?'This study begins on '+G.STREET[hand.config.startStreet]+' with '+fmt(hand.config.pot)+' bb in the pot; earlier actions are not in the saved study.':'Initial stacks: '+hand.initial.map((amount,i)=>labels[i]+' '+fmt(G.bb(amount))+' bb').join(' · ')+'. '+labels[sb]+' posts '+hand.config.sb+' bb; '+labels[bb]+' posts '+hand.config.bb+' bb.'+(hand.config.ante?' Ante '+hand.config.ante+' bb ('+hand.config.anteMode+').':'');
+ $('savedDrillHistory').innerHTML='<div class="history-start">'+esc(origin)+'</div>'+hand.log.map(event=>'<div>'+esc(eventLabel(event))+'</div>').join('')+'<div><strong>'+esc(labels[hero])+': your decision</strong></div>';
+ paintTable($('savedDrillTable'),hand,hero,{known,caption:'Your saved practice decision'});$('savedDrillActions').innerHTML=row.result.actions.map((action,i)=>'<button class="btn" data-saved-action="'+i+'">'+esc(action.label)+'</button>').join('');$('savedDrillFeedback').textContent='Choose your action to reveal the saved analysis.';document.querySelectorAll('[data-saved-action]').forEach(button=>button.onclick=()=>answerSavedSpot(Number(button.dataset.savedAction)));$('savedSpotDrill').scrollIntoView({block:'start'});
+ }catch(error){$('savedSpotStatus').textContent='This saved spot could not be reconstructed: '+error.message;}
+}
+function answerSavedSpot(index){const drill=transferUI.drill;if(!drill||drill.answered)return;const result=drill.row.result,action=result.actions[index];if(!action)return;drill.answered=true;document.querySelectorAll('[data-saved-action]').forEach(button=>button.disabled=true);const usable=T.assessmentEvidence(result).usable;if(usable)scoreResult(result,{kind:'savedSpot',hand:drill.hand,action},action);$('savedDrillFeedback').innerHTML='<p><strong>You chose '+esc(action.label)+'.</strong> '+(usable?'Saved estimated decision cost: '+fmt(result.loss[index],3)+' '+esc(result.units)+'.':'This saved result did not reach the assessment target, so no grade is recorded.')+'</p>'+decisionResultHTML(result);}
+function nextSavedSpot(){const eligible=transferUI.rows.filter(row=>!$('savedReliableOnly').checked||T.assessmentEvidence(row.result).usable);if(!eligible.length)return;const current=eligible.findIndex(row=>row.id===transferUI.drill?.row.id);startSavedSpot(eligible[(current+1)%eligible.length].id);}
+function initTransfer(){
+ $('backupPrepare').onclick=prepareStudyBackup;$('backupContents').onchange=invalidatePreparedBackup;$('backupShare').onclick=shareStudyBackup;$('backupDownload').onclick=downloadStudyBackup;$('backupImport').onclick=()=>$('backupFile').click();$('backupFile').onchange=()=>importStudyFile($('backupFile').files[0]);$('backupReload').onclick=()=>location.reload();$('savedRefresh').onclick=refreshSavedSpots;$('savedReliableOnly').onchange=refreshSavedSpots;$('savedTransfer').onclick=()=>switchTab('transfer');$('savedNextSpot').onclick=nextSavedSpot;
+ $('mobileSetupToggle').onclick=()=>{const hidden=document.querySelector('.layout').classList.toggle('mobile-setup-hidden');$('mobileSetupToggle').setAttribute('aria-expanded',String(!hidden));$('mobileSetupToggle').textContent=hidden?'Table setup & solver options':'Close table setup';};
+}
