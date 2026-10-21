@@ -35,6 +35,18 @@
   if(!rows)return{uniform:true,count:uniformCount,prob:()=>1/uniformCount};const total=sum(rows.map(r=>r.weight));assert(total>0,'A player range has zero mass.');let cumulative=0;const lookup=new Map();for(const r of rows){r.prob=r.weight/total;cumulative+=r.prob;r.cumulative=cumulative;lookup.set(r.key,r.prob);}return{uniform:false,rows,count:rows.length,prob:cards=>lookup.get(comboKey(cards))||0};
  }
  function sampleRow(d,random){let lo=0,hi=d.rows.length-1;const u=random();while(lo<hi){const m=(lo+hi)>>1;if(d.rows[m].cumulative<u)lo=m+1;else hi=m;}return d.rows[lo].cards.slice();}
+ // Starting hands ordered by all-in equity against two random hands. Used only
+ // when no explicit, charted or learned range describes a preflop action, so
+ // a raiser or caller is not credited with any two cards.
+ const PREFLOP_ORDER='AA KK QQ JJ TT 99 AKs 88 AQs AKo AJs ATs AQo KQs 77 KJs AJo KTs A9s KQo ATo QJs A8s 66 KJo QTs A7s K9s JTs KTo A9o QJo A5s A6s Q9s A8o QTo 55 A4s K8s K7s A3s K9o A7o J9s JTo Q8s T9s A2s K6s A5o A6o Q9o J8s A4o K5s 44 T8s K8o K4s Q7s J9o A3o K7o 98s J7s Q6s K3s T9o Q8o A2o K2s Q5s K6o T7s 97s K5o J8o Q4s 33 T8o 87s J6s Q3s J5s T6s K4o Q7o 98o K3o J4s Q2s Q6o 96s J7o 86s 76s Q5o T7o J3s K2o 97o 22 Q4o J2s 65s 87o T5s T4s 75s 85s 95s J6o T3s Q3o 54s J5o T6o 96o T2s 86o Q2o 84s 74s 76o 64s J4o 94s 93s 53s T5o J3o 92s 75o 63s 95o 65o T4o 85o J2o 43s 83s 73s 82s 52s T3o 54o 62s 64o 74o 42s 72s 94o 84o T2o 32s 93o 53o 92o 63o 43o 83o 73o 82o 52o 42o 62o 72o 32o'.split(' '),PREFLOP_SPAN=(()=>{const m=new Map();let done=0;for(const c of PREFLOP_ORDER){const n=c.length===2?6:c[2]==='s'?4:12;m.set(c,[done/1326,(done+n)/1326]);done+=n;}return m;})();
+ function topShare(cls,p){const [a,b]=PREFLOP_SPAN.get(cls);return Math.min(1,Math.max(0,(p-a)/(b-a)));}
+ function heuristicPreflop(config,actions,seat){
+  const n=config.seats,bb=n===2?(config.button+1)%n:(config.button+2)%n,open=[.15,.5,.45,.3,.24,.2,.17,.15,.13],steps=[];let raises=0,width=1;
+  for(const a of actions){if(a.street!==0)break;
+   if(a.kind==='raise'||a.kind==='bet'){const p=raises===0?open[Math.min(8,(bb-a.seat+n)%n)]:raises===1?.05:raises===2?.025:.015;if(a.seat===seat)steps.push({hi:p,lo:0,top:1});raises++;width=p;}
+   else if(a.kind==='call'&&a.seat===seat){if(raises===0)steps.push({hi:seat===(n===2?config.button:(config.button+1)%n)?.6:.35,lo:0,top:1});else if(raises===1)steps.push({hi:seat===bb?Math.min(.6,width+.25):Math.max(.06,.8*width),lo:.03,top:.3});else if(raises===2)steps.push({hi:.07,lo:.015,top:.3});else steps.push({hi:.025,lo:0,top:1});}}
+  if(!steps.length)return null;return cls=>steps.reduce((w,x)=>w*(topShare(cls,x.hi)-(1-x.top)*topShare(cls,x.lo)),1);
+ }
  class Ranges{
   constructor(data,model,opt){
    this.data=data;this.config=G.normalize(data.config);this.rules=this.config.rules;this.hero=data.actor;this.board=data.board.slice();this.heroCards=data.heroCards.slice();this.options=opt;this.descriptions=[];this.distributions=[];
@@ -54,8 +66,10 @@
      // this way, so later exact solves enumerate far fewer joint deals.
      if(used&&opt.approximate){const actual=seat===this.hero?comboKey(this.heroCards):null,before=rows.length;rows=rows.filter(r=>r.weight>=PRUNE||r.key===actual);pruned=before-rows.length;}
     }}else if(!rows&&automatic&&data.actions.some(a=>a.seat===seat))skipped=data.actions.filter(a=>a.seat===seat).length;
-    let d=distribution(rows,count);if(!explicit&&used===0)d=distribution(null,count);
-    this.distributions.push(d);this.descriptions.push({seat,range:explicit?text:used?'History-conditioned starting range':'All legal hands',combinations:d.count,historyActionsUsed:used,historyActionsOmitted:skipped,pruned,source:explicit?'User-specified current range':used?'Learned history likelihoods with 5% smoothing'+(pruned?'; '+pruned+' rarely played combinations removed':''):'Broad uniform assumption',implicit:d.uniform});
+    let heuristic=false;const share=!explicit&&!used&&automatic&&opt.rangeMode==='auto'&&opt.approximate&&all&&this.rules.hole===2&&this.config.variant==='NLH'?heuristicPreflop(this.config,data.actions,seat):null;
+    if(share){const actual=seat===this.hero?comboKey(this.heroCards):null;rows=all.map(r=>({...r,cards:r.cards.slice(),weight:r.key===actual?Math.max(.02,share(C.handClass(r.cards))):share(C.handClass(r.cards))})).filter(r=>r.weight>0);heuristic=rows.length>0;}
+    let d=distribution(rows,count);if(!explicit&&used===0&&!heuristic)d=distribution(null,count);
+    this.distributions.push(d);this.descriptions.push({seat,range:explicit?text:used?'History-conditioned starting range':heuristic?'Estimated preflop range':'All legal hands',combinations:d.count,historyActionsUsed:used,historyActionsOmitted:skipped,pruned,source:explicit?'User-specified current range':heuristic?'Built-in estimate from preflop position and action':used?'Learned history likelihoods with 5% smoothing'+(pruned?'; '+pruned+' rarely played combinations removed':''):'Broad uniform assumption',implicit:d.uniform});
    }
    assert(!this.heroCards.some(c=>boardSet.has(c))&&this.heroCards.length===this.rules.hole,'Your private cards conflict with the public board.');assert(this.distributions[this.hero].prob(this.heroCards)>0,'Your hand is excluded from your range. Include it in the range before solving.');
   }
@@ -173,7 +187,13 @@
     // bounded by the effort's time and state budgets and labelled approximate.
     if(this.options.approximate){this.fallback=error.message;this.engine=new SampledSolver(this.data,this.ranges,{...this.options,iterations:500000},extra);}else this.engine=unsupported(error.message);}
   }
-  get complete(){return this.engine.complete;}step(){this.engine.step();}progress(){return this.engine.progress();}result(){const r=this.engine.result();if(this.fallback&&r.solve){r.solve.approximate=true;r.solve.fallbackReason=this.fallback;}return r;}conditionRanges(data){return this.engine.conditionRanges?.(data)||null;}policyAt(data){return this.engine.policyAt?.(data)||null;}
+  get complete(){return this.engine.complete;}step(){this.engine.step();}progress(){return this.engine.progress();}result(){
+   const r=this.engine.result();if(!this.fallback||!r.solve)return r;r.solve.approximate=true;r.solve.fallbackReason=this.fallback;
+   // Untrained continuation decisions play uniformly at random, which makes
+   // large bets look hugely profitable. Withhold estimates that rest on them.
+   const coverage=r.coverage,weakest=Math.min(...r.actionCoverage),settled=!r.solve.halted&&coverage>=.9&&weakest>=.85;if(settled)return r;
+   return{supported:false,approximateWithheld:true,message:'No reliable approximation for this spot. The exact solver cannot fit it ('+this.fallback.replace(/\.$/,'')+'), and the sampled fallback did not settle: only '+Math.round(100*coverage)+'% of later decisions were trained'+(r.solve.halted?' before it reached its memory budget':'')+'. Untrained decisions play at random, so its frequencies and EVs would be misleading and are not shown. Narrow the ranges under "Solver assumptions and accuracy", use fewer players or shallower stacks, or import a preflop chart under Library → Preflop solver references.'};
+  }conditionRanges(data){return this.engine.conditionRanges?.(data)||null;}policyAt(data){return this.engine.policyAt?.(data)||null;}
  }
  const api={VERSION,Solver,Ranges,ExactRiverSolver,SampledSolver,parseRange,options,reconstruct,publicKey,keyFor,utility,actionsAt};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerSpot=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
