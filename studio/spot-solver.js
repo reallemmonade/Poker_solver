@@ -4,10 +4,10 @@
  if(!G&&typeof require==='function'){try{G=require('./hand-engine.js');}catch{G=require('./game.js');}}
  if(!T&&typeof require==='function'){try{T=require('./full-hand-trainer.js');}catch{T=require('./trainer.js');}}
  const C=G.Core;
- const VERSION=1,assert=(v,m)=>{if(!v)throw Error(m)},sum=a=>a.reduce((s,x)=>s+x,0),comboKey=cs=>cs.slice().sort((a,b)=>a-b).join('.');
+ const VERSION=1,PRUNE=.03,assert=(v,m)=>{if(!v)throw Error(m)},sum=a=>a.reduce((s,x)=>s+x,0),comboKey=cs=>cs.slice().sort((a,b)=>a-b).join('.');
  const clock=()=>typeof performance==='undefined'?Date.now():performance.now();
  function choose(n,k){let v=1;for(let i=1;i<=k;i++)v=v*(n-i+1)/i;return v;}
- function options(raw={}){const sizes=raw.rootSizes===undefined?[]:raw.rootSizes;assert(Array.isArray(sizes)&&sizes.length<=6&&sizes.every(x=>Number.isFinite(Number(x))&&Number(x)>0),'Enter up to six positive additional bet/raise totals in bb.');const given=raw.abstraction||{},base=T.normalizeAbstraction({...given,betSizes:given.betSizes||[1/3,2/3,1.5],raiseSizes:given.raiseSizes||[1/3,2/3,1.5]}),abstraction=T.normalizeAbstraction({...base,jam:true});return{rangeMode:raw.rangeMode==='uniform'?'uniform':'auto',ranges:Array.isArray(raw.ranges)?raw.ranges.map(String):[],iterations:Math.min(500000,Math.max(1000,Number(raw.iterations)||50000)),samples:Math.min(10000,Math.max(200,Number(raw.samples)||2000)),milliseconds:Math.min(180000,Math.max(1000,Number(raw.milliseconds)||45000)),maxInfos:Math.min(500000,Math.max(1000,Number(raw.maxInfos)||150000)),exactMemoryMB:Math.min(4096,Math.max(32,Number(raw.exactMemoryMB)||256)),maxJointDeals:Math.min(200000,Math.max(100,Number(raw.maxJointDeals)||20000)),preparationMilliseconds:Math.min(180000,Math.max(1000,Number(raw.preparationMilliseconds)||15000)),tolerance:Math.min(.05,Math.max(.00001,Number(raw.tolerance)||.001)),rootSizes:sizes.map(Number),abstraction};}
+ function options(raw={}){const sizes=raw.rootSizes===undefined?[]:raw.rootSizes;assert(Array.isArray(sizes)&&sizes.length<=6&&sizes.every(x=>Number.isFinite(Number(x))&&Number(x)>0),'Enter up to six positive additional bet/raise totals in bb.');const given=raw.abstraction||{},base=T.normalizeAbstraction({...given,betSizes:given.betSizes||[1/3,2/3,1.5],raiseSizes:given.raiseSizes||[1/3,2/3,1.5]}),abstraction=T.normalizeAbstraction({...base,jam:true});return{rangeMode:raw.rangeMode==='uniform'?'uniform':'auto',ranges:Array.isArray(raw.ranges)?raw.ranges.map(String):[],iterations:Math.min(500000,Math.max(1000,Number(raw.iterations)||50000)),samples:Math.min(10000,Math.max(200,Number(raw.samples)||2000)),milliseconds:Math.min(180000,Math.max(1000,Number(raw.milliseconds)||45000)),maxInfos:Math.min(500000,Math.max(1000,Number(raw.maxInfos)||150000)),exactMemoryMB:Math.min(4096,Math.max(32,Number(raw.exactMemoryMB)||256)),maxJointDeals:Math.min(500000,Math.max(100,Number(raw.maxJointDeals)||20000)),approximate:raw.approximate!==false,preparationMilliseconds:Math.min(180000,Math.max(1000,Number(raw.preparationMilliseconds)||15000)),tolerance:Math.min(.05,Math.max(.00001,Number(raw.tolerance)||.001)),rootSizes:sizes.map(Number),abstraction};}
  function publicKey(data){return JSON.stringify([data.config,data.actor,data.heroCards.slice().sort((a,b)=>a-b),data.board,data.actions.map(a=>[a.seat,a.street,a.kind,a.target])]);}
  function reconstruct(data,holes,random=G.rng(1)){
   const h=new G.Hand(data.config,{holes,runout:data.board.slice(data.config.boardCards.length),rng:random});
@@ -41,7 +41,7 @@
    const boardSet=new Set(this.board),deck=Array.from({length:52},(_,i)=>i).filter(c=>!boardSet.has(c)),all=this.rules.hole===2?G.combinations(deck,2).map(cards=>({cards,key:comboKey(cards),weight:1})):null;
    const count=choose(deck.length,this.rules.hole),prefix=[];if(model&&opt.rangeMode==='auto'&&all){const h=new G.Hand(this.config,{runout:data.board.slice(this.config.boardCards.length),rng:G.rng(917)});for(const a of data.actions){prefix.push({hand:h.clone(),action:a});h.act(a);}}
    for(let seat=0;seat<this.config.seats;seat++){
-    const text=opt.ranges[seat]||'',explicit=parseRange(text,this.rules,this.board),automatic=!text.trim()||/^auto$/i.test(text.trim());let rows=explicit,used=0,skipped=0;
+    const text=opt.ranges[seat]||'',explicit=parseRange(text,this.rules,this.board),automatic=!text.trim()||/^auto$/i.test(text.trim());let rows=explicit,used=0,skipped=0,pruned=0;
     if(!rows&&all){rows=all.map(r=>({...r,cards:r.cards.slice()}));if(automatic&&opt.rangeMode==='auto'&&!model)skipped=data.actions.filter(a=>a.seat===seat).length;if(automatic&&opt.rangeMode==='auto'&&model){
      for(const frame of prefix.filter(p=>p.action.seat===seat)){
       const legal=rows.filter(r=>!r.cards.some(c=>frame.hand.board.includes(c))),likelihood=[];let ready=0;
@@ -50,9 +50,12 @@
       // avoids rewarding individual untrained hands with an arbitrary fallback.
       if(ready===legal.length&&ready){for(let j=0;j<legal.length;j++)legal[j].weight*=likelihood[j];const peak=Math.max(...legal.map(r=>r.weight));if(peak>0)for(const row of legal)row.weight/=peak;used++;}else skipped++;
      }
+     // Approximate mode drops hands the learned strategy almost never plays
+     // this way, so later exact solves enumerate far fewer joint deals.
+     if(used&&opt.approximate){const actual=seat===this.hero?comboKey(this.heroCards):null,before=rows.length;rows=rows.filter(r=>r.weight>=PRUNE||r.key===actual);pruned=before-rows.length;}
     }}else if(!rows&&automatic&&data.actions.some(a=>a.seat===seat))skipped=data.actions.filter(a=>a.seat===seat).length;
     let d=distribution(rows,count);if(!explicit&&used===0)d=distribution(null,count);
-    this.distributions.push(d);this.descriptions.push({seat,range:explicit?text:used?'History-conditioned starting range':'All legal hands',combinations:d.count,historyActionsUsed:used,historyActionsOmitted:skipped,source:explicit?'User-specified current range':used?'Learned history likelihoods with 5% smoothing':'Broad uniform assumption',implicit:d.uniform});
+    this.distributions.push(d);this.descriptions.push({seat,range:explicit?text:used?'History-conditioned starting range':'All legal hands',combinations:d.count,historyActionsUsed:used,historyActionsOmitted:skipped,pruned,source:explicit?'User-specified current range':used?'Learned history likelihoods with 5% smoothing'+(pruned?'; '+pruned+' rarely played combinations removed':''):'Broad uniform assumption',implicit:d.uniform});
    }
    assert(!this.heroCards.some(c=>boardSet.has(c))&&this.heroCards.length===this.rules.hole,'Your private cards conflict with the public board.');assert(this.distributions[this.hero].prob(this.heroCards)>0,'Your hand is excluded from your range. Include it in the range before solving.');
   }
@@ -158,16 +161,19 @@
    // Sampled practice blueprints cannot establish opponents' current ranges.
    // Production calculations use explicit ranges, a preceding solved strategy,
    // or prominently identified uniform assumptions, never bot personas.
-   this.ranges=new Ranges(this.data,rawOptions.experimental?model:null,this.options);
+   this.ranges=new Ranges(this.data,rawOptions.experimental||this.options.approximate?model:null,this.options);
    try{const hand=reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)),live=hand.living(),simpleUtility=!this.data.config.rules.low&&!this.data.config.bounties.some(x=>x>0),uniformFolds=hand.folded.every((folded,seat)=>!folded||this.ranges.distributions[seat].uniform),exact=data.config.seats===2&&data.board.length===5&&simpleUtility&&(this.data.config.rules.hole===2||this.ranges.distributions.every(d=>!d.uniform&&d.count<=200));
     if(exact)this.engine=new ExactRiverSolver(this.data,this.ranges,this.options,extra);
     else if(live.length===2&&uniformFolds&&simpleUtility&&data.config.variant==='NLH'&&data.board.length>=3){const postflop=root.PokerExactPostflop||(typeof require==='function'?require('./postflop-exact.js'):null);assert(postflop,'The exact postflop engine is unavailable.');this.engine=new postflop.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,terminalValues:ExactRiverSolver.prototype.terminalValues});}
     else if(rawOptions.experimental)this.engine=new SampledSolver(this.data,this.ranges,this.options,extra);
     else{const multiway=root.PokerExactMultiway||(typeof require==='function'?require('./multiway-exact.js'):null);assert(multiway,'The multiplayer exact engine is unavailable.');this.engine=new multiway.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,utility});}
    }
-   catch(error){if(!/budget|exceed/.test(error.message))throw error;this.engine=unsupported(error.message);}
+   catch(error){if(!/budget|exceed/.test(error.message))throw error;
+    // Spots too large for an exact solve get a sampled solve of the same tree,
+    // bounded by the effort's time and state budgets and labelled approximate.
+    if(this.options.approximate){this.fallback=error.message;this.engine=new SampledSolver(this.data,this.ranges,{...this.options,iterations:500000},extra);}else this.engine=unsupported(error.message);}
   }
-  get complete(){return this.engine.complete;}step(){this.engine.step();}progress(){return this.engine.progress();}result(){return this.engine.result();}conditionRanges(data){return this.engine.conditionRanges?.(data)||null;}policyAt(data){return this.engine.policyAt?.(data)||null;}
+  get complete(){return this.engine.complete;}step(){this.engine.step();}progress(){return this.engine.progress();}result(){const r=this.engine.result();if(this.fallback&&r.solve){r.solve.approximate=true;r.solve.fallbackReason=this.fallback;}return r;}conditionRanges(data){return this.engine.conditionRanges?.(data)||null;}policyAt(data){return this.engine.policyAt?.(data)||null;}
  }
  const api={VERSION,Solver,Ranges,ExactRiverSolver,SampledSolver,parseRange,options,reconstruct,publicKey,keyFor,utility,actionsAt};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerSpot=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

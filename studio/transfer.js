@@ -67,7 +67,7 @@ function validateBackupRow(store,row){
   const allowed=['lastModel','spotSizing','spotDealBudget','autoAnalyze','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
   if(row.id==='lastModel'&&!validRecordId(row.value))throw Error('Invalid model selection.');
   if(row.id==='autoAnalyze'&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
-  if(row.id==='spotDealBudget'&&![20000,50000,100000,200000].includes(row.value))throw Error('Invalid deal limit.');
+  if(row.id==='spotDealBudget'&&![20000,50000,100000,200000,500000].includes(row.value))throw Error('Invalid deal limit.');
   if(row.id==='spotSizing')T.normalizeAbstraction(row.value);
   if(row.id==='preflopReferences-v1'){if(!Array.isArray(row.value)||row.value.length>1000)throw Error('Invalid preflop reference collection.');for(const pack of row.value)PokerPreflop.validate(pack);}
   return{id:row.id,value:row.value};
