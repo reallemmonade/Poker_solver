@@ -4,6 +4,14 @@
 !/render.yaml
 !/river/
 !/river/engine.js
+!/tools/
+!/tools/preflop/
+!/tools/preflop/README.md
+!/tools/preflop/tree.cjs
+!/tools/preflop/solve.cjs
+!/tools/preflop/export.cjs
+!/tools/preflop/check-pushfold.cjs
+!/tools/preflop/equity-table.json
 !/studio/
 !/studio/app.js
 !/studio/bots.js
