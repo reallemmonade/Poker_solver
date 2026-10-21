@@ -24,6 +24,19 @@
   if(hand.done||hand.street!==0||hand.family!==pack.family)return null;const node=pack.index.get(historyKey(hand));if(!node)return null;const row=rowFor(node,hand.holes[hand.actor]);if(!row)return null;const actions=node.actions.map(a=>({...a}));for(const a of controlActions)if(!actions.some(b=>b.kind===a.kind&&(!['raise','bet'].includes(a.kind)||b.target===a.target)))actions.push({...a});const probs=actions.map((a,i)=>i<row.length?row[i]:null);
   return{supported:true,referenceOnly:true,referenceVersion:1,actions,reference:probs,probs,trained:true,displayEligible:true,visits:0,updates:0,referenceSource:{kind:'imported-preflop',name:pack.name,...pack.source},referenceKey:pack.family+'|'+node.key,handClass:G.Core.handClass(hand.holes[hand.actor]),units:hand.config.mode==='cash'?'bb':'prize units',game:{seats:hand.n,stacks:hand.config.stacks.slice(),ante:hand.config.ante,rakePct:hand.config.rakePct,rakeCap:hand.config.rakeCap}};
  }
+ // Live sessions carry stacks between hands, so exact-depth matches are rare.
+ // This falls back to the closest-depth pack of the same game (within 25%),
+ // replays the line in that pack's game and labels the depth substitution.
+ function shape(config){const f=JSON.parse(G.familyId(config));delete f.stacks;return JSON.stringify(f);}
+ function nearest(packs,hand,controlActions=[],tolerance=1.25){
+  if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
+  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),want=shape({...hand.config,button:0});let best=null;
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)||shape(pack.config)!==want||best&&gap>=best.gap)continue;best={pack,gap,chart};}
+  if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)});
+  try{for(const a of hand.actionLog)proxy.act({kind:a.kind,target:a.target});}catch{return null;}
+  proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,controlActions.map(a=>({...a})));if(!result)return null;
+  result.depthMatch={chart:best.chart,actual:depth};result.referenceKey+='|depth:'+depth;return result;
+ }
  function isResult(r){return !!(r?.supported&&r.referenceOnly&&r.referenceVersion===1&&r.referenceSource?.kind==='imported-preflop'&&typeof r.referenceSource.name==='string'&&/^https:\/\//.test(r.referenceSource.url)&&Array.isArray(r.actions)&&r.actions.length>=2&&r.actions.length===r.reference?.length&&r.reference.every(x=>x===null||Number.isFinite(x)&&x>=0&&x<=1)&&Math.abs(sum(r.reference.map(x=>x||0))-1)<1e-6);}
- const api={FORMAT,classes,validate,serialize,query,isResult,historyKey};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
+ const api={FORMAT,classes,validate,serialize,query,nearest,isResult,historyKey};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
