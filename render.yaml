@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: range-lab-poker-studio
+    runtime: static
+    buildCommand: node studio/build.cjs --web
+    staticPublishPath: studio/render-site
