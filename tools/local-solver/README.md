@@ -19,7 +19,7 @@ In the app, set **Analysis settings → Big heads-up postflop spots** to **Texas
    - It builds TexasSolver and runs a small test solve. If Homebrew is missing or is an Intel copy on Apple silicon, it gets cmake from a private Python venv and libomp from `$LIBOMP_PREFIX` or a conda install (`conda install llvm-openmp`).
 3. Start the bridge: double-click `tools/local-solver/start.command`, or run `node tools/local-solver/server.cjs`. Keep the window open while you study.
 
-The bridge listens on `127.0.0.1:8787` only. It accepts requests from `https://range-lab-poker-studio.onrender.com` and from `localhost` pages. To allow other origins, set `RANGE_LAB_ORIGINS` (comma-separated). It runs one solve at a time, for either game.
+The bridge listens on `127.0.0.1:8787` only. It accepts requests from `https://range-lab-poker-studio.onrender.com` and from `localhost` pages. To allow other origins, set `RANGE_LAB_ORIGINS` (comma-separated). A copy of the app opened from a file sends the origin `null`. Sandboxed frames on any website send it too, so it is not allowed unless you list `null` there. It runs one solve at a time, for either game.
 
 Options:
 
@@ -41,7 +41,7 @@ Options:
 
 ## PLO: what plo_solver solves
 
-**Spot.** The current street onward (flop, turn or river) for the two players left in the hand, at any table size. Folded players' cards are ignored, as in the NLH path. The app sends heads-up PLO spots here when both players have explicit ranges, for example combos sampled from an imported preflop chart. River spots on a two-seat table with at most 200 combos a side still solve in the browser.
+**Spot.** The current street onward (flop, turn or river) for the two players left in the hand, at any table size. Folded players' cards are ignored, as in the NLH path. The app sends heads-up PLO spots here when both players have explicit ranges, for example combos sampled from an imported preflop chart. River spots on a two-seat table with at most 300 combos a side still solve in the browser.
 
 **Ranges.** These are exact weighted 4-card combos, scaled so the largest weight is 1. Your own combo is always included, at weight 0.005 if the range left it out.
 
@@ -128,3 +128,5 @@ The solver prints `Iter: N` and `Total exploitability X precent` lines while it 
 ## Licence
 
 TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO solver is part of this project.
+
+Check the bridge without a solver: `node tools/local-solver/check-bridge.cjs`.

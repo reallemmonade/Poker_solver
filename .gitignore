@@ -12,6 +12,7 @@
 !/tools/local-solver/server.cjs
 !/tools/local-solver/install-mac.sh
 !/tools/local-solver/start.command
+!/tools/local-solver/check-bridge.cjs
 !/tools/plo-solver/
 !/tools/plo-solver/plo_solver.cpp
 !/tools/plo-solver/test.cjs

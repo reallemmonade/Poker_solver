@@ -11,8 +11,10 @@ const L=require('../../studio/local-solver.js');
 
 const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory'].includes(k)?Number(v):v;}
-// Pages allowed to call the bridge: the Render site, and the app opened locally.
-const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1,null').split(',').map(s=>s.trim()).filter(Boolean);
+// Pages allowed to call the bridge: the Render site, and the app served from
+// localhost. A file:// page sends Origin "null", which sandboxed iframes on any
+// site also send, so it is allowed only when RANGE_LAB_ORIGINS lists null.
+const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1').split(',').map(s=>s.trim()).filter(Boolean);
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
 let job=null;
@@ -25,19 +27,21 @@ function send(req,res,code,body){res.writeHead(code,headers(req));res.end(JSON.s
 
 function solve(spec){
  return new Promise((resolve,reject)=>{
+  // The solver runs in its own folder and writes result.json there; a relative
+  // name keeps temp paths with spaces out of the solver's input.
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-')),out=path.join(dir,'result.json'),file=path.join(dir,'input.txt'),plo=spec.game==='PLO4',bin=plo?args['plo-solver']:args.solver,name=plo?'The PLO solver':'TexasSolver';
   // The PLO solver stops itself a little before the bridge's timeout and still writes its result.
-  fs.writeFileSync(file,plo?L.input(spec,{threads:args.threads,output:out,memoryMB:args.memory,timeLimit:args.timeout*.95}):L.input(spec,{threads:args.threads,output:out}));
+  fs.writeFileSync(file,plo?L.input(spec,{threads:args.threads,output:'result.json',memoryMB:args.memory,timeLimit:args.timeout*.95}):L.input(spec,{threads:args.threads,output:'result.json'}));
   const started=Date.now(),child=spawn(bin,plo?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir});
-  job={child,started,iterations:0,exploitability:null};let log='',tail='';
+  const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
   const timer=setTimeout(()=>child.kill('SIGKILL'),args.timeout*1000);
-  child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)job.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)job.exploitability=+m[1];}});
+  child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)mine.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)mine.exploitability=+m[1];}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
-  child.on('error',error=>{clearTimeout(timer);reject(Error('Could not start '+name+' at '+bin+': '+error.message+(plo?'. Run tools/local-solver/install-mac.sh first.':'')));});
+  child.on('error',error=>{clearTimeout(timer);if(job===mine)job=null;reject(Error('Could not start '+name+' at '+bin+': '+error.message+(plo?'. Run tools/local-solver/install-mac.sh first.':'')));});
   child.on('close',code=>{
-   clearTimeout(timer);const seconds=(Date.now()-started)/1000,{iterations,exploitability}=job;job=null;
+   clearTimeout(timer);const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
    try{
-    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
+    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(cancelled?'The solve was cancelled.':code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
     resolve({tree:JSON.parse(fs.readFileSync(out,'utf8')),iterations,exploitability,seconds,threads:args.threads});
    }catch(error){reject(error);}finally{fs.rmSync(dir,{recursive:true,force:true});}
   });
@@ -49,12 +53,15 @@ const server=http.createServer((req,res)=>{
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
  if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,busy:!!job,version:1});
  if(req.method==='GET'&&req.url==='/status')return send(req,res,200,job?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
- if(req.method==='POST'&&req.url==='/cancel'){if(job)job.child.kill('SIGKILL');return send(req,res,200,{ok:true});}
+ if(req.method==='POST'&&req.url==='/cancel'){if(!job)return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
  if(req.method==='POST'&&req.url==='/solve'){
   if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
   let body='';req.on('data',d=>{body+=d;if(body.length>2e6)req.destroy();});
   req.on('end',async()=>{
    let spec;try{spec=L.validate(JSON.parse(body));}catch(error){return send(req,res,400,{error:error.message});}
+   // Checked again here: two requests can both pass the check above before
+   // either body has arrived.
+   if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
    try{send(req,res,200,await solve(spec));}catch(error){send(req,res,500,{error:error.message});}
   });
   return;

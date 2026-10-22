@@ -176,7 +176,7 @@
    // Production calculations use explicit ranges, a preceding solved strategy,
    // or prominently identified uniform assumptions, never bot personas.
    this.ranges=new Ranges(this.data,rawOptions.experimental||this.options.approximate?model:null,this.options);
-   try{const hand=reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)),live=hand.living(),simpleUtility=!this.data.config.rules.low&&!this.data.config.bounties.some(x=>x>0),uniformFolds=hand.folded.every((folded,seat)=>!folded||this.ranges.distributions[seat].uniform),exact=data.config.seats===2&&data.board.length===5&&simpleUtility&&(this.data.config.rules.hole===2||this.ranges.distributions.every(d=>!d.uniform&&d.count<=200));
+   try{const hand=reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)),live=hand.living(),simpleUtility=!this.data.config.rules.low&&!this.data.config.bounties.some(x=>x>0),uniformFolds=hand.folded.every((folded,seat)=>!folded||this.ranges.distributions[seat].uniform),exact=data.config.seats===2&&data.board.length===5&&simpleUtility&&(this.data.config.rules.hole===2||this.ranges.distributions.every(d=>!d.uniform&&d.count<=300));
     // Two players left in a PLO pot (folded seats' cards ignored) with explicit ranges
     // go to the PLO solver on this computer when it is turned on.
     const Local=root.PokerLocalSolver||(typeof require==='function'?require('./local-solver.js'):null),ploLocal=!exact&&this.options.localSolver&&Local&&this.data.config.variant==='PLO4'&&live.length===2&&data.board.length>=3&&simpleUtility&&live.every(seat=>!this.ranges.distributions[seat].uniform);let local=null;

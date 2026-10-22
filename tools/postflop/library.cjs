@@ -83,7 +83,7 @@ async function solve(){
    const file=path.join(dir,f.key+'.json');if(fs.existsSync(file))continue;
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
-    const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:dump}),work);
+    const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:'out.json'}),work);
     const result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(JSON.parse(fs.readFileSync(dump,'utf8')))};
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');

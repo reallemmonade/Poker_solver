@@ -6,7 +6,7 @@ function receiveSolvedPolicy(message){if(message.type!=='continuationPolicy')ret
 function preflopReference(hand,actions=null,preferred=null){if(!hand||hand.done||hand.street!==0)return null;const chosen=preferred||(preflopLibrary.preferred?.family===hand.family?preflopLibrary.preferred:null);const controls=actions||G.modelActions(hand,state.abstraction);for(const pack of chosen?[chosen]:preflopLibrary.packs){const q=PokerPreflop.query(pack,hand,controls);if(q)return q;}return PokerPreflop.nearest(chosen?[chosen]:preflopLibrary.packs,hand,controls);}
 // Postflop starting ranges from the imported preflop charts, used when nothing
 // more specific is known (typed ranges, or a preceding exact solve). PLO ranges
-// are a weighted sample of combos: up to 199 for the in-browser river solver,
+// are a weighted sample of combos: up to 299 for the in-browser river solver,
 // more when the computer's local solver takes the spot.
 function chartPostflopRanges(hand,observed,opts){
  if(!hand||hand.street===0||!preflopLibrary.packs.length)return null;const preferred=preflopLibrary.preferred,packs=preferred?[preferred,...preflopLibrary.packs.filter(p=>p!==preferred)]:preflopLibrary.packs;
@@ -14,7 +14,7 @@ function chartPostflopRanges(hand,observed,opts){
  const ranges=Array(hand.n).fill(''),heroClass=G.Core.handClass(observed.heroCards);
  for(const [seat,w]of Object.entries(r.seats)){const hero=+seat===observed.actor;
   if(r.game==='NLH'){const weights=Array.from(w),i=PokerPreflop.classes.indexOf(heroClass);if(hero&&i>=0)weights[i]=Math.max(weights[i],.01);ranges[seat]=PokerPreflop.classRangeText(weights);}
-  else{const limit=opts.localSolver?[600,1200,2500][observed.board.length-3]:199,combos=PokerPreflop.ploCombos({pack:r.pack,weights:w},observed.board,{limit,include:hero?observed.heroCards:null,seed:1+(+seat)}),peak=Math.max(...combos.map(c=>c.weight));if(!combos.length||!(peak>0))return null;ranges[seat]=combos.map(c=>c.cards.map(G.Core.cardName).join('')+':'+Math.max(.01,Math.round(1000*c.weight/peak)/1000)).join(',');}
+  else{const limit=opts.localSolver?[600,1200,2500][observed.board.length-3]:299,combos=PokerPreflop.ploCombos({pack:r.pack,weights:w},observed.board,{limit,include:hero?observed.heroCards:null,seed:1+(+seat)}),peak=Math.max(...combos.map(c=>c.weight));if(!combos.length||!(peak>0))return null;ranges[seat]=combos.map(c=>c.cards.map(G.Core.cardName).join('')+':'+Math.max(.01,Math.round(1000*c.weight/peak)/1000)).join(',');}
  }
  return{ranges,origin:'Imported preflop chart: '+r.name+(r.depthMatch?' (nearest depth '+fmt(r.depthMatch.chart)+' bb for '+fmt(r.depthMatch.actual)+' bb)':'')+(r.game==='NLH'?'':'; a weighted sample of combos')};
 }
