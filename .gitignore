@@ -6,6 +6,11 @@
 !/river/engine.js
 !/tools/
 !/tools/preflop/
+!/tools/local-solver/
+!/tools/local-solver/README.md
+!/tools/local-solver/server.cjs
+!/tools/local-solver/install-mac.sh
+!/tools/local-solver/start.command
 !/tools/preflop/README.md
 !/tools/preflop/tree.cjs
 !/tools/preflop/solve.cjs
@@ -27,6 +32,7 @@
 !/studio/postflop-exact.js
 !/studio/preflop-panel.html
 !/studio/preflop.js
+!/studio/local-solver.js
 !/studio/quiz-flow.js
 !/studio/quiz.css
 !/studio/quiz.js
