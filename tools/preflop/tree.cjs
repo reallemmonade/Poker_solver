@@ -3,12 +3,13 @@
 // at most one player flats an open, and after a 3-bet only the player who made
 // the previous raise may continue. A player who flatted the open may continue
 // against a squeeze only once the opener has folded. Everyone else folds.
-const round=x=>Math.round(x*2)/2;
+const round=x=>Math.round(x*10)/10;
 
 function defaults(raw={}){
- const n=raw.seats||9;
- return{seats:n,stack:200,sb:.5,bb:1,open:2.5,sbOpen:3,threeBetIP:3,threeBetOOP:4,squeezePerCaller:1,fourBet:2.3,
-  jamShare:.4,openJam:false,pushFold:false,realization:.12,playability:{},...raw,seats:n};
+ const n=raw.seats||9,stack=raw.stack||200;
+ return{seats:n,stack,sb:.5,bb:1,ante:0,open:2.5,sbOpen:3,threeBetIP:3,threeBetOOP:4,squeezePerCaller:1,fourBet:2.3,fiveBet:2.2,
+  // Short stacks may also shove at every raise; deep stacks get a sized 5-bet.
+  extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,foldRemoval:true,realization:.12,playability:{},...raw,seats:n};
 }
 
 // Seats are relative to the button (seat 0). SB is 1 and BB 2, or 0 and 1 heads-up.
@@ -18,27 +19,45 @@ function postflopRank(n,seat){return(seat-blinds(n)[0]+n)%n;}
 
 function build(raw){
  const o=defaults(raw),n=o.seats,[sbSeat,bbSeat]=blinds(n),order=actionOrder(n),nodes=[];
- const inv=Array(n).fill(0);inv[sbSeat]=o.sb;inv[bbSeat]=o.bb;
- const root=step({inv,folded:Array(n).fill(false),bet:o.bb,level:0,raiser:-1,prevRaiser:-1,callers:0,caller:-1,pending:order.slice(),history:[]});
+ // The big-blind ante is dead money: it is in the pot but not part of any bet.
+ const dead=Array(n).fill(0);dead[bbSeat]=o.ante;
+ const cap=dead.map(d=>o.stack-d),bets=Array(n).fill(0);bets[sbSeat]=o.sb;bets[bbSeat]=o.bb;
+ const root=step({bets,folded:Array(n).fill(false),bet:o.bb,allIn:false,level:0,raiser:-1,prevRaiser:-1,callers:0,caller:-1,pending:order.slice(),history:[]});
  return{options:o,root,nodes};
 
+ // The sized raise for this actor, or null when the next raise is all-in.
  function sizeFor(s,actor){
-  // The raise this actor would make, in bb, or the stack when it is close.
+  // Pot limit: every raise is pot-sized (call, then raise the pot), all-in once that reaches the stack.
+  if(o.potLimit){const to=Math.floor((2*s.bet-s.bets[actor]+sum(s.bets)+sum(dead))*10+1e-9)/10;return to>=cap[actor]?null:to;}
   let to;
   if(s.level===0)to=actor===sbSeat&&n>2?o.sbOpen:o.open;
   else if(s.level===1)to=s.bet*(actor===sbSeat||actor===bbSeat?o.threeBetOOP:o.threeBetIP)+s.bet*o.squeezePerCaller*s.callers;
   else if(s.level===2)to=s.bet*o.fourBet;
-  else to=o.stack;
+  else if(s.level===3&&o.deep)to=s.bet*o.fiveBet;
+  else return null;
   to=round(to);
-  return to>=o.jamShare*o.stack||o.pushFold||s.level===0&&o.openJam?o.stack:to;
+  return to>=o.jamShare*o.stack?null:to;
+ }
+ function raises(s,actor){
+  if(cap[actor]<=s.bet)return[];
+  if(o.pushFold)return[{kind:'raise',to:cap[actor],jam:true}];
+  const sized=sizeFor(s,actor),out=[];
+  if(sized!==null)out.push({kind:'raise',to:sized});
+  if(sized===null||o.extraJam&&!o.potLimit)out.push({kind:'raise',to:cap[actor],jam:true});
+  return out;
  }
  function options(s,actor){
-  if(s.bet>=o.stack)return['fold','call'];
-  if(o.pushFold)return s.level===0?(actor===bbSeat?[]:['fold','raise']):['fold','call'];
-  if(s.level===0)return actor===bbSeat?[]:['fold','raise'];
-  if(s.level===1)return s.callers===0?['fold','call','raise']:['fold','raise'];
+  const fold={kind:'fold'},call={kind:'call'};
+  if(s.allIn){
+   if(s.level===1&&s.callers===0)return[fold,call];
+   if(s.level===1||actor!==s.prevRaiser&&!(s.level===2&&actor===s.caller&&s.folded[s.prevRaiser]))return[];
+   return[fold,call];
+  }
+  if(o.pushFold)return s.level===0&&actor!==bbSeat?[fold,...raises(s,actor)]:[];
+  if(s.level===0)return actor===bbSeat?[]:[fold,...raises(s,actor)];
+  if(s.level===1)return s.callers===0?[fold,call,...raises(s,actor)]:[fold,...raises(s,actor)];
   if(actor!==s.prevRaiser&&!(s.level===2&&actor===s.caller&&s.folded[s.prevRaiser]))return[];
-  return['fold','call','raise'];
+  return[fold,call,...raises(s,actor)];
  }
  function step(s){
   while(s.pending.length){
@@ -50,16 +69,16 @@ function build(raw){
     if(s.level===0&&actor===bbSeat){s.pending=s.pending.slice(1);continue;}
     s={...s,folded:s.folded.map((f,i)=>f||i===actor),pending:s.pending.slice(1),history:s.history.concat([{seat:actor,kind:'fold',auto:true}])};continue;
    }
-   const node={type:'decision',id:nodes.length,actor,level:s.level,history:s.history,pot:sum(s.inv),toCall:s.bet-s.inv[actor],children:[],actions:[]};nodes.push(node);
-   for(const kind of acts){
-    const next={...s,inv:s.inv.slice(),folded:s.folded.slice(),pending:s.pending.slice(1),history:s.history.concat()};
+   const node={type:'decision',id:nodes.length,actor,level:s.level,history:s.history,pot:sum(s.bets)+sum(dead),toCall:s.bet-s.bets[actor],children:[],actions:[]};nodes.push(node);
+   for(const a of acts){
+    const next={...s,bets:s.bets.slice(),folded:s.folded.slice(),pending:s.pending.slice(1)};
     let event;
-    if(kind==='fold'){next.folded[actor]=true;event={seat:actor,kind:'fold'};}
-    else if(kind==='call'){next.inv[actor]=s.bet;next.callers=s.callers+1;next.caller=actor;event={seat:actor,kind:'call'};}
+    if(a.kind==='fold'){next.folded[actor]=true;event={seat:actor,kind:'fold'};}
+    else if(a.kind==='call'){next.bets[actor]=Math.min(s.bet,cap[actor]);next.callers=s.callers+1;next.caller=actor;event={seat:actor,kind:'call'};}
     else{
-     const to=sizeFor(s,actor);next.inv[actor]=to;next.bet=to;next.level=s.level+1;next.prevRaiser=s.raiser;next.raiser=actor;next.callers=0;
+     next.bets[actor]=a.to;next.bet=a.to;next.allIn=!!a.jam;next.level=s.level+1;next.prevRaiser=s.raiser;next.raiser=actor;next.callers=0;
      const start=order.indexOf(actor);next.pending=Array.from({length:n-1},(_,k)=>order[(start+1+k)%n]).filter(i=>!next.folded[i]);
-     event={seat:actor,kind:'raise',to};
+     event={seat:actor,kind:'raise',to:a.to};
     }
     next.history=s.history.concat([event]);
     node.actions.push(event);node.children.push(step(next));
@@ -69,12 +88,14 @@ function build(raw){
   return terminal(s);
  }
  function terminal(s){
-  const live=s.inv.map((_,i)=>i).filter(i=>!s.folded[i]),pot=sum(s.inv);
-  // An unopened pot folds to the BB.
-  if(live.length===1)return{type:'fold',winner:live[0],inv:s.inv.slice(),pot};
+  const live=s.bets.map((_,i)=>i).filter(i=>!s.folded[i]),bets=s.bets.slice();
+  if(live.length===2){const matched=Math.min(bets[live[0]],bets[live[1]]);for(const i of live)bets[i]=matched;}
+  // Each player's stake includes their dead ante; uncalled chips go back.
+  const inv=bets.map((b,i)=>b+dead[i]),pot=sum(inv);
+  if(live.length===1)return{type:'fold',winner:live[0],inv,pot};
   if(live.length!==2)throw Error('Trimmed tree reached a '+live.length+'-way pot.');
   const [a,b]=live,ip=postflopRank(n,a)>postflopRank(n,b)?a:b;
-  return{type:s.bet>=o.stack?'allin':'flop',players:[ip,ip===a?b:a],inv:s.inv.slice(),pot};
+  return{type:s.allIn?'allin':'flop',players:[ip,ip===a?b:a],inv,pot};
  }
 }
 function sum(a){return a.reduce((x,y)=>x+y,0);}
