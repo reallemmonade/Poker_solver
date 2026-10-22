@@ -7,7 +7,7 @@
  const VERSION=1,PRUNE=.03,assert=(v,m)=>{if(!v)throw Error(m)},sum=a=>a.reduce((s,x)=>s+x,0),comboKey=cs=>cs.slice().sort((a,b)=>a-b).join('.');
  const clock=()=>typeof performance==='undefined'?Date.now():performance.now();
  function choose(n,k){let v=1;for(let i=1;i<=k;i++)v=v*(n-i+1)/i;return v;}
- function options(raw={}){const sizes=raw.rootSizes===undefined?[]:raw.rootSizes;assert(Array.isArray(sizes)&&sizes.length<=6&&sizes.every(x=>Number.isFinite(Number(x))&&Number(x)>0),'Enter up to six positive additional bet/raise totals in bb.');const given=raw.abstraction||{},base=T.normalizeAbstraction({...given,betSizes:given.betSizes||[1/3,2/3,1.5],raiseSizes:given.raiseSizes||[1/3,2/3,1.5]}),abstraction=T.normalizeAbstraction({...base,jam:true});return{rangeMode:raw.rangeMode==='uniform'?'uniform':'auto',ranges:Array.isArray(raw.ranges)?raw.ranges.map(String):[],iterations:Math.min(500000,Math.max(1000,Number(raw.iterations)||50000)),samples:Math.min(10000,Math.max(200,Number(raw.samples)||2000)),milliseconds:Math.min(180000,Math.max(1000,Number(raw.milliseconds)||45000)),maxInfos:Math.min(500000,Math.max(1000,Number(raw.maxInfos)||150000)),exactMemoryMB:Math.min(4096,Math.max(32,Number(raw.exactMemoryMB)||256)),maxJointDeals:Math.min(500000,Math.max(100,Number(raw.maxJointDeals)||20000)),approximate:raw.approximate!==false,preparationMilliseconds:Math.min(180000,Math.max(1000,Number(raw.preparationMilliseconds)||15000)),tolerance:Math.min(.05,Math.max(.00001,Number(raw.tolerance)||.001)),rootSizes:sizes.map(Number),abstraction};}
+ function options(raw={}){const sizes=raw.rootSizes===undefined?[]:raw.rootSizes;assert(Array.isArray(sizes)&&sizes.length<=6&&sizes.every(x=>Number.isFinite(Number(x))&&Number(x)>0),'Enter up to six positive additional bet/raise totals in bb.');const given=raw.abstraction||{},base=T.normalizeAbstraction({...given,betSizes:given.betSizes||[1/3,2/3,1.5],raiseSizes:given.raiseSizes||[1/3,2/3,1.5]}),abstraction=T.normalizeAbstraction({...base,jam:true});return{rangeMode:raw.rangeMode==='uniform'?'uniform':'auto',ranges:Array.isArray(raw.ranges)?raw.ranges.map(String):[],iterations:Math.min(500000,Math.max(1000,Number(raw.iterations)||50000)),samples:Math.min(10000,Math.max(200,Number(raw.samples)||2000)),milliseconds:Math.min(180000,Math.max(1000,Number(raw.milliseconds)||45000)),maxInfos:Math.min(500000,Math.max(1000,Number(raw.maxInfos)||150000)),exactMemoryMB:Math.min(4096,Math.max(32,Number(raw.exactMemoryMB)||256)),maxJointDeals:Math.min(500000,Math.max(100,Number(raw.maxJointDeals)||20000)),approximate:raw.approximate!==false,localSolver:/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(String(raw.localSolver||''))?String(raw.localSolver):'',preparationMilliseconds:Math.min(180000,Math.max(1000,Number(raw.preparationMilliseconds)||15000)),tolerance:Math.min(.05,Math.max(.00001,Number(raw.tolerance)||.001)),rootSizes:sizes.map(Number),abstraction};}
  function publicKey(data){return JSON.stringify([data.config,data.actor,data.heroCards.slice().sort((a,b)=>a-b),data.board,data.actions.map(a=>[a.seat,a.street,a.kind,a.target])]);}
  function reconstruct(data,holes,random=G.rng(1)){
   const h=new G.Hand(data.config,{holes,runout:data.board.slice(data.config.boardCards.length),rng:random});
@@ -183,11 +183,15 @@
     else{const multiway=root.PokerExactMultiway||(typeof require==='function'?require('./multiway-exact.js'):null);assert(multiway,'The multiplayer exact engine is unavailable.');this.engine=new multiway.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,utility});}
    }
    catch(error){if(!/budget|exceed/.test(error.message))throw error;
+    // Heads-up spots too large to solve exactly here can go to TexasSolver on
+    // this computer when the user has turned that on.
+    const Local=root.PokerLocalSolver||(typeof require==='function'?require('./local-solver.js'):null);
+    if(this.options.localSolver&&Local){try{this.engine=new Local.Engine(this.data,this.ranges,this.options,reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)));this.local=error.message;return;}catch{}}
     // Spots too large for an exact solve get a sampled solve of the same tree,
     // bounded by the effort's time and state budgets and labelled approximate.
     if(this.options.approximate){this.fallback=error.message;this.engine=new SampledSolver(this.data,this.ranges,{...this.options,iterations:500000},extra);}else this.engine=unsupported(error.message);}
   }
-  get complete(){return this.engine.complete;}step(){this.engine.step();}progress(){return this.engine.progress();}result(){
+  get complete(){return this.engine.complete;}get waiting(){return !!this.engine.waiting;}cancel(){this.engine.cancel?.();}step(){this.engine.step();}progress(){return this.engine.progress();}result(){
    const r=this.engine.result();if(!this.fallback||!r.solve)return r;r.solve.approximate=true;r.solve.fallbackReason=this.fallback;
    // Untrained continuation decisions play uniformly at random, which makes
    // large bets look hugely profitable. Withhold estimates that rest on them.
