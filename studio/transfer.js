@@ -42,7 +42,7 @@ async function prepareStudyBackup(){
  if(transferUI.busy||state.busy){transferMessage('Finish or cancel the current calculation before preparing a backup.',true);return;}
  transferUI.busy=true;$('backupPrepare').disabled=true;$('backupImport').disabled=true;invalidatePreparedBackup();transferMessage('Preparing your saved analyses and study data…');
  try{
-  const includeModels=$('backupContents').value==='complete';if(includeModels)await saveModel(false);const stores=await readStudyStores(includeModels);stores.meta=stores.meta.filter(row=>row.id!=='liveSession-broken'&&(includeModels||row.id!=='lastModel'));let legacy=0;
+  const includeModels=$('backupContents').value==='complete';if(includeModels)await saveModel(false);const stores=await readStudyStores(includeModels);stores.meta=stores.meta.filter(row=>row.id!=='quizDraft-v1'&&row.id!=='liveSession-broken'&&(includeModels||row.id!=='lastModel'));let legacy=0;
   // A legacy row and its archived copy share one ID; keep the newest so the backup stays importable.
   const solves=new Map();for(const row of stores.solves.map(row=>{try{return normalizeSavedSpot(row);}catch{legacy++;return archiveSavedSpot(row);}})){const old=solves.get(row.id);if(!old||rowDate(row)>rowDate(old))solves.set(row.id,row);}stores.solves=[...solves.values()];
   // The study file lists reference charts by name (re-import them from their file); a complete backup carries them as plain arrays.
@@ -91,7 +91,7 @@ async function validateStudyImport(data){
  const out={};let total=0;
  for(const name of studyStores){const rows=data.stores[name];if(!Array.isArray(rows)||rows.length>100000)throw Error('Invalid or oversized '+name+' collection.');total+=rows.length;}
  if(total>200000)throw Error('This backup has too many records for a browser import.');
- for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id)){const at=out[name].findIndex(r=>r.id===row.id),old=out[name][at];if(name!=='solves'||!row.archived||!old.archived||old.key!==row.key)throw Error('Duplicate '+name+' record in backup.');if(rowDate(row)>rowDate(old))out[name][at]=row;continue;}ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
+ for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){if(name==='meta'&&data.stores[name][i]?.id==='quizDraft-v1')continue;const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id)){const at=out[name].findIndex(r=>r.id===row.id),old=out[name][at];if(name!=='solves'||!row.archived||!old.archived||old.key!==row.key)throw Error('Duplicate '+name+' record in backup.');if(rowDate(row)>rowDate(old))out[name][at]=row;continue;}ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
  return out;
 }
 function mergeStudyRows(existing,incoming){
