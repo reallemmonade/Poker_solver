@@ -8,6 +8,9 @@
  const C=G&&G.Core,STREETS=['flop','turn','river'],assert=(v,m)=>{if(!v)throw Error(m)};
  const CARD=/^[2-9TJQKA][cdhs]$/,COMBO=/^([2-9TJQKA][cdhs]){2}$/,CLASS=/^(?:([2-9TJQKA])\1|[2-9TJQKA]{2}[so])$/;
  const DEFAULT_URL='http://127.0.0.1:8787',LOCAL_TREE={bet:[33,66,75],raise:66,allinThreshold:.67};
+ // PLO tree: one bet size per street (fraction of pot), a pot raise, at most 2 raises
+ // on the flop and 3 later. The solver lowers the caps itself if memory runs short.
+ const COMBO4=/^([2-9TJQKA][cdhs]){4}$/,PLO_TREE={bet:[.33,.66,.75],raise:1,cap:[2,3,3],allinThreshold:.67},PLO_MAX_COMBOS=20000,round4=x=>Math.round(x*1e4)/1e4;
 
  // Pot percentages that reproduce an exact bet or raise in TexasSolver's tree.
  // Chips are the app's internal units (100 per bb). Each player starts the
@@ -19,7 +22,7 @@
 
  // Builds the solver spec for the current decision, or explains why it cannot.
  function spec(data,ranges,opt={}){
-  const config=G.normalize(data.config);
+  const config=G.normalize(data.config);if(config.variant==='PLO4')return ploSpec(data,ranges,opt,config);
   assert(config.variant==='NLH'&&config.rules.hole===2,'The local solver supports No-Limit Hold\'em only.');
   assert(data.board.length>=3,'The local solver starts from the flop.');
   const h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),current=data.board.length-2,snapshot=x=>({pot:x.pot,stacks:x.stacks.slice()});let start=null;
@@ -63,8 +66,58 @@
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||1)),maxIterations:Math.min(1000,Math.max(10,Number(opt.localIterations)||200))};
  }
 
+ // Pot-limit Omaha (4 cards, high) goes to tools/plo-solver: exact weighted combos,
+ // bet sizes as fractions of the pot, raises as fractions of a pot raise, and the
+ // exact amounts already played on this street (the solver adds them to its tree).
+ function ploSpec(data,ranges,opt,config){
+  assert(config.rules.hole===4&&!config.rules.low,'The local PLO solver supports 4-card high only.');
+  assert(data.board.length>=3,'The local solver starts from the flop.');
+  const h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),current=data.board.length-2,snapshot=x=>({pot:x.pot,stacks:x.stacks.slice()});let start=null;
+  for(const a of data.actions){if(h.street===current&&!start)start=snapshot(h);h.act(a);}
+  if(!start)start=snapshot(h);
+  assert(!h.done&&h.actor===data.actor,'The selected spot is no longer an open decision.');
+  const live=h.living();assert(live.length===2,'The local solver handles heads-up pots only.');
+  const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
+  const street=current-1,stack=Math.min(start.stacks[ip],start.stacks[oop]);assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
+  const sizes={},caps={};for(let s=street;s<3;s++){sizes[STREETS[s]]={};caps[STREETS[s]]=PLO_TREE.cap[s];for(const who of ['ip','oop'])sizes[STREETS[s]][who]={bet:[PLO_TREE.bet[s]],raise:[PLO_TREE.raise]};}
+  const path=[];for(const a of data.actions.filter(a=>a.street===current)){assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}
+  const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
+  const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
+  const rangeIp=combos(ip),rangeOop=combos(oop),heroRange=data.actor===ip?rangeIp:rangeOop;
+  if(!heroRange[hero])heroRange[hero]=.005;
+  return{version:1,game:'PLO4',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,allinThreshold:PLO_TREE.allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,
+   accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||.5)),maxIterations:Math.min(2000,Math.max(10,Number(opt.localIterations)||300))};
+ }
+ function validatePLO(s){
+  const num=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi,board=Array.isArray(s.board)?s.board:[];
+  assert(board.length>=3&&board.length<=5&&board.every(c=>typeof c==='string'&&CARD.test(c))&&new Set(board).size===board.length,'Invalid board.');
+  assert(num(s.pot,1,1e9)&&num(s.stack,1,1e10)&&num(s.minBet,1,1e9),'Invalid pot, stack or minimum bet.');
+  const first=board.length-3,allowed=STREETS.slice(first);
+  for(const r of [s.rangeIp,s.rangeOop]){assert(r&&typeof r==='object'&&!Array.isArray(r),'Invalid range.');const keys=Object.keys(r);assert(keys.length>0&&keys.length<=PLO_MAX_COMBOS,'Each range needs 1 to '+PLO_MAX_COMBOS+' combos.');for(const k of keys){assert(COMBO4.test(k)&&new Set(k.match(/../g)).size===4&&!k.match(/../g).some(c=>board.includes(c))&&num(r[k],1e-6,1),'Invalid range entry '+k.slice(0,12)+'.');}}
+  assert(s.sizes&&typeof s.sizes==='object'&&s.caps&&typeof s.caps==='object','Missing bet sizes.');
+  for(const street of Object.keys(s.sizes)){assert(allowed.includes(street),'Invalid street '+street+'.');for(const who of Object.keys(s.sizes[street])){assert(who==='ip'||who==='oop','Invalid player.');const book=s.sizes[street][who];for(const k of ['bet','raise'])assert(Array.isArray(book[k])&&book[k].length<=6&&book[k].every(x=>num(x,.01,1)),'Invalid '+k+' sizes.');}}
+  for(const [street,c] of Object.entries(s.caps))assert(allowed.includes(street)&&Number.isInteger(c)&&c>=0&&c<=4,'Invalid raise cap.');
+  assert(num(s.allinThreshold,.1,1),'Invalid all-in threshold.');
+  assert(num(s.accuracy,.05,5)&&Number.isInteger(s.maxIterations)&&num(s.maxIterations,10,2000),'Invalid accuracy settings.');
+  assert(Array.isArray(s.path)&&s.path.length<=16&&s.path.every(p=>p&&(p.kind==='check'||p.kind==='call')&&p.to===undefined||p&&(p.kind==='bet'||p.kind==='raise')&&num(p.to,1,1e10)),'Invalid action path.');
+  assert(typeof s.hero==='string'&&COMBO4.test(s.hero)&&(s.heroIsIp?s.rangeIp:s.rangeOop)[s.hero]>0,'Invalid hero hand.');
+  assert(typeof s.heroIsIp==='boolean','Invalid hero seat.');
+  return s;
+ }
+ function inputPLO(s,{threads=4,output='result.json',memoryMB=8192,timeLimit=1800}={}){
+  validatePLO(s);assert(typeof output==='string'&&!/[\r\n]/.test(output),'Invalid output path.');
+  const range=r=>Object.entries(r).map(([k,w])=>w>=1?k:k+':'+w).join(','),n=x=>String(Math.round(x*1e6)/1e6);
+  const lines=['game PLO4','board '+s.board.join(''),'pot '+n(s.pot),'stack '+n(s.stack),'min_bet '+n(s.minBet),'allin_threshold '+n(s.allinThreshold),'range_oop '+range(s.rangeOop),'range_ip '+range(s.rangeIp)];
+  for(const [street,books] of Object.entries(s.sizes))for(const [who,book] of Object.entries(books))for(const k of ['bet','raise'])lines.push(k+' '+street+' '+who+' '+(book[k].length?book[k].map(n).join(','):'none'));
+  for(const [street,c] of Object.entries(s.caps))lines.push('cap '+street+' '+c);
+  if(s.path.length)lines.push('path '+s.path.map(p=>p.to===undefined?p.kind:'to:'+n(p.to)).join(','));
+  lines.push('threads '+Math.max(1,Math.min(256,threads|0)),'accuracy '+n(s.accuracy),'max_iterations '+s.maxIterations,'print_interval 10','memory_limit_mb '+Math.max(256,Math.round(memoryMB)),'time_limit '+Math.max(10,Math.round(timeLimit)),'output '+output);
+  return lines.join('\n')+'\n';
+ }
+
  // Strict checks shared by the bridge, which turns a spec into solver commands.
  function validate(s){
+  if(s&&s.game==='PLO4'&&s.version===1)return validatePLO(s);
   const num=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi;
   assert(s&&s.version===1,'Unknown spec version.');
   assert(Array.isArray(s.board)&&s.board.length>=3&&s.board.length<=5&&s.board.every(c=>CARD.test(c))&&new Set(s.board).size===s.board.length,'Invalid board.');
@@ -79,6 +132,7 @@
  }
 
  function input(s,{threads=4,output='output_result.json'}={}){
+  if(s&&s.game==='PLO4')return inputPLO(s,arguments[1]);
   validate(s);const range=r=>Object.entries(r).map(([k,w])=>w>=1?k:k+':'+w).join(','),lines=['set_pot '+s.pot,'set_effective_stack '+s.stack,'set_board '+s.board.join(','),'set_range_ip '+range(s.rangeIp),'set_range_oop '+range(s.rangeOop)];
   for(const who of ['ip','oop'])for(const [street,book]of Object.entries(s.sizes[who])){
    for(const k of ['bet','raise','donk'])if(book[k].length)lines.push('set_bet_sizes '+who+','+street+','+k+','+book[k].join(','));
@@ -124,6 +178,42 @@
   const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total)};
  }
 
+ // The PLO solver's tree: actions carry the street total ("to") they bet or raise to.
+ function followPLO(tree,path){
+  let node=tree;
+  for(const step of path){
+   assert(node&&Array.isArray(node.actions),'The solver tree does not contain this line.');
+   let i=-1;if(step.kind==='check'||step.kind==='call')i=node.actions.findIndex(a=>a.kind===step.kind);
+   else{const options=node.actions.map((a,k)=>({a,k})).filter(o=>o.a.kind===step.kind).sort((x,y)=>Math.abs(x.a.to-step.to)-Math.abs(y.a.to-step.to));if(options[0]&&Math.abs(options[0].a.to-step.to)<=Math.max(2,.01*step.to))i=options[0].k;}
+   assert(i>=0,'The solver tree does not contain the action '+step.kind+(step.to?' '+step.to:'')+'.');node=node.children[i];
+  }
+  assert(node&&Array.isArray(node.actions)&&node.strategy,'The solver did not return a strategy for this decision.');
+  return node;
+ }
+ // Maps PLO solver actions to the app's legal actions; EVs become bb from this decision.
+ function mapPLO(hand,node,row,evs){
+  const legal=hand.legal(),paid=hand.streetPaid[hand.actor],actions=[],probs=[],mean=[];
+  node.actions.forEach((x,i)=>{
+   let action;
+   if(x.kind==='fold')action={kind:'fold',label:'Fold'};
+   else if(x.kind==='check')action={kind:'check',label:'Check'};
+   else if(x.kind==='call')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
+   else{const top=Math.min(legal.maxRaiseTo,legal.allInTo),target=x.allin?top:Math.min(top,Math.max(legal.minRaiseTo,Math.round(x.to))),k=hand.currentBet?'raise':'bet';action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   action.id=action.kind+':'+(action.target||0);const ev=evs?G.bb(evs[i]+paid):null;
+   const same=actions.findIndex(a=>a.id===action.id);if(same>=0){probs[same]+=row[i];if(ev!==null&&ev>mean[same])mean[same]=ev;}else{actions.push(action);probs.push(row[i]);mean.push(ev);}
+  });
+  const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total),mean};
+ }
+ function resultPLO(engine){
+  const s=engine.spec,tree=engine.body.tree,player=s.heroIsIp?1:0,node=followPLO(tree.tree,s.path),index=tree.combos[player].indexOf(s.hero);
+  assert(index>=0,'The solver strategy does not include your hand.');
+  const cash=engine.hand.config.mode==='cash',{actions,probs,mean}=mapPLO(engine.hand,node,node.strategy[index],node.evs[index]),hasEV=cash&&mean.every(Number.isFinite),values=hasEV?mean:actions.map(()=>0),best=hasEV?values.indexOf(Math.max(...values)):probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0),converged=Number.isFinite(tree.exploitability)&&tree.exploitability<=s.accuracy,rare=node.reach[index]<.005;
+  return{supported:true,actions,reference:probs,mean:values,se:zeros,loss:hasEV?values.map(v=>values[best]-v):zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:cash?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),reliable:hasEV&&converged,
+   solve:{version:1,method:'local-plo',exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],treeReduced:tree.treeReduced,raiseCaps:tree.caps,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:[Object.keys(s.rangeOop).length,Object.keys(s.rangeIp).length],
+    actionTree:{betSizes:s.sizes[STREETS[s.board.length-3]][s.heroIsIp?'ip':'oop'].bet,raiseSizes:[1],potLimit:true,maxRaises:tree.caps[s.board.length-3],jam:true},
+    warning:'Solved by the PLO solver on this computer for the combos shown, with one bet size and pot-sized raises on every later street. Exploitability is measured exactly, in percent of the pot.'+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(tree.treeReduced?' Raise caps were lowered to fit memory.':'')+(converged?'':' The solve stopped before reaching its accuracy target.')+(rare?' Your hand almost never reaches this spot in the solved strategy, so its row shows the best-EV action.':'')}};
+ }
+
  // Worker engine: one HTTP request, then complete. step() never blocks.
  class Engine{
   constructor(data,ranges,opt,hand,fetcher){
@@ -140,6 +230,7 @@
   progress(){if(this.complete)clearInterval(this.poll);const s=this.status||{};return{phase:'local',done:Math.round((Date.now()-this.started)/1000),total:0,iterations:s.iterations||0,exploitability:s.exploitability??null};}
   result(){
    if(this.error)return{supported:false,message:'Local solver: '+this.error};
+   if(this.spec.game==='PLO4')return resultPLO(this);
    const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);
    return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
     solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
@@ -147,6 +238,6 @@
   }
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,Engine,betPercent,raisePercent};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,Engine,betPercent,raisePercent,PLO_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

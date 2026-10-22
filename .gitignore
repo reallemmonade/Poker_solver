@@ -12,6 +12,9 @@
 !/tools/local-solver/server.cjs
 !/tools/local-solver/install-mac.sh
 !/tools/local-solver/start.command
+!/tools/plo-solver/
+!/tools/plo-solver/plo_solver.cpp
+!/tools/plo-solver/test.cjs
 !/tools/preflop/README.md
 !/tools/preflop/tree.cjs
 !/tools/preflop/solve.cjs
