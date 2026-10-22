@@ -2,5 +2,18 @@ services:
   - type: web
     name: range-lab-poker-studio
     runtime: static
-    buildCommand: node studio/build.cjs --web
+    buildCommand: node studio/build.cjs --web && node studio/build-friends.cjs
     staticPublishPath: studio/render-site
+    envVars:
+      - key: MULTIPLAYER_API_ORIGIN
+        value: https://range-lab-live-rooms.onrender.com
+  - type: web
+    name: range-lab-live-rooms
+    runtime: node
+    plan: free
+    buildCommand: node --version
+    startCommand: node server.cjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://range-lab-poker-studio.onrender.com

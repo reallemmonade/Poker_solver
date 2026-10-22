@@ -2,6 +2,7 @@
 !/.gitignore
 !/README.md
 !/render.yaml
+!/server.cjs
 !/river/
 !/river/engine.js
 !/tools/
@@ -21,7 +22,10 @@
 !/studio/app.js
 !/studio/bots.js
 !/studio/build.cjs
+!/studio/build-friends.cjs
 !/studio/evidence-ui.js
+!/studio/friends.html
+!/studio/friends.js
 !/studio/game.js
 !/studio/history.js
 !/studio/index.html

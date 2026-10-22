@@ -1,12 +1,14 @@
 # Range Lab Poker Studio
 
-This repository contains the browser app and the source needed to build it. Render serves the app as a static site; it does not run the solver or store training data on a server.
+This repository contains the browser app and the source needed to build it. Render serves the study app as a static site and runs a small Node service for private multiplayer rooms. Solver work and training data stay in the browser; multiplayer room state lives in memory on the room service while the table is active.
 
 ## Deploy on Render
 
-Connect this GitHub repository to Render as a Blueprint. The included `render.yaml` builds a small site at `studio/render-site` without bundling the large training collection or saved training checkpoints.
+Connect this GitHub repository to Render as a Blueprint. It keeps the existing `range-lab-poker-studio` static site and adds a `range-lab-live-rooms` Node web service. The multiplayer page calls that room API while staying on the static app's origin, so your existing browser saved data remains on its current site. The room service supports CORS from the configured static origin in `ALLOWED_ORIGINS`.
 
-The app runs in the visitor's browser. Models, hand histories, and practice results are saved in that browser's IndexedDB. They do not sync to Render or to another computer. To move them, use the app's export and import controls.
+The Blueprint points the front end to `https://range-lab-live-rooms.onrender.com`. If Render assigns a different service URL, update `MULTIPLAYER_API_ORIGIN` on the static site and `ALLOWED_ORIGINS` on the room service, then redeploy both. Render free web services can sleep while idle; the first request may wait for the service to wake. Open tables use in-memory room state, so redeploys or service restarts close active tables. This is intended for casual friend games, not a persistent poker server.
+
+The study app runs in each visitor's browser. For friend games, Node runs on Render; neither you nor your friends need to install Node on your devices. Models, hand histories, and practice results are saved in that browser's IndexedDB. They do not sync to Render or to another computer. To move them, use the app's export and import controls.
 
 ## Run and train locally
 
@@ -25,6 +27,12 @@ These are manual file transfers, not automatic iCloud synchronization. Export an
 ## Mobile layout and checks
 
 On narrow screens, table setup is collapsed behind a button, navigation scrolls to the selected tab, touch controls are larger, and inputs use 16px text to avoid Safari focus zoom. Safe-area padding accommodates the iPhone screen edges.
+
+## Play with friends
+
+Open **Play with friends** from the app, create a private room, and share its link or eight-character room code. Friends open the link, enter a name, and join an open seat from their phones. The game is no-limit Hold'em with a half-big-blind small blind, configurable seat count, starting stack and ante. Each player sees only their own private cards; other live hands are revealed at showdown. The server checks turn order, legal actions, card dealing, pot awards and chips. The host deals each next hand. Tables are temporary and close if the room service restarts or is redeployed.
+
+To run it locally, build the site and multiplayer page, then start the room service with `node server.cjs`. Open `http://localhost:10000` on your computer. For friends on different networks, deploy the Render Blueprint; they cannot connect to a server running only on your computer unless you separately expose it to the internet.
 
 Run `node studio/build.cjs --web`, then `node studio/verify-transfer.cjs` to check transfer and mobile behavior. The check uses installed Chrome and isolated browser profiles. It covers real saved-solve restoration, invalid-file rejection, duplicate merges, phone-to-laptop progress, persistence and widths from 320 to 430 pixels. Platform sharing is mocked and native iCloud/Safari behavior still requires an actual-device check.
 
