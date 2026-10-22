@@ -3,10 +3,12 @@
 Builds preflop chart packs (`range-lab-preflop-reference-v1`) that the app imports from Charts. Node 18+, no dependencies.
 
 ```
-node tools/preflop/check-pushfold.cjs                     # validation, about 1 second
+node tools/preflop/check-pushfold.cjs                     # validation, a few seconds
 node tools/preflop/export.cjs --seats 9 --stack 200 --format cash --iterations 2000 --out 9max-200bb.json
 node tools/preflop/library.cjs --out preflop-library --jobs 4   # every chart, bundled into one file
 ```
+
+`export.cjs` rejects unknown options and out-of-range values (seats 2-9, a stack above 1bb, format cash or mtt, game nlh or plo, at least one iteration). It measures NashConv every `--every` iterations and keeps the averaged strategy from the checkpoint with the lowest NashConv; `library.cjs` passes `--every 500` by default.
 
 `library.cjs` solves NLH and PLO cash and MTT charts for heads-up and 3- to 9-handed tables at 10, 20, 50, 100, 150, 200, 500 and 1000bb. It then writes `preflop-library.json` and `preflop-library.json.gz`, a `range-lab-preflop-bundle-v1` file that the Library imports in one go (either copy). Bundled rows are compact: a pure action index or per-mille frequencies per class.
 
@@ -35,7 +37,7 @@ node tools/preflop/export.cjs --game plo --seats 6 --stack 100 --format cash --o
 - **Equity tables:** compatibility between groups is exact (inclusion-exclusion over shared cards). Group-vs-group all-in equity is sampled, 3,000 runouts per pair.
 - **Zero-sum folds:** folded PLO hands are treated as independent of the rest (`foldRemoval: false`), so every player sees the same joint probabilities and the game stays zero-sum. NLH keeps card removal against the narrowest folded range.
 - **Pot limit:** every raise is pot-sized, and all-in comes once a pot raise reaches the stack.
-- **Realization:** the in-position edge is x1.05, against x1.12 in NLH. PLO equities run closer together, and this value reproduces published 6-max 100bb opening ranges (about 18% UTG to 49% BTN).
+- **Realization:** the in-position edge is x1.10 and sharpness 1.5 (NLH: x1.12 and 1.2), with no extra edge for the last raiser. PLO equities run closer together, so hands that are behind need the sharper penalty. These values reproduce published 6-max 100bb opening ranges (about 17% UTG to 50% BTN), have the BB fold about two thirds of hands to an UTG pot raise and a third to a BTN one, and let the BTN flat about 10% against a CO open.
 - **Playability by shape:**
   - up: double-suited +10%, single-suited +4%, suited ace +4%, connected +6%;
   - down: rainbow -6%, three or more of a suit -8%, disconnected -4%, trips -12%.
@@ -45,29 +47,37 @@ The packs carry `handGroups` (group names, plus two base-36 digits per class in 
 ## How it works
 
 - `tree.cjs` builds a trimmed betting tree. Seats are counted from the button (0), as in chart packs. Sizes: open 2.5bb (SB 3bb), 3-bet 3x in position or 4x from the blinds plus 1x per caller, 4-bet 2.3x, then all-in. Any raise to 40% of the stack or more becomes all-in.
+- Position after the flop: the button acts last, heads-up too (where it is also the small blind).
 - Trims, so every flop is heads-up:
   - no open-limps;
   - at most one player flats an open;
   - after a 3-bet only the previous raiser continues;
-  - a flatter continues against a squeeze only if the opener folds.
+  - a flatter continues against a squeeze only if the opener folds;
+  - facing a 4-bet or more, a call that would leave less than 2.5 times the pot behind is dropped (all-in or fold).
 - `solve.cjs` runs CFR+ (alternating updates, linear averaging) over the 169 hand classes.
   - All-in pots pay all-in equity from `equity-table.json`: a Monte Carlo table, at least 20,000 runouts per class pair, with card removal between the two players.
-  - Flop pots are not played out. They pay an equity-realization share: equity is scaled x1.12 in position and x0.88 out of position, and by a playability factor (pairs, suited and connected hands up, disconnected offsuit hands down).
+  - Flop pots are not played out. They pay an equity-realization share of the pot, from the odds e/(1-e) raised to the power 1.2 (so a hand that is behind realizes less than its raw equity, and trash out of position far less), scaled x1.12 in position and x0.88 out of position, x1.06 for the last preflop raiser, and by a playability factor (pairs, suited and connected hands up, disconnected offsuit hands down; offsuit connectors below 65 get no bonus).
+  - A flop pot with little behind is close to all-in: below a stack-to-pot ratio of 0.5 it pays all-in equity, and up to 1.5 a blend of all-in equity and the realization share. This matters most for pot-limit lines that leave a few big blinds behind.
   - Folded players' ranges are treated as independent; card removal is applied against the narrowest one.
-- The average strategy is weighted by each player's own reach. It is also accumulated in lines an opponent never takes, so a deviation into such a line meets a real strategy, not noise.
+- The average strategy is weighted by each player's own reach.
+- Lines an opponent (almost) never takes are still solved: CFR passes send a token share (1e-5) of the opponent's continuing range down every action, and regrets are added per unit of opponent reach. Without this, a line dropped early (an in-position flat, a squeeze after it) kept the strategy regret matching held in the first iterations, such as folding aces.
+- Packs give each node's `reach`: how often the averaged strategies arrive there (0-1). The app reports nodes under 0.0001 as `offPath`.
 - `exploitability()` reports NashConv: the total each player could gain by best-responding to the averaged strategy. It is measured within this model.
 
 ## Validation
 
-`check-pushfold.cjs` solves heads-up 10bb push/fold through the same code. It reaches NashConv about 1e-6 bb, SB value -0.0455 bb and a 58.3% shove rate. The independent fictitious-play solution of the same table has NashConv 0.0013 bb and shoves 58.4%. Measured on this solver's game, that solution's NashConv is 0.0013 bb, so the two compute the same game. Their per-hand differences are confined to near-indifferent hands.
+`check-pushfold.cjs` solves heads-up 10bb push/fold through the same code, then heads-up 100bb, where the button must be in position in every flop pot, open at least 70% and see the BB fold some hands (about 82% and 24%). It reaches NashConv about 1e-6 bb, SB value -0.0455 bb and a 58.3% shove rate. The independent fictitious-play solution of the same table has NashConv 0.0013 bb and shoves 58.4%. Measured on this solver's game, that solution's NashConv is 0.0013 bb, so the two compute the same game. Their per-hand differences are confined to near-indifferent hands.
 
 ## Limits
 
 The 9-handed charts are only as good as the realization model. Compared with full postflop solvers, expect these differences:
 
-- tighter early-position opens;
-- fewer small pairs and suited connectors, because implied odds at 200bb are only partly captured;
+- fewer suited connectors (the SB folds 54s and 76s first in), because implied odds are only partly captured;
 - no limping;
-- simplified multiway play.
+- simplified multiway play, so in-position flats stay rarer than in full solves;
+- with the 1bb big-blind ante (MTT charts) the BB still defends almost every hand against late-position opens, and openers rarely fold to a 3-bet;
+- PLO hand groups are coarse: a group plays one strategy, so a hand such as 9876 single-suited is folded from the CO with the weaker rundowns in its group.
+
+Rebuilding the bundled library after a model change takes several hours on four cores: `node tools/preflop/library.cjs --out preflop-library --jobs 4` (delete the folder's chart files first, since finished charts are kept).
 
 Label the pack as a model, not a full solve.
