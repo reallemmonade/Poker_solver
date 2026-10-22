@@ -22,6 +22,11 @@
 !/tools/preflop/plo-equity.cpp
 !/tools/preflop/plo-model.cjs
 !/tools/preflop/plo-model.json
+!/tools/postflop/
+!/tools/postflop/README.md
+!/tools/postflop/library.cjs
+!/tools/postflop/flops.cjs
+!/tools/postflop/check.cjs
 !/studio/
 !/studio/app.js
 !/studio/bots.js
@@ -37,6 +42,7 @@
 !/studio/interface.css
 !/studio/verify-interface.cjs
 !/studio/multiway-exact.js
+!/studio/postflop-library.js
 !/studio/multiway-ui.js
 !/studio/opponents.js
 !/studio/policy.js
