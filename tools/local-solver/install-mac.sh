@@ -1,12 +1,50 @@
 #!/bin/bash
-# Builds TexasSolver's command-line solver for the local bridge.
-# macOS needs the Xcode command-line tools and Homebrew (for cmake and libomp).
-# TexasSolver is AGPL-3.0 and free for personal use; it is downloaded from its
-# author's repository and built on this computer, never redistributed.
+# Builds the solvers for the local bridge:
+# - the PLO solver (tools/plo-solver), plain C++17 with no other dependencies;
+# - TexasSolver's command-line solver for NLH. macOS needs the Xcode command-line
+#   tools and Homebrew (for cmake and libomp). TexasSolver is AGPL-3.0 and free for
+#   personal use; it is downloaded from its author's repository and built on this
+#   computer, never redistributed.
+#   bash tools/local-solver/install-mac.sh [--plo-only]
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 src="$here/TexasSolver"
 commit=6dfb65b4d7ed081da509e8d8c3d82138c4708267
+
+# PLO solver. A shell running under Rosetta on Apple silicon would build an Intel
+# binary, so compile for arm64 explicitly there.
+plo="$(cd "$here/../plo-solver" && pwd)"
+cxx=()
+for c in c++ clang++ g++; do if command -v "$c" >/dev/null; then cxx=("$c"); break; fi; done
+[ ${#cxx[@]} -gt 0 ] || { echo "Install a C++ compiler first (xcode-select --install on a Mac)."; exit 1; }
+if [ "$(uname)" = Darwin ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then cxx=(arch -arm64 "${cxx[@]}"); fi
+tune=()
+# Arm compilers tune with -mcpu=native; x86 ones take -march=native (gcc accepts
+# -mcpu there too, but only as a deprecated -mtune).
+flags=(-march=native); case "$(uname -m)" in arm64|aarch64) flags=(-mcpu=native -march=native);; esac
+if [ "${cxx[0]}" = arch ]; then flags=(-mcpu=native); fi
+for f in "${flags[@]}"; do
+  if echo 'int main(){return 0;}' | "${cxx[@]}" "$f" -x c++ -o /dev/null - >/dev/null 2>&1; then tune=("$f"); break; fi
+done
+echo "Building the PLO solver..."
+"${cxx[@]}" -O3 -std=c++17 -pthread ${tune[@]+"${tune[@]}"} -o "$plo/plo_solver" "$plo/plo_solver.cpp"
+smoke="$(mktemp -d)"
+cat > "$smoke/input.txt" <<EOF
+game PLO4
+board KsQd7h4c2s
+pot 100
+stack 1000
+range_oop QcJcTd9d,QhJhTc9c,QsJsTh9h
+range_ip KcKh3c5c,KcKd3h5d,6c6d8c8d,6h6s8h8s,8s8c6d3s
+threads 2
+accuracy 0.1
+max_iterations 500
+output $smoke/result.json
+EOF
+"$plo/plo_solver" "$smoke/input.txt" >/dev/null
+test -s "$smoke/result.json" && echo "The PLO solver is ready: $plo/plo_solver"
+rm -rf "$smoke"
+if [ "${1:-}" = --plo-only ]; then exit 0; fi
 
 omp=""
 if [ "$(uname)" = Darwin ]; then

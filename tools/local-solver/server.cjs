@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 'use strict';
-// Local bridge between the Range Lab web app and TexasSolver's console solver.
+// Local bridge between the Range Lab web app and the solvers on this computer:
+// TexasSolver's console solver for NLH, tools/plo-solver for pot-limit Omaha.
 // Listens on 127.0.0.1 only. The app posts a solve spec (studio/local-solver.js);
-// the bridge validates it, writes the solver commands itself, runs one solve at
-// a time and returns the dumped strategy for the current street.
-//   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--port 8787] [--threads N]
+// the bridge validates it, writes the solver input itself, runs one solve at
+// a time and returns the strategy for the current street.
+//   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--plo-solver path/to/plo_solver] [--port 8787] [--threads N] [--memory MB]
 const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process');
 const L=require('../../studio/local-solver.js');
 
-const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),timeout:1800};
-for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout'].includes(k)?Number(v):v;}
+const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
+for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory'].includes(k)?Number(v):v;}
 // Pages allowed to call the bridge: the Render site, and the app opened locally.
 const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1,null').split(',').map(s=>s.trim()).filter(Boolean);
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
@@ -24,18 +25,19 @@ function send(req,res,code,body){res.writeHead(code,headers(req));res.end(JSON.s
 
 function solve(spec){
  return new Promise((resolve,reject)=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-')),out=path.join(dir,'result.json'),file=path.join(dir,'input.txt');
-  fs.writeFileSync(file,L.input(spec,{threads:args.threads,output:out}));
-  const started=Date.now(),child=spawn(args.solver,['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir});
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-')),out=path.join(dir,'result.json'),file=path.join(dir,'input.txt'),plo=spec.game==='PLO4',bin=plo?args['plo-solver']:args.solver,name=plo?'The PLO solver':'TexasSolver';
+  // The PLO solver stops itself a little before the bridge's timeout and still writes its result.
+  fs.writeFileSync(file,plo?L.input(spec,{threads:args.threads,output:out,memoryMB:args.memory,timeLimit:args.timeout*.95}):L.input(spec,{threads:args.threads,output:out}));
+  const started=Date.now(),child=spawn(bin,plo?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir});
   job={child,started,iterations:0,exploitability:null};let log='',tail='';
   const timer=setTimeout(()=>child.kill('SIGKILL'),args.timeout*1000);
   child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)job.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)job.exploitability=+m[1];}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
-  child.on('error',error=>{clearTimeout(timer);reject(Error('Could not start TexasSolver at '+args.solver+': '+error.message));});
+  child.on('error',error=>{clearTimeout(timer);reject(Error('Could not start '+name+' at '+bin+': '+error.message+(plo?'. Run tools/local-solver/install-mac.sh first.':'')));});
   child.on('close',code=>{
    clearTimeout(timer);const seconds=(Date.now()-started)/1000,{iterations,exploitability}=job;job=null;
    try{
-    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||[])[1];throw Error(code===null||code===137?'The solve was stopped (time limit or out of memory).':'TexasSolver failed'+(what?': '+what:' (exit '+code+')')+'.');}
+    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
     resolve({tree:JSON.parse(fs.readFileSync(out,'utf8')),iterations,exploitability,seconds,threads:args.threads});
    }catch(error){reject(error);}finally{fs.rmSync(dir,{recursive:true,force:true});}
   });
@@ -45,7 +47,7 @@ function solve(spec){
 const server=http.createServer((req,res)=>{
  if(req.headers.origin&&!originOK(req.headers.origin))return send(req,res,403,{error:'This page is not allowed to use the local solver. Add its origin to RANGE_LAB_ORIGINS.'});
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
- if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),threads:args.threads,busy:!!job,version:1});
+ if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,busy:!!job,version:1});
  if(req.method==='GET'&&req.url==='/status')return send(req,res,200,job?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
  if(req.method==='POST'&&req.url==='/cancel'){if(job)job.child.kill('SIGKILL');return send(req,res,200,{ok:true});}
  if(req.method==='POST'&&req.url==='/solve'){
@@ -62,5 +64,6 @@ const server=http.createServer((req,res)=>{
 server.requestTimeout=0;server.headersTimeout=60000;
 server.listen(args.port,'127.0.0.1',()=>{
  console.log('Range Lab local solver listening on http://127.0.0.1:'+args.port+' with '+args.threads+' threads.');
- if(!fs.existsSync(args.solver))console.log('Warning: TexasSolver was not found at '+args.solver+'. Run tools/local-solver/install-mac.sh first.');
+ if(!fs.existsSync(args.solver))console.log('Warning: TexasSolver (NLH) was not found at '+args.solver+'. Run tools/local-solver/install-mac.sh first.');
+ if(!fs.existsSync(args['plo-solver']))console.log('Warning: the PLO solver was not found at '+args['plo-solver']+'. Run tools/local-solver/install-mac.sh first.');
 });
