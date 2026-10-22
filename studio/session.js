@@ -20,15 +20,15 @@ function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootC
 function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
 function rollbackSessionTransition(saved){state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();renderAll();}
 function renderSessionStatus(){
- const h=state.hand;if(!h)return;
+ const h=state.hand;if(!h){$('deal').textContent='Deal hand';$('deal').disabled=playBusy()||tableView.playing;return;}
  $('sessionStatus').textContent='Session '+liveSession.round+' · hand '+Math.max(1,liveSession.handNumber)+' · '+liveSession.message;
- $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').disabled=state.busy||tableView.playing||!h.done;
+ $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').disabled=playBusy()||tableView.playing||!h.done;
  $('restartSession').disabled=state.busy;renderCapacityActions();
 }
 function scheduleSessionNext(){
  cancelSessionNext();const hand=state.hand;
- if(!hand?.done||!$('autoNextHand').checked||!$('play').classList.contains('active')||state.busy||tableView.playing||state.dirty||$('controlAll').checked)return;
- liveSession.timer=setTimeout(()=>{liveSession.timer=null;if(state.hand!==hand||!$('play').classList.contains('active')||!$('autoNextHand').checked||state.busy||state.dirty)return;deal(true);},4500);
+ if(!hand?.done||!$('autoNextHand').checked||!$('play').classList.contains('active')||playBusy()||tableView.playing||state.dirty||$('controlAll').checked)return;
+ liveSession.timer=setTimeout(()=>{liveSession.timer=null;if(state.hand!==hand||!$('play').classList.contains('active')||!$('autoNextHand').checked||playBusy()||state.dirty)return;deal(true);},4500);
 }
 function sessionHandEnded(){
  liveSession.message=state.hand.stacks[state.hero]===0?'You busted. The next hand restarts the original setup.':state.hand.stacks.filter(x=>x>0).length<2?'You won the table. The next hand starts a fresh session.':'Hand complete · stacks saved; positions move on the next deal.';
@@ -37,8 +37,8 @@ function sessionHandEnded(){
 function saveLiveSession(){
  if(!liveSession.ready||!state.hand||!liveSession.rootConfig)return;
  const h=state.hand;
- const value={version:1,rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots,round:liveSession.round,handNumber:liveSession.handNumber,completedHands:state.sessionHands,hero:state.hero,bots:botSettings.seats.slice(),autoNext:$('autoNextHand').checked,blindLevels:$('sessionBlindLevels').checked,levelHands:+$('levelHands').value,levelFactor:+$('levelFactor').value,hand:{config:h.config,holes:h.holes.map(cards=>cards.slice()),board:h.board.slice(),actions:h.actionLog.map(a=>({...a})),deck:h.deck.slice(),plannedBoard:h.plannedBoard.slice(),burns:h.burns.slice(),endingStacks:h.stacks.slice(),grades:state.currentGrades,done:h.done}};
- dbPut('meta',{id:'liveSession',value}).catch(()=>{});
+ const value={version:1,rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots,round:liveSession.round,handNumber:liveSession.handNumber,completedHands:state.sessionHands,hero:state.hero,bots:botSettings.seats.slice(),autoNext:$('autoNextHand').checked,blindLevels:$('sessionBlindLevels').checked,levelHands:+$('levelHands').value,levelFactor:+$('levelFactor').value,hand:{config:h.config,holes:h.holes.map(cards=>cards.slice()),board:h.board.slice(),actions:h.actionLog.map(a=>({...a})),deck:h.deck.slice(),plannedBoard:h.plannedBoard.slice(),burns:h.burns.slice(),endingStacks:h.stacks.slice(),grades:state.currentGrades,done:h.done,saved:state.handSaved}};
+ dbPut('meta',{id:'liveSession',value}).catch(saveFailed);
 }
 function restoreLiveSession(value){
  try{
@@ -49,12 +49,12 @@ function restoreLiveSession(value){
    if(hand.stacks.some((chips,seat)=>chips!==value.hand.endingStacks[seat]))throw Error('Saved session stacks differ from its action history.');
    const deck=value.hand.deck,planned=value.hand.plannedBoard,burns=value.hand.burns,all=[...hand.holes.flat(),...hand.board,...deck,...planned,...burns];if(all.length!==52||all.some(card=>!Number.isInteger(card)||card<0||card>51)||new Set(all).size!==52)throw Error('Saved card order is invalid.');
    cancelSessionNext();stopTableMotion();hand.deck=deck.slice();hand.plannedBoard=planned.slice();hand.burns=burns.slice();
-   state.hand=hand;state.config=c;state.hero=value.hero;state.handSaved=hand.done;state.currentGrades=(value.hand.grades||[]).map(scrubSavedGrade);state.sessionHands=value.completedHands||0;
+   state.hand=hand;state.config=c;state.hero=value.hero;state.handSaved=hand.done&&value.hand.saved!==false;state.currentGrades=(value.hand.grades||[]).map(scrubSavedGrade);state.sessionHands=value.completedHands||0;
    liveSession.rootConfig=root;liveSession.rootHero=value.rootHero;liveSession.rootBots=value.rootBots.slice();liveSession.round=value.round||1;liveSession.handNumber=value.handNumber||1;liveSession.message='Saved session restored · stacks and dealer position preserved.';
    if(Array.isArray(value.bots))botSettings.seats=value.bots.map(p=>PokerBots.personas[p]?p:'balanced');botSettings.renderKey='';$('autoNextHand').checked=value.autoNext!==false;$('sessionBlindLevels').checked=!!value.blindLevels;$('levelHands').value=value.levelHands||10;$('levelFactor').value=value.levelFactor||1.5;
-   writeForm(c,state.abstraction);$('hero').value=state.hero;renderAll();scheduleSessionNext();if(!hand.done)advanceBots();
+   writeForm(c,state.abstraction);$('hero').value=state.hero;renderAll();if(hand.done&&!state.handSaved){liveSession.ready=true;onHandEnd();}scheduleSessionNext();if(!hand.done)advanceBots();
   }
- }catch(error){status('The saved session could not be restored: '+error.message,true);}
+ }catch(error){status('The saved session could not be restored: '+error.message+' A copy was kept on this device.',true);dbPut('meta',{id:'liveSession-broken',value}).catch(()=>{});}
  finally{liveSession.ready=true;saveLiveSession();renderSessionStatus();}
 }
 function restartLiveSession(){

@@ -75,10 +75,12 @@
  // Chip-EV tournament charts ignore payouts and other tables' stacks, so they
  // stand in for any tournament with the same blinds and ante.
  function shape(config,chipEV=false){const f=JSON.parse(G.familyId(config));delete f.stacks;if(chipEV){delete f.payouts;delete f.other;}return JSON.stringify(f);}
+  // A pack's shape never changes; the table's two shapes are computed once per lookup.
+  const packShapes=new WeakMap();function packShape(pack){let s=packShapes.get(pack);if(s===undefined){s=shape(pack.config,pack.chipEV);packShapes.set(pack,s);}return s;}
  function nearest(packs,hand,controlActions=[],tolerance=1.5){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
-  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0};let best=null;
-  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)||shape(pack.config,pack.chipEV)!==shape(table,pack.chipEV)||best&&gap>=best.gap)continue;best={pack,gap,chart};}
+  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth)),ev=pack.chipEV?1:0;if(gap>Math.log(tolerance)||best&&gap>=best.gap)continue;if(tableShape[ev]===undefined)tableShape[ev]=shape(table,!!ev);if(packShape(pack)!==tableShape[ev])continue;best={pack,gap,chart};}
   if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)});
   try{for(const a of hand.actionLog)proxy.act({kind:a.kind,target:a.target});}catch{return null;}
   proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
