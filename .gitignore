@@ -27,6 +27,7 @@
 !/tools/postflop/library.cjs
 !/tools/postflop/flops.cjs
 !/tools/postflop/check.cjs
+!/tools/postflop/run-library.command
 !/studio/
 !/studio/app.js
 !/studio/bots.js
