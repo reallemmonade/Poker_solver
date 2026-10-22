@@ -10,13 +10,21 @@ The Blueprint points the front end to `https://range-lab-live-rooms.onrender.com
 
 The study app runs in each visitor's browser. For friend games, Node runs on Render; neither you nor your friends need to install Node on your devices. Models, hand histories, and practice results are saved in that browser's IndexedDB. They do not sync to Render or to another computer. To move them, use the app's export and import controls.
 
+## Find your way around
+
+The main activities are **Play** (bots or friends), **Practice** (full hands, saved drills and progress), and **Study** (the shared decision table, ranges and hand replay). **Library** holds saved spots, hands, reference sources, models and backups. Opening a saved item launches its appropriate activity.
+
+Use **Edit game** for seats, shared or individual stacks, positions, bet sizes, antes, rake and tournament details. The same bet-size defaults supply the live action buttons and current-spot solves. Existing saved models retain their original training trees. Advanced model training, resource controls and coverage information are in **Settings**. Practice topics collapse after selection; answers remain hidden during a hand, and full histories remain available. Phones use bottom navigation and a focused layout during practice.
+
+Build with `node studio/build.cjs --web` and run `node studio/verify-interface.cjs` to check navigation, the shared editor, hidden answers, saved analysis replay, backup merging and phone layouts. The check requires installed Chrome on Windows.
+
 ## Run and train locally
 
 Install Node.js, then run `node studio/build.cjs --web` from this repository's root directory (`work` in the current workspace). Open `studio/render-site/index.html` in a browser. The same command builds the Render site. It starts without bundled training data; import your study backup or train a model in the browser.
 
 ## Study on a laptop and iPhone with iCloud Drive
 
-Open **iCloud / Files** in the app. Choose **Study file** to transfer solved spots, hands and assessments without the larger model checkpoints, or **Complete backup** to include saved models and the active model snapshot. Prepare the backup, then share it to Files and choose iCloud Drive, or download it and move it there. The app cannot verify where the operating system saves a file.
+Open **Library → Backups & Files** in the app. Choose **Study file** to transfer solved spots, hands and assessments without the larger model checkpoints, or **Complete backup** to include saved models and the active model snapshot. Prepare the backup, then share it to Files and choose iCloud Drive, or download it and move it there. The app cannot verify where the operating system saves a file.
 
 On the second device, open the same site, choose **iCloud / Files → Open backup / analysis from Files**, and select the JSON from iCloud Drive. Imports merge records atomically and retain existing device settings. Model policies are whole snapshots, with the more-trained snapshot retained for a matching model; training updates from two devices are not mathematically combined. Repeated imports do not duplicate decisions.
 

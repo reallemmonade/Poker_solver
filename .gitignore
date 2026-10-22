@@ -33,6 +33,9 @@
 !/studio/game.js
 !/studio/history.js
 !/studio/index.html
+!/studio/interface.js
+!/studio/interface.css
+!/studio/verify-interface.cjs
 !/studio/multiway-exact.js
 !/studio/multiway-ui.js
 !/studio/opponents.js
