@@ -26,7 +26,7 @@ const SPOTS={
 // donk bets: the tree a 100bb flop fits in about 5 GB and solves in minutes.
 const TREE={flop:{bet:[33],raise:[66]},turn:{bet:[66],raise:[]},river:{bet:[75],raise:[]},allinThreshold:.67};
 
-const args={cmd:process.argv[2]||'help',charts:'/mnt/project-files/chart-packs/preflop-library.json.gz',spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',name:'Range Lab postflop library'};
+const args={cmd:process.argv[2]||'help',charts:path.join(__dirname,'charts-100bb.json.gz'),spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',name:'Range Lab postflop library'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}

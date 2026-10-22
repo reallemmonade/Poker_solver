@@ -5,15 +5,18 @@ Precomputes heads-up flop strategies with TexasSolver for common preflop lines. 
 ```
 bash tools/local-solver/install-mac.sh             # builds TexasSolver once
 node tools/postflop/library.cjs list               # known spots
-node tools/postflop/library.cjs solve --charts preflop-library.json.gz --spots btn-bb,co-bb --flops 100 --out postflop-work
+node tools/postflop/library.cjs solve --spots btn-bb,co-bb --flops 100 --out postflop-work
 node tools/postflop/library.cjs bundle --out postflop-work   # writes postflop-work/postflop-library.json(.gz)
 ```
 
-On a Mac, double-click `tools/postflop/run-library.command`. It reads the charts from `~/Desktop/Poker_Solver/preflop-library.json.gz`, writes to `~/Desktop/Poker_Solver/postflop-work`, keeps the Mac awake while it runs, and bundles at the end. Set `CHARTS`, `OUT`, `SPOTS` or `FLOPS` to change these.
+On a Mac, double-click `tools/postflop/run-library.command`. It writes to `~/Desktop/Poker_Solver/postflop-work`, keeps the Mac awake while it runs, and bundles at the end. Set `CHARTS`, `OUT`, `SPOTS` or `FLOPS` to change these.
 
 Each solved flop is written to `<out>/<spot>/<flop>.json` as soon as it finishes. A stopped run resumes where it left off. Options: `--threads` (default: all cores), `--accuracy` (stop at this exploitability, % of pot, default 1), `--iterations` (default 200), `--flops N` or `--flops all` (all 1,755).
 
 ## Spots
+
+The two charts the spots use (NLH cash 6-handed and 2-handed 100bb, copied unchanged from the preflop chart library) ship as `charts-100bb.json.gz`, so the library runs without the 22 MB chart bundle. In the app, import the full chart library too: answers need the matching chart loaded.
+
 
 | Id | Line (6-max unless noted, 100bb cash) |
 | --- | --- |

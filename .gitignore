@@ -28,6 +28,7 @@
 !/tools/postflop/flops.cjs
 !/tools/postflop/check.cjs
 !/tools/postflop/run-library.command
+!/tools/postflop/charts-100bb.json.gz
 !/studio/
 !/studio/app.js
 !/studio/bots.js
