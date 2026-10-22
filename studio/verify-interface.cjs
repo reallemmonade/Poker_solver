@@ -1,8 +1,16 @@
 'use strict';
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn}=require('node:child_process'),{pathToFileURL}=require('node:url');
 const G=require('./game.js'),S=require('./spot-solver.js'),T=require('./trainer.js');
 const studio=__dirname,repo=path.dirname(studio),profile=path.join(repo,'interface-check-'+process.pid),output=path.join(repo,'interface-previews');fs.mkdirSync(output,{recursive:true});
-const browser=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--disable-background-networking','--disable-component-update','--no-first-run','--no-default-browser-check','--remote-debugging-pipe','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe'],windowsHide:true});
+// Chrome or Chromium on any system: CHROME_PATH wins, then the usual install locations and PATH.
+function findChrome(){
+ const env=process.env,local=env.LOCALAPPDATA||'',pw=env.PLAYWRIGHT_BROWSERS_PATH||'';
+ const listed=[env.CHROME_PATH,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',local&&path.join(local,'Google/Chrome/Application/chrome.exe'),'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ...(pw&&fs.existsSync(pw)?fs.readdirSync(pw).filter(d=>/^chromium-\d+$/.test(d)).map(d=>path.join(pw,d,'chrome-linux/chrome')):[]),
+  ...(env.PATH||'').split(path.delimiter).flatMap(d=>['google-chrome','google-chrome-stable','chromium','chromium-browser'].map(n=>path.join(d,n)))];
+ const found=listed.find(f=>f&&fs.existsSync(f));if(!found)throw Error('Chrome was not found. Install Chrome or set CHROME_PATH to its executable.');return found;
+}
+const browser=spawn(findChrome(),['--headless=new','--no-sandbox','--disable-gpu','--disable-background-networking','--disable-component-update','--no-first-run','--no-default-browser-check','--remote-debugging-pipe','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe'],windowsHide:true});
 let seq=0,buffer='',count=0;const pending=new Map(),errors=[];
 browser.stderr.on('data',()=>{});browser.stdio[4].on('data',chunk=>{buffer+=chunk;let end;while((end=buffer.indexOf('\0'))>=0){const raw=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!raw)continue;const m=JSON.parse(raw);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}}else if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text);}});
 function cmd(method,params={},sessionId){const id=++seq;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error(method+' timed out'));},25000);pending.set(id,{resolve,reject,timer});browser.stdio[3].write(JSON.stringify({id,method,params,...sessionId?{sessionId}:{}})+'\0');});}
@@ -12,7 +20,7 @@ async function ev(expression){const r=await c('Runtime.evaluate',{expression,awa
 async function wait(expression){for(let i=0;i<150;i++){if(await ev(expression))return;await new Promise(r=>setTimeout(r,40));}throw Error('Timed out waiting for '+expression+'; '+errors.join('\n'));}
 function pass(text){console.log('PASS '+text);count++;}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
-await c('Page.navigate',{url:'file:///'+path.join(studio,'render-site/index.html').replaceAll('\\','/')});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
+await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');
 assert.deepEqual(await ev('[...document.querySelectorAll(".ui-primary [data-area]")].map(e=>e.textContent)'),['Play','Practice','Study','Library']);
 const duplicateIds=await ev('(()=>{const counts={};document.querySelectorAll("[id]").forEach(e=>counts[e.id]=(counts[e.id]||0)+1);return Object.keys(counts).filter(k=>counts[k]>1)})()');assert.deepEqual(duplicateIds,[]);

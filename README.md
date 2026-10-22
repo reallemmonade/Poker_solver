@@ -16,7 +16,7 @@ The main activities are **Play** (bots or friends), **Practice** (full hands, sa
 
 Use **Edit game** for seats, shared or individual stacks, positions, bet sizes, antes, rake and tournament details. The same bet-size defaults supply the live action buttons and current-spot solves. Existing saved models retain their original training trees. Advanced model training, resource controls and coverage information are in **Settings**. Practice topics collapse after selection; answers remain hidden during a hand, and full histories remain available. Phones use bottom navigation and a focused layout during practice.
 
-Build with `node studio/build.cjs --web` and run `node studio/verify-interface.cjs` to check navigation, the shared editor, hidden answers, saved analysis replay, backup merging and phone layouts. The check requires installed Chrome on Windows.
+Build with `node studio/build.cjs --web` and run `node studio/verify-interface.cjs` to check navigation, the shared editor, hidden answers, saved analysis replay, backup merging and phone layouts. The check runs on Windows, macOS or Linux with Chrome or Chromium installed; set `CHROME_PATH` if it is somewhere unusual.
 
 ## Run and train locally
 
