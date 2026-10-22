@@ -21,7 +21,7 @@ function captureSessionTransition(){return{config:state.config,hero:state.hero,h
 function rollbackSessionTransition(saved){state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();renderAll();}
 function renderSessionStatus(){
  const h=state.hand;if(!h){$('deal').textContent='Deal hand';$('deal').disabled=playBusy()||tableView.playing;return;}
- $('sessionStatus').textContent='Session '+liveSession.round+' · hand '+Math.max(1,liveSession.handNumber)+' · '+liveSession.message;
+ $('sessionStatus').textContent='Session '+liveSession.round+' · hand '+Math.max(1,liveSession.handNumber)+' · '+(h.done&&tableView.playing?'Finishing the hand…':liveSession.message);// the result waits for the end-of-hand animation
  $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').disabled=playBusy()||tableView.playing||!h.done;
  $('restartSession').disabled=state.busy;renderCapacityActions();
 }
