@@ -1,11 +1,12 @@
 'use strict';
 // CFR+ preflop solver over the trimmed tree in tree.cjs.
-// Strategies are per hand class (169). Heads-up terminals use the class-vs-class
-// equity table with card removal; folded players' ranges enter as independent
-// weights (no card removal across more than two players). Flops are scored by an
-// equity-realization model instead of being played out.
+// Strategies are per hand class: the 169 NLH classes, or the PLO4 hand groups from
+// plo-model.json. Heads-up terminals use the class-vs-class equity table with card
+// removal; folded players' ranges enter as independent weights (no card removal
+// across more than two players). Flops are scored by an equity-realization model
+// instead of being played out.
 const fs=require('fs'),path=require('path'),Tree=require('./tree.cjs');
-const K=169,table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
+const table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
 const classes=table.classes,ranks='AKQJT98765432';
 const combos=Float64Array.from(classes,c=>c.length===2?6:c[2]==='s'?4:12),weight=combos.map(c=>c/1326);
 
@@ -22,11 +23,20 @@ function playability(c,w=PLAY){
  return f;
 }
 
-function matrices(o){
- const play=classes.map(c=>playability(c,{...PLAY,...o.playability})),C=new Float64Array(K*K),allin=new Float64Array(K*K),ip=new Float64Array(K*K),oop=new Float64Array(K*K);
+// A hand model: class labels, combo weights, compatibility (share of opposing combos
+// that are disjoint and in each class), all-in equity and playability.
+let ploModel=null;
+function model(o){
+ if(o.variant!=='PLO4')return{variant:'NLH',K:169,classes,weight,compat:(i,j)=>table.compatibility[i][j]/1225,equity:(i,j)=>table.equity[i][j],play:classes.map(c=>playability(c,{...PLAY,...o.playability}))};
+ ploModel=ploModel||JSON.parse(fs.readFileSync(path.join(__dirname,'plo-model.json'),'utf8'));const m=ploModel,total=m.combos.reduce((a,b)=>a+b,0);
+ return{variant:'PLO4',K:m.labels.length,classes:m.labels,weight:Float64Array.from(m.combos,c=>c/total),compat:(i,j)=>m.compatibility[i][j],equity:(i,j)=>m.equity[i][j],play:m.playability,handGroups:{labels:m.labels,classes:m.classes}};
+}
+
+function matrices(o,m){
+ const K=m.K,C=new Float64Array(K*K),allin=new Float64Array(K*K),ip=new Float64Array(K*K),oop=new Float64Array(K*K),play=m.play;
  const rIP=1+o.realization,rOOP=1-o.realization;
  for(let i=0;i<K;i++)for(let j=0;j<K;j++){
-  const c=table.compatibility[i][j]/1225,e=table.equity[i][j],x=i*K+j;
+  const c=m.compat(i,j),e=m.equity(i,j),x=i*K+j;
   C[x]=c;allin[x]=c*e;
   const a=e*rIP*play[i],b=(1-e)*rOOP*play[j];ip[x]=a+b>0?c*a/(a+b):0;
   const a2=e*rOOP*play[i],b2=(1-e)*rIP*play[j];oop[x]=a2+b2>0?c*a2/(a2+b2):0;
@@ -35,37 +45,40 @@ function matrices(o){
 }
 
 function matvec(M,v,out){
+ const K=out.length;
  for(let i=0;i<K;i++){let s=0;const r=i*K;for(let j=0;j<K;j++)s+=M[r+j]*v[j];out[i]=s;}
  return out;
 }
-function mass(v){let s=0;for(let i=0;i<K;i++)s+=weight[i]*v[i];return s;}
 
 class Solver{
  constructor(options){
-  this.tree=Tree.build(options);this.o=this.tree.options;this.n=this.o.seats;this.M=matrices(this.o);this.t=0;
-  for(const node of this.tree.nodes){const A=node.actions.length;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
-  this.ones=new Float64Array(K).fill(1);
+  this.tree=Tree.build(options);this.o=this.tree.options;this.n=this.o.seats;this.m=model(this.o);this.K=this.m.K;this.M=matrices(this.o,this.m);this.t=0;
+  const K=this.K,w=this.m.weight;this.mass=v=>{let s=0;for(let i=0;i<K;i++)s+=w[i]*v[i];return s;};
+  for(const node of this.tree.nodes){const A=node.actions.length,K=this.K;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
+  this.ones=new Float64Array(this.K).fill(1);
  }
  // Regret matching (current) or the averaged strategy, laid out [action*K+class].
  strategy(node,average){
+  const K=this.K;
   const A=node.actions.length,src=average?node.sum:node.regret,out=new Float64Array(A*K);
   for(let i=0;i<K;i++){let s=0;for(let a=0;a<A;a++){const r=src[a*K+i];if(r>0)s+=r;}
    for(let a=0;a<A;a++){const r=src[a*K+i];out[a*K+i]=s>0?(r>0?r/s:0):1/A;}}
   return out;
  }
  terminal(node,p,reach){
+  const K=this.K;
   const out=new Float64Array(K);
   const [ipSeat,oopSeat]=node.players||[];
   if(node.type==='fold'||p!==ipSeat&&p!==oopSeat){
    // Card removal is applied against the narrowest opposing range only.
    let f=1,narrow=-1,low=Infinity;
-   for(let k=0;k<this.n;k++)if(k!==p&&reach[k]!==this.ones){const m=mass(reach[k]);f*=m;if(m<low){low=m;narrow=k;}}
+   for(let k=0;k<this.n;k++)if(k!==p&&reach[k]!==this.ones){const m=this.mass(reach[k]);f*=m;if(m<low){low=m;narrow=k;}}
    const payoff=(node.type==='fold'&&node.winner===p?node.pot:0)-node.inv[p];
    if(narrow<0||low===0){out.fill(payoff*f);return out;}
    matvec(this.M.C,reach[narrow],out);for(let i=0;i<K;i++)out[i]*=payoff*f/low;return out;
   }
   const q=p===ipSeat?oopSeat:ipSeat;let f=1;
-  for(let k=0;k<this.n;k++)if(k!==p&&k!==q&&reach[k]!==this.ones)f*=mass(reach[k]);
+  for(let k=0;k<this.n;k++)if(k!==p&&k!==q&&reach[k]!==this.ones)f*=this.mass(reach[k]);
   const share=node.type==='allin'?this.M.allin:p===ipSeat?this.M.ip:this.M.oop;
   const won=matvec(share,reach[q],new Float64Array(K)),seen=matvec(this.M.C,reach[q],new Float64Array(K));
   for(let i=0;i<K;i++)out[i]=f*(node.pot*won[i]-node.inv[p]*seen[i]);
@@ -73,6 +86,7 @@ class Solver{
  }
  // mode: 'cfr' updates p's regrets, 'value' evaluates the averaged strategy, 'best' best-responds for p.
  walk(node,p,reach,mode){
+  const K=this.K;
   if(node.type!=='decision')return this.terminal(node,p,reach);
   const A=node.actions.length,a=node.actor,sigma=this.strategy(node,mode!=='cfr'),out=new Float64Array(K);
   if(a===p){
@@ -104,22 +118,23 @@ class Solver{
  exploitability(){
   const values=[],best=[];
   for(let p=0;p<this.n;p++){
-   values.push(mass(this.walk(this.tree.root,p,Array(this.n).fill(this.ones),'value')));
-   best.push(mass(this.walk(this.tree.root,p,Array(this.n).fill(this.ones),'best')));
+   values.push(this.mass(this.walk(this.tree.root,p,Array(this.n).fill(this.ones),'value')));
+   best.push(this.mass(this.walk(this.tree.root,p,Array(this.n).fill(this.ones),'best')));
   }
   const gains=best.map((b,p)=>b-values[p]);
   return{nashConv:gains.reduce((x,y)=>x+y,0),gains,values,zeroSum:values.reduce((x,y)=>x+y,0)};
  }
  // Averaged strategy rows for a node, keyed by class.
  rows(node){
+  const K=this.K;
   const s=this.strategy(node,true),A=node.actions.length,out={};
-  classes.forEach((c,i)=>{const row=[];for(let a=0;a<A;a++)row.push(s[a*K+i]);const t=row.reduce((x,y)=>x+y,0);out[c]=row.map(x=>x/t);});
+  this.m.classes.forEach((c,i)=>{const row=[];for(let a=0;a<A;a++)row.push(s[a*K+i]);const t=row.reduce((x,y)=>x+y,0);out[c]=row.map(x=>x/t);});
   return out;
  }
  // Share of all combos taking each action, given the player reaches this node with every hand.
  frequency(node,kind){
   const rows=this.rows(node),idx=node.actions.map((a,i)=>a.kind===kind?i:-1).filter(i=>i>=0);
-  return classes.reduce((s,c,i)=>s+weight[i]*idx.reduce((x,k)=>x+rows[c][k],0),0);
+  return this.m.classes.reduce((s,c,i)=>s+this.m.weight[i]*idx.reduce((x,k)=>x+rows[c][k],0),0);
  }
 }
 
