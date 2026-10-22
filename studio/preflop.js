@@ -107,9 +107,10 @@
   const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
   for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth)),ev=pack.chipEV?1:0;if(gap>Math.log(tolerance)+1e-9||best&&gap>=best.gap)continue;if(tableShape[ev]===undefined)tableShape[ev]=shape(table,!!ev);if(packShape(pack)!==tableShape[ev])continue;best={pack,gap,chart};}
   if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
-  // A raise to this hand's all-in (or pot-limit maximum) stands for the chart's largest raise,
-  // as does any raise the chart's stacks cannot cover; other sizes replay unchanged.
-  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal());if(a.target>=topRaise(real.legal())||a.target>=top)target=top;}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
+  // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
+  // cannot cover stands for the chart's largest raise; other sizes (a short stack's all-in too) replay unchanged.
+  const eff=Math.min(hand.initial[hero],Math.max(...others));
+  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal();if(a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff))target=top;}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
   proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
   // The chart's largest raise stands for this hand's; other sizes are kept within this hand's
   // legal range, and actions that become the same are merged.
@@ -123,5 +124,8 @@
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
  }
  function isResult(r){return !!(r?.supported&&r.referenceOnly&&r.referenceVersion===1&&r.referenceSource?.kind==='imported-preflop'&&typeof r.referenceSource.name==='string'&&/^https:\/\//.test(r.referenceSource.url)&&Array.isArray(r.actions)&&r.actions.length>=2&&r.actions.length===r.reference?.length&&r.reference.every(x=>x===null||Number.isFinite(x)&&x>=0&&x<=1)&&Math.abs(sum(r.reference.map(x=>x||0))-1)<1e-6);}
- const api={FORMAT,OFF_PATH,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey,row:rowFor};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
+ // Redeals the actor's cards (from the hand's deck) until the chart answers for them; false when the
+ // node is off the chart's own line or no tried hand reaches it. For quiz questions drawn from pack nodes.
+ function deal(pack,hand,rng=Math.random,tries=400){const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return false;const h=hand.holes[hand.actor],d=hand.deck;for(let t=0;t<tries;t++){if(query(pack,hand,[]))return true;for(let k=0;k<h.length;k++){const j=Math.floor(rng()*d.length);[h[k],d[j]]=[d[j],h[k]];}}return false;}
+ const api={FORMAT,OFF_PATH,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey,row:rowFor,deal};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
