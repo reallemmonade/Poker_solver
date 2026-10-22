@@ -91,7 +91,13 @@ class Solver{
   const A=node.actions.length,a=node.actor,sigma=this.strategy(node,mode!=='cfr'),out=new Float64Array(K);
   if(a===p){
    const values=[];
-   for(let k=0;k<A;k++)values.push(this.walk(node.children[k],p,reach,mode));
+   // The player's own reach does not change its counterfactual values, but it weights
+   // the average strategy at its later decisions, so it is carried down in CFR passes.
+   for(let k=0;k<A;k++){
+    let next=reach;
+    if(mode==='cfr'){next=reach.slice();const r=new Float64Array(K);for(let i=0;i<K;i++)r[i]=reach[p][i]*sigma[k*K+i];next[p]=r;}
+    values.push(this.walk(node.children[k],p,next,mode));
+   }
    if(mode==='best'){out.fill(-Infinity);for(const v of values)for(let i=0;i<K;i++)if(v[i]>out[i])out[i]=v[i];return out;}
    for(let k=0;k<A;k++)for(let i=0;i<K;i++)out[i]+=sigma[k*K+i]*values[k][i];
    if(mode==='cfr'){
