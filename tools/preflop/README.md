@@ -21,7 +21,9 @@ node tools/preflop/library.cjs --out preflop-library --jobs 4   # every chart, b
 - At 25bb or less, all-in is offered at every raise.
 - From 300bb, a sized 5-bet comes before the all-in.
 
-**Depth matching:** the app uses the nearest depth within a factor of 1.5 and labels the substitution.
+**Depth matching:** the app uses the nearest depth within a factor of 1.6 (so 20-50bb and 200-500bb have no gap) and labels the substitution. All-ins and the largest pot-limit raise in the line map to the chart's largest raise, and the chart's sizes are kept within the table's legal range. A chip-EV chart used for a table with real payouts is labelled as such.
+
+**Untrained rows:** packs carry no reach, so the app rebuilds it from the rows. It does not serve a node that the other players reach with zero chart probability, or a hand class that reaches the node under 0.1% of the time; those rows are left at the solver's uniform start or an early iterate.
 
 ## PLO
 
