@@ -43,7 +43,7 @@
     assert(['each','bigblind'].includes(c.anteMode),'Ante mode must be per player or big blind.');c.button=Number(c.button);assert(Number.isInteger(c.button)&&c.button>=0&&c.button<c.seats,'Button seat is outside the table.');
     c.startStreet=Number(c.startStreet);assert(Number.isInteger(c.startStreet)&&c.startStreet>=0&&c.startStreet<=3,'Invalid starting street.');
     c.boardCards=c.board.trim()?Core.cards(c.board):[];assert(c.boardCards.length===[0,3,4,5][c.startStreet],'Enter zero, three, four or five public cards to match the starting street.');
-    if(!c.startStreet)assert(c.pot===0,'Preflop starts with the posted blinds and antes; set the extra pot to zero.');else assert(!c.ante,'Hands that start after preflop take no ante; include antes in the starting pot instead.');
+    if(!c.startStreet)assert(c.pot===0,'Preflop starts with the posted blinds and antes; set the extra pot to zero.');else c.ante=0;
     assert(['cash','icm'].includes(c.mode),'Use cash or tournament utility.');
     c.otherStacks=(c.otherStacks||[]).map(Number);c.payouts=(c.payouts||[]).map(Number);
     if(c.mode==='icm'){assert(c.seats+c.otherStacks.length<=12&&c.otherStacks.every(x=>Number.isFinite(x)&&x>0),'Exact ICM supports up to twelve remaining positive stacks.');assert(c.payouts.length>0&&c.payouts.length<=c.seats+c.otherStacks.length&&c.payouts.every((x,i)=>Number.isFinite(x)&&x>=0&&(!i||x<=c.payouts[i-1]))&&c.payouts.some(x=>x>0),'Enter nonincreasing payouts, first place first.');}
