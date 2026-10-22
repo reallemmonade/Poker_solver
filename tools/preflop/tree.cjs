@@ -9,7 +9,7 @@ function defaults(raw={}){
  const n=raw.seats||9,stack=raw.stack||200;
  return{seats:n,stack,sb:.5,bb:1,ante:0,open:2.5,sbOpen:3,threeBetIP:3,threeBetOOP:4,squeezePerCaller:1,fourBet:2.3,fiveBet:2.2,
   // Short stacks may also shove at every raise; deep stacks get a sized 5-bet.
-  extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,realization:.12,playability:{},...raw,seats:n};
+  extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,foldRemoval:true,realization:.12,playability:{},...raw,seats:n};
 }
 
 // Seats are relative to the button (seat 0). SB is 1 and BB 2, or 0 and 1 heads-up.

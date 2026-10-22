@@ -33,6 +33,7 @@ node tools/preflop/export.cjs --game plo --seats 6 --stack 100 --format cash --o
 
 - **Hand groups:** the 270,725 four-card hands fall into 16,432 suit-isomorphic classes. `plo-model.cjs` groups them by shape (suits, pairing, connectedness, suited ace) and then by equity against a random hand, with no band wider than about 5 points of equity (256 groups). Everything in a group plays the same strategy.
 - **Equity tables:** compatibility between groups is exact (inclusion-exclusion over shared cards). Group-vs-group all-in equity is sampled, 3,000 runouts per pair.
+- **Zero-sum folds:** folded PLO hands are treated as independent of the rest (`foldRemoval: false`), so every player sees the same joint probabilities and the game stays zero-sum. NLH keeps card removal against the narrowest folded range.
 - **Pot limit:** every raise is pot-sized, and all-in comes once a pot raise reaches the stack.
 - **Realization:** the in-position edge is x1.05, against x1.12 in NLH. PLO equities run closer together, and this value reproduces published 6-max 100bb opening ranges (about 18% UTG to 49% BTN).
 - **Playability by shape:**
@@ -53,6 +54,7 @@ The packs carry `handGroups` (group names, plus two base-36 digits per class in 
   - All-in pots pay all-in equity from `equity-table.json`: a Monte Carlo table, at least 20,000 runouts per class pair, with card removal between the two players.
   - Flop pots are not played out. They pay an equity-realization share: equity is scaled x1.12 in position and x0.88 out of position, and by a playability factor (pairs, suited and connected hands up, disconnected offsuit hands down).
   - Folded players' ranges are treated as independent; card removal is applied against the narrowest one.
+- The average strategy is weighted by each player's own reach. It is also accumulated in lines an opponent never takes, so a deviation into such a line meets a real strategy, not noise.
 - `exploitability()` reports NashConv: the total each player could gain by best-responding to the averaged strategy. It is measured within this model.
 
 ## Validation

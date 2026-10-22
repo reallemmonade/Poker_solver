@@ -10,7 +10,7 @@ const P=require('../../studio/preflop.js');
 // PLO raises are always pot-sized. PLO equities run closer, so a smaller realization edge (x1.05 in position) matches published 6-max opening ranges.
 function game({seats,stack,format,game='nlh'}){
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;
- if(game==='plo')return{seats,stack,ante,variant:'PLO4',potLimit:true,realization:.05};
+ if(game==='plo')return{seats,stack,ante,variant:'PLO4',potLimit:true,realization:.05,foldRemoval:false};
  return{seats,stack,ante,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3};
 }
 

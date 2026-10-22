@@ -4,7 +4,7 @@
 // PLO needs plo-model.json (see plo-model.cjs).
 // Each chart is solved in its own process; finished charts are kept, so a rerun
 // only solves what is missing.
-const fs=require('fs'),path=require('path'),os=require('os'),{execFile}=require('child_process');
+const fs=require('fs'),path=require('path'),os=require('os'),{execFile}=require('child_process'),P=require('../../studio/preflop.js');
 
 const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,games:'nlh,plo'};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['out','games'].includes(k)?v:Number(v);}
@@ -30,7 +30,6 @@ for(let i=0;i<args.jobs;i++)next();
 
 // Bundled rows are compact: one row per class (NLH class or PLO group order), either the
 // index of a pure action or per-mille frequencies, the largest absorbing the rounding.
-const P=require('../../studio/preflop.js');
 function compact(pack){
  const labels=pack.handGroups?pack.handGroups.labels:P.classes;
  for(const node of pack.nodes)node.strategy=labels.map(c=>{const r=node.strategy[c].map(x=>Math.round(x*1000)),big=r.indexOf(Math.max(...r));r[big]+=1000-r.reduce((a,b)=>a+b,0);const pure=r.indexOf(1000);return pure>=0?pure:r;});

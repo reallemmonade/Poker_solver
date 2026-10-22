@@ -69,6 +69,14 @@ class Solver{
   const K=this.K;
   const out=new Float64Array(K);
   const [ipSeat,oopSeat]=node.players||[];
+  if(!this.o.foldRemoval&&(node.type==='fold'||p!==ipSeat&&p!==oopSeat)){
+   // Zero-sum variant: folded hands are independent of everything; only the two
+   // players at a showdown remove each other's cards. Every player then sees the
+   // same joint probabilities, which keeps the game zero-sum.
+   let f=1;for(let k=0;k<this.n;k++)if(k!==p&&k!==ipSeat&&k!==oopSeat&&reach[k]!==this.ones)f*=this.mass(reach[k]);
+   if(node.type!=='fold'){const seen=matvec(this.M.C,reach[oopSeat],new Float64Array(K));let both=0;for(let i=0;i<K;i++)both+=this.m.weight[i]*reach[ipSeat][i]*seen[i];f*=both;}
+   out.fill(((node.type==='fold'&&node.winner===p?node.pot:0)-node.inv[p])*f);return out;
+  }
   if(node.type==='fold'||p!==ipSeat&&p!==oopSeat){
    // Card removal is applied against the narrowest opposing range only.
    let f=1,narrow=-1,low=Infinity;
@@ -109,10 +117,19 @@ class Solver{
   for(let k=0;k<A;k++){
    const next=reach.slice(),r=new Float64Array(K);let any=false;
    for(let i=0;i<K;i++){r[i]=reach[a][i]*sigma[k*K+i];if(r[i]>0)any=true;}
-   if(!any)continue;next[a]=r;
+   // An opponent never takes this action, so p's values below are zero; p's average
+   // strategy there still needs its own reach, or a deviation into the line meets noise.
+   if(!any){if(mode==='cfr')this.accumulate(node.children[k],p,reach[p]);continue;}next[a]=r;
    const v=this.walk(node.children[k],p,next,mode);for(let i=0;i<K;i++)out[i]+=v[i];
   }
   return out;
+ }
+ accumulate(node,p,own){
+  if(node.type!=='decision')return;
+  const K=this.K,A=node.actions.length;
+  if(node.actor!==p){for(const c of node.children)this.accumulate(c,p,own);return;}
+  const sigma=this.strategy(node,false);
+  for(let k=0;k<A;k++){const r=new Float64Array(K);for(let i=0;i<K;i++){const x=k*K+i;node.sum[x]+=this.t*own[i]*sigma[x];r[i]=own[i]*sigma[x];}this.accumulate(node.children[k],p,r);}
  }
  iterate(count=1){
   for(let c=0;c<count;c++){
