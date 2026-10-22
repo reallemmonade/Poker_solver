@@ -2,6 +2,8 @@
 const liveSession={rootConfig:null,rootHero:0,rootBots:null,round:1,handNumber:0,timer:null,ready:false,message:''};
 function cancelSessionNext(){clearTimeout(liveSession.timer);liveSession.timer=null;}
 function beginLiveSession(config=state.config,hero=state.hero){cancelSessionNext();liveSession.rootConfig=G.normalize(config);liveSession.rootHero=hero;liveSession.rootBots=botSettings.seats.slice();liveSession.handNumber=0;state.sessionHands=0;liveSession.message='New session · stacks carry over and positions rotate.';}
+// Blind levels shrink every stack by the same factor in whole chips (0.01 bb), keeping the scaled total exact by largest remainder; no stack drops to zero.
+function scaleChips(stacks,factor){const chips=stacks.map(x=>Math.round(x*100)),raw=chips.map(v=>v/factor),out=raw.map(Math.floor);let left=Math.round(chips.reduce((s,v)=>s+v,0)/factor)-out.reduce((s,v)=>s+v,0);for(const i of raw.map((_,i)=>i).sort((a,b)=>(raw[b]-out[b])-(raw[a]-out[a])))if(left-->0)out[i]++;for(let i=0;i<out.length;i++)if(!out[i]){const j=out.indexOf(Math.max(...out));if(out[j]>1)out[j]--;out[i]++;}return out.map(v=>v/100);}
 function nextPersistentSessionConfig(){
  const h=state.hand;if(!h?.done)return state.config;
  const alive=h.stacks.map((amount,seat)=>amount>0?seat:-1).filter(seat=>seat>=0);
@@ -11,7 +13,7 @@ function nextPersistentSessionConfig(){
  let nextButton=(h.button+1)%h.n;while(!alive.includes(nextButton))nextButton=(nextButton+1)%h.n;
  const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(h.stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
  state.hero=alive.indexOf(state.hero);remapBotSeats(alive);
- if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1);config.stacks=config.stacks.map(x=>Math.max(.01,Math.round(x/factor*100)/100));config.otherStacks=config.otherStacks.map(x=>Math.max(.01,Math.round(x/factor*100)/100));}
+ if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1),scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
  liveSession.message=(h.n-alive.length?h.n-alive.length+' opponent(s) eliminated · ':'')+'Dealer moved to the next active seat.';return G.normalize(config);
 }
 function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootConfig)beginLiveSession();liveSession.handNumber++;}

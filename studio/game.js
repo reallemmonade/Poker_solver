@@ -13,12 +13,12 @@
   function rankHigh(cs){
     const counts=new Uint8Array(15),suits=new Uint8Array(4),sm=new Uint32Array(4);let mask=0;
     for(const c of cs){const r=(c>>2)+2,s=c&3;counts[r]++;suits[s]++;mask|=1<<r;sm[s]|=1<<r}
-    let flush=-1;for(let s=0;s<4;s++)if(suits[s]>=5)flush=s;
-    if(flush>=0){const st=straight(sm[flush]);if(st)return encode(8,[st])}
+    let flush=-1,sf=0;for(let s=0;s<4;s++)if(suits[s]>=5){const rs=[];for(let r=14;r>=2;r--)if(sm[s]&(1<<r))rs.push(r);const v=encode(5,rs);if(v>flush)flush=v;sf=Math.max(sf,straight(sm[s]))}
+    if(sf)return encode(8,[sf]);
     const quads=[],trips=[],pairs=[],singles=[];for(let r=14;r>=2;r--){if(counts[r]===4)quads.push(r);if(counts[r]>=3)trips.push(r);if(counts[r]>=2)pairs.push(r);if(counts[r])singles.push(r)}
     if(quads.length)return encode(7,[quads[0],singles.find(r=>r!==quads[0])]);
     if(trips.length&&pairs.some(r=>r!==trips[0]))return encode(6,[trips[0],pairs.find(r=>r!==trips[0])]);
-    if(flush>=0){const rs=[];for(let r=14;r>=2;r--)if(sm[flush]&(1<<r))rs.push(r);return encode(5,rs)}
+    if(flush>=0)return flush;
     const st=straight(mask);if(st)return encode(4,[st]);
     if(trips.length)return encode(3,[trips[0],...singles.filter(r=>r!==trips[0]).slice(0,2)]);
     if(pairs.length>=2)return encode(2,[pairs[0],pairs[1],singles.find(r=>r!==pairs[0]&&r!==pairs[1])]);
@@ -39,11 +39,11 @@
     assert(Number.isInteger(+c.seats)&&c.seats>=2&&c.seats<=9,'Use two to nine seats.');c.seats=+c.seats;
     assert(c.seats*rules.hole+8<=52,'This variant needs fewer seats: private cards, the board and three burn cards exceed the deck.');
     c.stacks=c.stacks.slice(0,c.seats).map(Number);assert(c.stacks.length===c.seats&&c.stacks.every(x=>Number.isFinite(x)&&x>=.01&&x<=10000000),'Every seat needs a positive stack at the supported chip resolution.');
-    for(const k of ['sb','bb','ante','pot','rakePct','rakeCap']){c[k]=Number(c[k]);assert(Number.isFinite(c[k])&&c[k]>=0&&c[k]<=10000000,`Invalid ${k}.`);if(k!=='rakePct')c[k]=bb(units(c[k]));}assert(c.bb>0&&c.sb<=c.bb,'Blinds must be positive and small blind cannot exceed big blind.');assert(c.rakePct<=20,'Rake must be at most 20%.');
+    for(const k of ['sb','bb','ante','pot','rakePct','rakeCap']){c[k]=Number(c[k]);assert(Number.isFinite(c[k])&&c[k]>=0&&c[k]<=10000000,`Invalid ${k}.`);if(['sb','bb','ante'].includes(k))assert(Math.abs(units(c[k])-c[k]*U)<1e-6,`The ${k==='ante'?'ante':k==='sb'?'small blind':'big blind'} must be a whole number of chips (0.01 bb resolution).`);if(k!=='rakePct')c[k]=bb(units(c[k]));}assert(c.bb>0&&c.sb<=c.bb,'Blinds must be positive and small blind cannot exceed big blind.');assert(c.rakePct<=20,'Rake must be at most 20%.');
     assert(['each','bigblind'].includes(c.anteMode),'Ante mode must be per player or big blind.');c.button=Number(c.button);assert(Number.isInteger(c.button)&&c.button>=0&&c.button<c.seats,'Button seat is outside the table.');
     c.startStreet=Number(c.startStreet);assert(Number.isInteger(c.startStreet)&&c.startStreet>=0&&c.startStreet<=3,'Invalid starting street.');
     c.boardCards=c.board.trim()?Core.cards(c.board):[];assert(c.boardCards.length===[0,3,4,5][c.startStreet],'Enter zero, three, four or five public cards to match the starting street.');
-    if(!c.startStreet)assert(c.pot===0,'Preflop starts with the posted blinds and antes; set the extra pot to zero.');
+    if(!c.startStreet)assert(c.pot===0,'Preflop starts with the posted blinds and antes; set the extra pot to zero.');else assert(!c.ante,'Hands that start after preflop take no ante; include antes in the starting pot instead.');
     assert(['cash','icm'].includes(c.mode),'Use cash or tournament utility.');
     c.otherStacks=(c.otherStacks||[]).map(Number);c.payouts=(c.payouts||[]).map(Number);
     if(c.mode==='icm'){assert(c.seats+c.otherStacks.length<=12&&c.otherStacks.every(x=>Number.isFinite(x)&&x>0),'Exact ICM supports up to twelve remaining positive stacks.');assert(c.payouts.length>0&&c.payouts.length<=c.seats+c.otherStacks.length&&c.payouts.every((x,i)=>Number.isFinite(x)&&x>=0&&(!i||x<=c.payouts[i-1]))&&c.payouts.some(x=>x>0),'Enter nonincreasing payouts, first place first.');}
@@ -78,10 +78,10 @@
         if(!this.pending.has(this.actor))this.actor=this.nextPending(this.actor-1);return;
       }
     }
-    legal(){assert(!this.done,'This hand has ended.');const p=this.actor,paid=this.streetPaid[p],call=Math.max(0,this.currentBet-paid),cost=Math.min(call,this.stacks[p]),fullMax=paid+this.stacks[p],potMax=this.rules.limit==='PL'?paid+call+this.pot+call:fullMax,max=Math.min(fullMax,potMax),reopened=this.actedAt[p]===null||this.currentBet-this.actedAt[p]>=this.lastFullRaise||this.actedKind[p]==='check'&&this.actedAt[p]===0&&this.currentBet>0,canRaise=this.actors().some(i=>i!==p)&&reopened&&max>this.currentBet,min=this.currentBet?this.currentBet+this.lastFullRaise:units(this.config.bb);
+    legal(){assert(!this.done,'This hand has ended.');const p=this.actor,paid=this.streetPaid[p],call=Math.max(0,this.currentBet-paid),cost=Math.min(call,this.stacks[p]),fullMax=paid+this.stacks[p],min=this.currentBet?this.currentBet+this.lastFullRaise:units(this.config.bb),potMax=this.rules.limit==='PL'?Math.max(paid+call+this.pot+call,min):fullMax,max=Math.min(fullMax,potMax),reopened=this.actedAt[p]===null||this.currentBet-this.actedAt[p]>=this.lastFullRaise||this.actedKind[p]==='check'&&this.actedAt[p]===0&&this.currentBet>0,canRaise=this.actors().some(i=>i!==p)&&reopened&&max>this.currentBet;
       return{seat:p,toCall:call,callCost:cost,check:call===0,fold:call>0,minRaiseTo:min,maxRaiseTo:max,allInTo:fullMax,canRaise:canRaise&&(max>=min||max===fullMax),reopened,paid};
     }
-    act(action){const legal=this.legal(),p=this.actor,kind=action.kind,oldBet=this.currentBet;let paid=0,target=this.streetPaid[p];assert(['fold','check','call','raise','bet'].includes(kind),'Unknown action.');
+    act(action){const legal=this.legal(),p=this.actor,oldBet=this.currentBet;let kind=action.kind,paid=0,target=this.streetPaid[p];assert(['fold','check','call','raise','bet'].includes(kind),'Unknown action.');if(kind==='bet'||kind==='raise')kind=oldBet?'raise':'bet';
       if(kind==='fold'){assert(legal.fold,'Checking is available; folding to no bet is disabled.');this.folded[p]=true}
       else if(kind==='check'){assert(legal.check,'A bet is outstanding.');}
       else if(kind==='call'){assert(legal.toCall>0,'There is no bet to call.');paid=legal.callCost;this.commit(p,paid);target=this.streetPaid[p]}
@@ -91,7 +91,7 @@
     settle(foldWinner=null){
       if(this.done)return;const ranks=this.holes.map((h,i)=>this.folded[i]||foldWinner!==null?null:evaluate(h,this.board,this.rules)),levels=[...new Set(this.total.filter(x=>x>0))].sort((a,b)=>a-b);let previous=0;
       if(this.deadPot)this.pots.push({amount:this.deadPot,cap:0,eligible:this.living()});
-      for(const cap of levels){const contributors=this.total.map((v,i)=>v>=cap?i:-1).filter(i=>i>=0),eligible=contributors.filter(i=>!this.folded[i]);this.pots.push({amount:(cap-previous)*contributors.length,cap,eligible});previous=cap}
+      for(const cap of levels){const contributors=this.total.map((v,i)=>v>=cap?i:-1).filter(i=>i>=0),eligible=contributors.filter(i=>!this.folded[i]);const last=this.pots[this.pots.length-1],amount=(cap-previous)*contributors.length;if(last&&last.eligible.join()===eligible.join()){last.amount+=amount;last.cap=cap}else this.pots.push({amount,cap,eligible});previous=cap}
       const gross=this.pots.reduce((s,p)=>s+p.amount,0),c=this.config,drop=c.mode==='cash'&&(!c.noFlopNoDrop||this.board.length>=3);this.rake=drop?Math.min(units(c.rakeCap),Math.floor(gross*c.rakePct/100)):0;
       const rawTakes=this.pots.map(p=>this.rake*p.amount/(gross||1)),takes=rawTakes.map(Math.floor),order=rawTakes.map((x,i)=>({i,f:x-Math.floor(x)})).sort((a,b)=>b.f-a.f);let left=this.rake-takes.reduce((a,b)=>a+b,0);for(const x of order)if(left-->0)takes[x.i]++;
       this.pots.forEach((pot,i)=>{const take=takes[i];pot.rake=take;pot.net=pot.amount-take;assert(pot.eligible.length>0,'Side pot has no eligible player.');
@@ -107,9 +107,9 @@
     snapshot(){return{config:this.config,holes:this.holes.map(h=>h.map(Core.cardName).join('')),board:this.board.map(Core.cardName).join(''),actions:this.actionLog.map(a=>({...a})),done:this.done,stacks:this.stacks.map(bb),pots:clone(this.pots),rake:bb(this.rake),returns:this.returns,bountyCash:this.bountyCash,bounties:this.bounties};}
   }
   function modelActions(hand,abstraction={}){
-    const p={betSizes:[.5,1],openSizes:[2.5],raiseSizes:[.75],preflopRaiseMultipliers:[3],maxAggressions:2,jam:true,...abstraction},l=hand.legal(),out=[];
+    const p={betSizes:[.5,1],openSizes:[2.5],raiseSizes:[.75],preflopRaiseMultipliers:[3],maxAggressions:2,jam:true,jamAfterCap:false,...abstraction},l=hand.legal(),out=[],capped=hand.aggressions>=p.maxAggressions;
     if(l.fold)out.push({id:'f',kind:'fold',label:'Fold'});if(l.check)out.push({id:'x',kind:'check',label:'Check'});else out.push({id:'c',kind:'call',label:`Call ${bb(l.callCost)} bb${l.callCost===hand.stacks[hand.actor]?' · all-in':''}`});
-    if(l.canRaise&&hand.aggressions<p.maxAggressions){let targets=[];if(!hand.street){targets=hand.aggressions===0?p.openSizes.map((x,i)=>({id:'o'+i,target:units(x*hand.config.bb)})):p.preflopRaiseMultipliers.map((x,i)=>({id:'r'+i,target:Math.round(hand.currentBet*x)}))}else targets=(l.toCall?p.raiseSizes:p.betSizes).map((x,i)=>({id:(l.toCall?'r':'b')+i,target:Math.round(l.toCall?hand.currentBet+x*(hand.pot+l.toCall):l.paid+x*hand.pot)}));if(p.jam&&l.allInTo<=l.maxRaiseTo)targets.push({id:'j',target:l.allInTo});for(const t of targets){t.target=Math.min(l.maxRaiseTo,Math.max(l.minRaiseTo,t.target));if(t.target<=hand.currentBet||t.target<l.minRaiseTo&&t.target!==l.allInTo||out.some(a=>a.target===t.target))continue;out.push({id:t.id,kind:hand.currentBet?'raise':'bet',target:t.target,label:`${hand.currentBet?'Raise to':'Bet'} ${bb(t.target)} bb${t.target===l.allInTo?' · all-in':''}`});}}
+    if(l.canRaise&&(!capped||p.jam&&p.jamAfterCap)){let targets=[];if(capped);else if(!hand.street){targets=hand.aggressions===0?p.openSizes.map((x,i)=>({id:'o'+i,target:units(x*hand.config.bb)})):p.preflopRaiseMultipliers.map((x,i)=>({id:'r'+i,target:Math.round(hand.currentBet*x)}))}else targets=(l.toCall?p.raiseSizes:p.betSizes).map((x,i)=>({id:(l.toCall?'r':'b')+i,target:Math.round(l.toCall?hand.currentBet+x*(hand.pot+l.toCall):l.paid+x*hand.pot)}));if(p.jam&&l.allInTo<=l.maxRaiseTo)targets.push({id:'j',target:l.allInTo});for(const t of targets){t.target=Math.min(l.maxRaiseTo,Math.max(l.minRaiseTo,t.target));if(t.target<=hand.currentBet||t.target<l.minRaiseTo&&t.target!==l.allInTo||out.some(a=>a.target===t.target))continue;out.push({id:t.id,kind:hand.currentBet?'raise':'bet',target:t.target,label:`${hand.currentBet?'Raise to':'Bet'} ${bb(t.target)} bb${t.target===l.allInTo?' · all-in':''}`});}}
     return out;
   }
   function texture(board){if(!board.length)return'-';const rs=board.map(c=>c>>2),ss=board.map(c=>c&3),maxSuit=Math.max(...[0,1,2,3].map(s=>ss.filter(x=>x===s).length)),distinct=new Set(rs).size,high=Math.floor(Math.max(...rs)/3),low=rs.filter(x=>x<=6||x===12).length;return`${high}${board.length-distinct}${maxSuit}${Math.min(3,low)}`}
