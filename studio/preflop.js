@@ -90,5 +90,5 @@
   result.depthMatch={chart:best.chart,actual:depth};result.referenceKey+='|depth:'+depth;return result;
  }
  function isResult(r){return !!(r?.supported&&r.referenceOnly&&r.referenceVersion===1&&r.referenceSource?.kind==='imported-preflop'&&typeof r.referenceSource.name==='string'&&/^https:\/\//.test(r.referenceSource.url)&&Array.isArray(r.actions)&&r.actions.length>=2&&r.actions.length===r.reference?.length&&r.reference.every(x=>x===null||Number.isFinite(x)&&x>=0&&x<=1)&&Math.abs(sum(r.reference.map(x=>x||0))-1)<1e-6);}
- const api={FORMAT,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
+ const api={FORMAT,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey,row:rowFor};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
