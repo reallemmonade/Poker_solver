@@ -78,7 +78,7 @@
   return node.path=steps;
  }
  function offPath(pack,node){
-  if(node.offPath!==undefined)return node.offPath;const steps=pathOf(pack,node);node.offPath=false;if(!steps)return false;
+  if(node.offPath!==undefined)return node.offPath;if(node.reach!==undefined&&node.reach<OFF_PATH)return node.offPath=true;const steps=pathOf(pack,node);node.offPath=false;if(!steps)return false;
   if(!pack.prior){const L=pack.groups?pack.groups.labels.length:classes.length,prior=pack.prior=new Float64Array(L);if(pack.groups){const pc=ploClasses();for(let i=0;i<pc.counts.length;i++)prior[pack.groups.of[i]]+=pc.counts[i];}else classes.forEach((c,i)=>prior[i]=c.length===2?6:c[2]==='s'?4:12);}
   const prior=pack.prior,L=prior.length,ranges=new Map();
   for(const [anc,k] of steps){if(anc.seat===node.seat)continue;let r=ranges.get(anc.seat);if(!r)ranges.set(anc.seat,r=new Float64Array(L).fill(1));const A=anc.actions.length,t=anc.table;let m=0;for(let c=0;c<L;c++){r[c]*=t[c*A+k]/1000;m+=prior[c]*r[c];}if(!(m>0))return node.offPath=true;}
@@ -108,9 +108,9 @@
   for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth)),ev=pack.chipEV?1:0;if(gap>Math.log(tolerance)+1e-9||best&&gap>=best.gap)continue;if(tableShape[ev]===undefined)tableShape[ev]=shape(table,!!ev);if(packShape(pack)!==tableShape[ev])continue;best={pack,gap,chart};}
   if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
   // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
-  // cannot cover stands for the chart's largest raise; other sizes (a short stack's all-in too) replay unchanged.
+  // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
   const eff=Math.min(hand.initial[hero],Math.max(...others));
-  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal();if(a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff))target=top;}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
+  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal();if(a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff||a.target===rl.allInTo&&real.initial[real.actor]>=eff))target=top;}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
   proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
   // The chart's largest raise stands for this hand's; other sizes are kept within this hand's
   // legal range, and actions that become the same are merged.
