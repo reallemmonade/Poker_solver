@@ -7,7 +7,7 @@ Heads-up postflop spots that are too large for the in-browser exact solver can b
 1. Install the Xcode command-line tools (`xcode-select --install`), [Homebrew](https://brew.sh) and Node (`brew install node`).
 2. Build the solver: `bash tools/local-solver/install-mac.sh`.
    - The script downloads TexasSolver's console branch at a pinned commit, plus `cmake` and `libomp` from Homebrew.
-   - It builds the solver and runs a small test solve.
+   - It builds the solver and runs a small test solve. If Homebrew is missing or is an Intel copy on Apple silicon, it gets cmake from a private Python venv and libomp from `$LIBOMP_PREFIX` or a conda install (`conda install llvm-openmp`).
 3. Start the bridge: double-click `tools/local-solver/start.command`, or run `node tools/local-solver/server.cjs`. Keep the window open while you study.
 
 The bridge listens on `127.0.0.1:8787` only. It accepts requests from `https://range-lab-poker-studio.onrender.com` and from `localhost` pages. To allow other origins, set `RANGE_LAB_ORIGINS` (comma-separated).

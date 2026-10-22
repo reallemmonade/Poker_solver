@@ -8,11 +8,34 @@ here="$(cd "$(dirname "$0")" && pwd)"
 src="$here/TexasSolver"
 commit=6dfb65b4d7ed081da509e8d8c3d82138c4708267
 
+omp=""
 if [ "$(uname)" = Darwin ]; then
   xcode-select -p >/dev/null 2>&1 || { echo "Install the Xcode command-line tools first: xcode-select --install"; exit 1; }
-  command -v brew >/dev/null || { echo "Install Homebrew first: https://brew.sh"; exit 1; }
-  brew list cmake >/dev/null 2>&1 || brew install cmake
-  brew list libomp >/dev/null 2>&1 || brew install libomp
+  # An Intel Homebrew in /usr/local on Apple silicon runs under Rosetta and
+  # installs x86_64 libraries the arm64 build cannot link, so only use a
+  # Homebrew that matches this machine.
+  native_brew=false
+  if command -v brew >/dev/null; then
+    if [ "$(uname -m)" = x86_64 ] || [ "$(brew --prefix)" != /usr/local ]; then native_brew=true; fi
+  fi
+  if ! command -v cmake >/dev/null; then
+    if $native_brew; then brew list cmake >/dev/null 2>&1 || brew install cmake; fi
+  fi
+  if ! command -v cmake >/dev/null; then
+    command -v python3 >/dev/null || { echo "Install Homebrew (https://brew.sh) or Python 3 to get cmake"; exit 1; }
+    # setuptools supplies the distutils module TexasSolver's old pybind11 still imports.
+    [ -x "$here/.cmake-venv/bin/cmake" ] || { python3 -m venv "$here/.cmake-venv" && "$here/.cmake-venv/bin/pip" install --quiet cmake setuptools; }
+    export PATH="$here/.cmake-venv/bin:$PATH"
+  fi
+  # libomp: $LIBOMP_PREFIX, else a native Homebrew, else a conda install.
+  if [ -n "${LIBOMP_PREFIX:-}" ]; then omp="$LIBOMP_PREFIX"
+  elif $native_brew; then brew list libomp >/dev/null 2>&1 || brew install libomp; omp="$(brew --prefix libomp)"
+  else
+    for p in "${CONDA_PREFIX:-}" /opt/anaconda3 /opt/miniconda3 "$HOME/anaconda3" "$HOME/miniconda3" "$HOME/miniforge3" /opt/homebrew/opt/libomp; do
+      if [ -n "$p" ] && [ -f "$p/include/omp.h" ] && lipo -archs "$p/lib/libomp.dylib" 2>/dev/null | grep -qw "$(uname -m)"; then omp="$p"; break; fi
+    done
+  fi
+  [ -n "$omp" ] || { echo "No $(uname -m) libomp found. Install a native Homebrew (https://brew.sh) or run: conda install llvm-openmp"; exit 1; }
 fi
 command -v node >/dev/null || echo "Note: the bridge needs Node.js 18 or later (brew install node)."
 
@@ -30,10 +53,9 @@ git checkout --quiet -- CMakeLists.txt
 sed -i.bak -e 's/ *-fopenmp//g' -e '/CMAKE_OSX_DEPLOYMENT_TARGET/d' CMakeLists.txt
 echo 'target_link_libraries(TexasSolver OpenMP::OpenMP_CXX)' >> CMakeLists.txt
 
-flags=(-DCMAKE_BUILD_TYPE=Release)
+flags=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5)
 if [ "$(uname)" = Darwin ]; then
-  omp="$(brew --prefix libomp)"
-  flags+=(-DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$omp/include" -DOpenMP_C_LIB_NAMES=omp
+  flags+=(-DCMAKE_BUILD_RPATH="$omp/lib" -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$omp/include" -DOpenMP_C_LIB_NAMES=omp
           -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I$omp/include" -DOpenMP_CXX_LIB_NAMES=omp
           -DOpenMP_omp_LIBRARY="$omp/lib/libomp.dylib")
 fi
