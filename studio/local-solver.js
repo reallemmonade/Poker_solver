@@ -33,10 +33,11 @@
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
   const street=current-1,pot=start.pot,base=pot/2,stack=Math.min(start.stacks[ip],start.stacks[oop]);
   assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
-  // Default tree: one bet size per street, one raise size and all-in. Bets that
-  // would commit over two thirds of the stack become all-in. Wider trees ran out
-  // of 15 GB on 100bb spots.
-  const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(let s=street;s<3;s++){const bet=[LOCAL_TREE.bet[s]];sizes[who][STREETS[s]]={bet:bet.slice(),raise:[LOCAL_TREE.raise],donk:who==='oop'&&s>0?bet.slice():[]};}}
+  // Default tree: one bet size per street and all-in, a raise size on the flop
+  // only, no donk bets (sizes used in the hand are added below). Bets that would
+  // commit over two thirds of the stack become all-in. Raises and donks on every
+  // street took 7.5 GB and 3x the time on a 100bb flop.
+  const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(let s=street;s<3;s++){const bet=[LOCAL_TREE.bet[s]];sizes[who][STREETS[s]]={bet:bet.slice(),raise:s===0?[LOCAL_TREE.raise]:[],donk:[]};}}
   let allinThreshold=LOCAL_TREE.allinThreshold;
   // Add the sizes actually used on this street so the real line exists in the tree.
   const path=[],paid={[ip]:0,[oop]:0};let facing=0;

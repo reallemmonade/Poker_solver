@@ -123,15 +123,14 @@ for (const b of [.75, 1]) {
   check(rejected === bad.length && /^path check$/m.test(text) && /^range_ip 8c8d7c6d:0.5$/m.test(text), `spec validation rejects ${rejected}/${bad.length} malformed specs and writes the input`);
 }
 
-// 9. NLH specs and solver input are unchanged from the committed version.
+// 9. NLH specs keep TexasSolver's tree: a raise size on the flop only, no donk bets.
 try {
-  const old = path.join(tmp, 'old-local-solver.js');fs.writeFileSync(old, execFileSync('git', ['show', 'f3d00c6:studio/local-solver.js'], { cwd: here, encoding: 'utf8' }));
-  const keep = globalThis.PokerLocalSolver, O = require(old); globalThis.PokerLocalSolver = keep; const config = { variant: 'NLH', seats: 6, stacks: [100, 100, 100, 100, 100, 100], button: 0 }, h = new G.Hand(config, { rng: G.rng(3) });
+  const config = { variant: 'NLH', seats: 6, stacks: [100, 100, 100, 100, 100, 100], button: 0 }, h = new G.Hand(config, { rng: G.rng(3) });
   for (const a of [{ kind: 'fold' }, { kind: 'fold' }, { kind: 'fold' }, { kind: 'raise', target: 250 }, { kind: 'fold' }, { kind: 'call' }, { kind: 'check' }, { kind: 'bet', target: 180 }]) h.act(a);
   const ranges = { rows: () => G.combinations([...Array(52).keys()].filter(c => !h.board.includes(c)), 2).map((cards, i) => ({ cards, prob: (i % 7 + 1) / 7 })) }, data = { config, actor: h.actor, heroCards: h.holes[h.actor], board: h.board, actions: h.actionLog.map(a => ({ seat: a.seat, street: a.street, kind: a.kind, target: a.target })) };
-  const a = L.spec(data, ranges), b = O.spec(data, ranges);
-  check(JSON.stringify(a) === JSON.stringify(b) && L.input(a, { threads: 3, output: 'o.json' }) === O.input(b, { threads: 3, output: 'o.json' }), 'NLH spec and TexasSolver input are byte-for-byte unchanged');
-} catch (error) { console.log('skip NLH comparison: ' + error.message.split('\n')[0]); }
+  const a = L.spec(data, ranges), text = L.input(a, { threads: 3, output: 'o.json' });
+  check(a.sizes.ip.flop.raise.includes(66) && ['turn', 'river'].every(s => !a.sizes.oop[s].raise.length && !a.sizes.oop[s].donk.length && !a.sizes.ip[s].raise.length) && /^set_bet_sizes oop,turn,allin$/m.test(text) && !/donk/.test(text), 'NLH spec keeps the slim TexasSolver tree (flop raise only, no donks)');
+} catch (error) { console.log('FAIL NLH tree check: ' + error.message.split('\n')[0]); }
 
 // 10. End to end: a 6-max PLO pot that is heads-up on the turn goes from the spot solver through
 // the bridge to plo_solver, and comes back as legal app actions with EVs in bb.

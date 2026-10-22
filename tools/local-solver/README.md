@@ -35,7 +35,7 @@ Options:
 ## NLH: what TexasSolver solves
 
 - **Spot:** the current street onward, for the two players left in the hand. Ranges are the app's ranges, averaged per hand class so TexasSolver can use suit isomorphism.
-- **Bet tree:** one bet size per street (flop 33%, turn 66%, river 75% of pot), one raise (66%) and all-in. Any bet committing more than two thirds of the stack becomes all-in. The sizes actually used on the current street are added so the real line exists in the tree.
+- **Bet tree:** one bet size per street (flop 33%, turn 66%, river 75% of pot) and all-in, plus a 66% raise on the flop. Turn and river raises are all-in only, and there are no donk bets. Any bet committing more than two thirds of the stack becomes all-in. The sizes actually used on the current street are added so the real line exists in the tree.
 - **Stopping rule:** the solve stops at 1% exploitability (in percent of the pot) or 200 iterations.
 - **Not reported:** TexasSolver doesn't report action EVs, so these results show frequencies and are never used for grades.
 
@@ -71,7 +71,7 @@ Options:
 - its EV for each action, given the other player's strategy;
 - its own reach probability.
 
-The EVs are chips won from the pot minus chips put in since the street began, so the two players' EVs sum to the pot. No rake is taken. The app turns them into bb from the current decision, which grades the decision like the in-browser exact solvers. If a combo reaches a node less than 0.5% of the time in its own strategy, its average there rests on early iterations, so its row shows the best-EV action instead.
+The EVs are chips won from the pot minus chips put in since the street began, so the two players' EVs sum to the pot. No rake is taken. The app shows them in bb from the current decision. It does not grade these decisions; grades still come only from the in-browser exact solvers. If a combo reaches a node less than 0.5% of the time in its own strategy, its average there rests on early iterations, so its row shows the best-EV action instead.
 
 ### PLO speed and memory
 
