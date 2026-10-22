@@ -21,7 +21,7 @@ for(const spot of library.spots){
   ok(Lib.canonical(board).key===key,spot.id+' '+key+' canonical key');
   for(const [what,flopLine,openScale]of [['root',[],1],['vs check',['check'],1],['vs bet',['check','bet'],1],['vs bet 40%',['check','bet40'],1],['vs bet 120%',['check','bet120'],1],['3bb open',['check'],1.2]]){
    const h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});
-   for(const kind of def.steps){const node=pack.index.get(P.historyKey(h)),opts=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0)),t=opts[0].target;h.act({kind,target:kind==='raise'?Math.round(t*openScale/50)*50:undefined});}
+   const proxy=new G.Hand(pack.config,{rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(proxy)),t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;proxy.act({kind,target:t});h.act({kind,target:kind==='raise'?Math.round(t*openScale/50)*50:undefined});}
    const pot=h.pot;for(const s of flopLine){if(s==='check')h.act({kind:'check'});else{const f={bet:.33,bet40:.4,bet120:1.2}[s];h.act({kind:'bet',target:Math.round(pot*f)});}}
    // Hero: a random combo off the board that the solved range holds.
    const range=P.postflopRanges(packs,h.config,h.actionLog),hero=h.actor;let cards;
