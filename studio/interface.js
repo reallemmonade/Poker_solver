@@ -86,7 +86,7 @@ function initInterface(){
  $('hero').onchange=()=>{markDirty();refresh();};
  const originalWriteSizing=writeSpotSizing;writeSpotSizing=function(sizing){originalWriteSizing(sizing);$('betSizes').value=$('spotBetSizes').value;$('raiseSizes').value=$('spotRaiseSizes').value;};writeSpotSizing(state.spotSizing);
  const originalReadForm=readForm;readForm=function(){const sizes=parseSpotSizing();$('betSizes').value=sizes.betSizes.map(x=>x*100).join(', ');$('raiseSizes').value=sizes.raiseSizes.map(x=>x*100).join(', ');return originalReadForm();};
- const originalQuery=studyReferenceQuery;studyReferenceQuery=function(hand){const q=originalQuery(hand);if(displayPolicyReady(q))return q;const actions=G.modelActions(hand,{...state.abstraction,...state.spotSizing,jam:true});return{...q,actions,probs:actions.map(()=>0)};};
+ const originalQuery=studyReferenceQuery;studyReferenceQuery=function(hand){const q=originalQuery(hand);if(displayPolicyReady(q))return q;const actions=G.modelActions(hand,{...state.abstraction,...state.spotSizing,jam:true,jamAfterCap:true,maxAggressions:hand.aggressions+state.abstraction.maxAggressions});return{...q,actions,probs:actions.map(()=>0)};};
  // A Study decision owns the shared table with bots paused. Returning to Play
  // restores the user's prior control setting rather than forcing a new hand.
  const legacySwitch=switchTab;
