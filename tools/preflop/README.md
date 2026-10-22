@@ -53,7 +53,7 @@ The packs carry `handGroups` (group names, plus two base-36 digits per class in 
   - at most one player flats an open;
   - after a 3-bet only the previous raiser continues;
   - a flatter continues against a squeeze only if the opener folds;
-  - facing a 4-bet or more, a call that would leave less than 2.5 times the pot behind is dropped (all-in or fold).
+  - facing a 4-bet or more, a call that would leave less than 2.5 times the pot behind is dropped (all-in or fold). At 100bb a called 4-bet leaves about 1.6-2.3 times the pot, so the 100bb cash charts, NLH and PLO, have no 4-bet flats: every sized 4-bet is answered by a fold or a jam (MTT charts keep 6 of 55 at 6-handed). At 150bb half or more of the 4-bet spots lose the flat (33 of 55 at 6-handed, 99 of 204 at 9-handed); at 200bb and deeper they all keep it. If a user flats a 4-bet where it was dropped, Practice has no frequency for that action and gives no grade. The trim is a deliberate trade-off. With the flat allowed (tested by dropping it only facing a 5-bet), 6-max cash 100bb flats about 62% of the range facing a 4-bet, and the jam range shrinks to about AA. KK then folds 36-100% to the 5-bet jam in 14 of 55 lines. Blending all-in equity into called 4-bet pots (stack-to-pot ratios of 1.5-5) did not change this.
 - `solve.cjs` runs CFR+ (alternating updates, linear averaging) over the 169 hand classes.
   - All-in pots pay all-in equity from `equity-table.json`: a Monte Carlo table, at least 20,000 runouts per class pair, with card removal between the two players.
   - Flop pots are not played out. They pay an equity-realization share of the pot, from the odds e/(1-e) raised to the power 1.2 (so a hand that is behind realizes less than its raw equity, and trash out of position far less), scaled x1.12 in position and x0.88 out of position, x1.06 for the last preflop raiser, and by a playability factor (pairs, suited and connected hands up, disconnected offsuit hands down; offsuit connectors below 65 get no bonus).
@@ -61,7 +61,7 @@ The packs carry `handGroups` (group names, plus two base-36 digits per class in 
   - Folded players' ranges are treated as independent; card removal is applied against the narrowest one.
 - The average strategy is weighted by each player's own reach.
 - Lines an opponent (almost) never takes are still solved: CFR passes send a token share (1e-5) of the opponent's continuing range down every action, and regrets are added per unit of opponent reach. Without this, a line dropped early (an in-position flat, a squeeze after it) kept the strategy regret matching held in the first iterations, such as folding aces.
-- Packs give each node's `reach`: how often the averaged strategies arrive there (0-1). The app reports nodes under 0.0001 as `offPath`.
+- Packs give each node's `reach`: how often the averaged strategies arrive there (0-1). `studio/preflop.js` query() returns it as `chartReach`, plus `offPath` for nodes under 0.0001. Nothing in the app shows these yet: the Practice result in `studio/references-ui.js` should label off-path answers or hold them back.
 - `exploitability()` reports NashConv: the total each player could gain by best-responding to the averaged strategy. It is measured within this model.
 
 ## Validation
@@ -76,8 +76,9 @@ The 9-handed charts are only as good as the realization model. Compared with ful
 - no limping;
 - simplified multiway play, so in-position flats stay rarer than in full solves;
 - with the 1bb big-blind ante (MTT charts) the BB still defends almost every hand against late-position opens, and openers rarely fold to a 3-bet;
+- at 150bb, where 4-bet flats remain, KK still folds 59-100% to the 5-bet jam after 4-betting on 9 lines of the 6-max cash chart. `checks()` reports each such line (NLH, 40-200bb) when a pack is built;
 - PLO hand groups are coarse: a group plays one strategy, so a hand such as 9876 single-suited is folded from the CO with the weaker rundowns in its group.
 
-Rebuilding the bundled library after a model change takes several hours on four cores: `node tools/preflop/library.cjs --out preflop-library --jobs 4` (delete the folder's chart files first, since finished charts are kept).
+The bundled `preflop-library.json.gz` in the app's chart packs was built before the current model. Its settings text has no "odds to the power" clause. Until it is rebuilt, Practice grades against the old charts: the heads-up button opens 36.7%, premiums fold to some squeezes, and so on. Rebuilding the bundled library after a model change takes several hours on four cores: `node tools/preflop/library.cjs --out preflop-library --jobs 4` (delete the folder's chart files first, since finished charts are kept).
 
 Label the pack as a model, not a full solve.

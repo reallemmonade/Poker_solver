@@ -88,7 +88,9 @@ function checks(solver){
  // Premiums continue against a single raise (an open or a 3-bet) on every line that is reached.
  const top=label(premium[0]),ti=m.classes.indexOf(top);
  lineReach(solver,(node,reach,line)=>{
-  const fold=node.actions.findIndex(a=>a.kind==='fold'),raises=node.history.filter(e=>e.kind==='raise').length;
+  const fold=node.actions.findIndex(a=>a.kind==='fold'),R=node.history.filter(e=>e.kind==='raise'),raises=R.length;
+  // NLH 40-200bb: KK stacks off against the 5-bet jam after 4-betting.
+  const kk=m.classes.indexOf('KK');if(!plo&&fold>=0&&raises===4&&R[2].seat===node.actor&&stack>=40&&stack<=200&&line>=1e-5&&reach[node.actor][kk]>=.5){const f=solver.rows(node).KK[fold];if(f>.1)problems.push(`seat ${node.actor} folds KK ${(100*f).toFixed(1)}% to the jam after ${node.history.map(e=>e.seat+e.kind[0]+(e.to||'')).join(' ')}`);}
   if(fold<0||line<1e-4||raises<1||raises>2||stack>200||reach[node.actor][ti]<.5)return;
   const f=solver.rows(node)[top][fold];if(f>.01)problems.push(`seat ${node.actor} folds ${premium[0]} ${(100*f).toFixed(1)}% after ${node.history.map(e=>e.seat+e.kind[0]+(e.to||'')).join(' ')}`);
  });
