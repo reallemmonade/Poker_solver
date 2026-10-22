@@ -469,9 +469,11 @@ static double exploitability(double* br) {
 
 // ---------- output
 static string comboName(const Cb& c) { string s; for (int k = 3; k >= 0; k--) s += cardName(c.c[k]); return s; }
-// Strategy rows are the average strategy. A combo that its own strategy almost never
-// brings to a node (reach under 0.5% of its weight) has an average there that rests on
-// early iterations, so its row shows the action with the best EV instead; "reach" says which.
+// Strategy rows are the average strategy, except where it is unsettled for a combo: if
+// its own strategy almost never brings it to the node (reach under 0.5%), the average
+// rests on early iterations; if the mix loses over 1% of the pot against the best action,
+// the node is too rarely reached to have converged. Those rows ("adjusted") show the
+// best-EV action instead.
 static void writeNode(FILE* f, int ni, vector<float> reach[2]) {
   const Node& n = T[ni];
   if (n.type == FOLD) { fprintf(f, "{\"end\":\"fold\"}"); return; }
@@ -481,15 +483,19 @@ static void writeNode(FILE* f, int ni, vector<float> reach[2]) {
   int p = n.actor, A = n.nA, H = N[p]; static const char* K[] = {"fold", "check", "call", "bet", "raise"};
   fprintf(f, "{\"player\":%d,\"actions\":[", p);
   for (int a = 0; a < A; a++) { const Act& x = ACTS[n.kid + a]; fprintf(f, "%s{\"kind\":\"%s\",\"to\":%.6g,\"allin\":%s}", a ? "," : "", K[x.kind], x.to, x.allin ? "true" : "false"); }
-  vector<float> sg((size_t)A * H), out((size_t)A * H); strategy(n, true, sg.data()); out = sg;
+  vector<float> sg((size_t)A * H), out((size_t)A * H); strategy(n, true, sg.data()); out = sg; vector<int> adjusted;
   auto it = REC.find(ni);
   for (int h = 0; h < H; h++) {
     double z = it == REC.end() ? 0 : it->second.norm[h];
-    if (reach[p][h] >= .005 || z <= 1e-12) continue;
-    double best = -1e300; for (int a = 0; a < A; a++) best = max(best, (double)it->second.v[(size_t)a * H + h]);
+    if (z <= 1e-12) continue;
+    double best = -1e300, mix = 0; for (int a = 0; a < A; a++) { best = max(best, (double)it->second.v[(size_t)a * H + h]); mix += sg[a * H + h] * it->second.v[(size_t)a * H + h]; }
+    if (reach[p][h] >= .005 && (best - mix) / z <= .01 * cfg.pot) continue;
+    adjusted.push_back(h);
     int k = 0; for (int a = 0; a < A; a++) k += it->second.v[(size_t)a * H + h] >= best - 1e-6 * z;
     for (int a = 0; a < A; a++) out[a * H + h] = it->second.v[(size_t)a * H + h] >= best - 1e-6 * z ? 1.f / k : 0.f;
   }
+  fprintf(f, "],\"adjusted\":[");
+  for (size_t k = 0; k < adjusted.size(); k++) fprintf(f, "%s%d", k ? "," : "", adjusted[k]);
   fprintf(f, "],\"reach\":[");
   for (int h = 0; h < H; h++) fprintf(f, "%s%.4g", h ? "," : "", round(reach[p][h] * 1e4) / 1e4);
   fprintf(f, "],\"strategy\":[");
