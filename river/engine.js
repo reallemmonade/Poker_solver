@@ -107,13 +107,14 @@
     return { hands, blocked: blockedCount };
   }
   function icm(stacks, payouts) {
-    const n = stacks.length, limit = 1 << n, dp = new Float64Array(limit), sums = new Float64Array(limit), counts = new Uint8Array(limit), out = new Float64Array(n), total = sum(stacks);
+    const n = stacks.length, limit = 1 << n, dp = new Float64Array(limit), sums = new Float64Array(limit), counts = new Uint8Array(limit), live = new Uint8Array(limit), out = new Float64Array(n), total = sum(stacks), liveTotal = stacks.filter(x => x > 0).length;
     dp[0] = 1;
-    for (let mask = 1; mask < limit; mask++) { const bit = mask & -mask, i = 31 - Math.clz32(bit); sums[mask] = sums[mask ^ bit] + stacks[i]; counts[mask] = counts[mask ^ bit] + 1; }
+    for (let mask = 1; mask < limit; mask++) { const bit = mask & -mask, i = 31 - Math.clz32(bit); sums[mask] = sums[mask ^ bit] + stacks[i]; counts[mask] = counts[mask ^ bit] + 1; live[mask] = live[mask ^ bit] + (stacks[i] > 0); }
     for (let mask = 0; mask < limit - 1; mask++) {
       const k = counts[mask]; if (!dp[mask] || k >= payouts.length) continue;
-      const remaining = total - sums[mask];
-      for (let i=0;i<n;i++) if (!(mask & (1<<i))) { const p = remaining > EPS ? stacks[i]/remaining : 1/(n-k), mass = dp[mask]*p; out[i] += mass*(payouts[k]||0); dp[mask|(1<<i)] += mass; }
+      // Only zero stacks left share the remaining places evenly; comparing float sums leaves residue.
+      const remaining = liveTotal > live[mask] ? total - sums[mask] : 0;
+      for (let i=0;i<n;i++) if (!(mask & (1<<i))) { const p = remaining > 0 ? stacks[i]/remaining : 1/(n-k), mass = dp[mask]*p; out[i] += mass*(payouts[k]||0); dp[mask|(1<<i)] += mass; }
     }
     return Array.from(out);
   }

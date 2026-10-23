@@ -51,6 +51,7 @@ A flop decision is answered from the library only when all of these hold:
 - The stack-to-pot ratio is within a factor of 1.5. Chip amounts scale to the hand's pot.
 - Each flop bet or raise is within a factor of 1.5 of a solved size. The answer says when a nearest size stands in.
 - Your hand is in the solved range.
+- Both players' chart ranges still match the ranges the library was solved for. A chart re-solved under the same name gets no library answers until the library is rebuilt from it.
 
 Otherwise the app solves the spot as before: in the browser, or with TexasSolver on your computer, using ranges from the same chart. TexasSolver reports no action EVs, so library answers show frequencies and are not graded.
 

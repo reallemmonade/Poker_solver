@@ -59,6 +59,9 @@
   const spot=libraries.flatMap(l=>l.spots).find(s=>s.chart.name===range.name&&s.chart.key===range.key);if(!spot)return null;
   const c=canonical(hand.board),flop=spot.flops[c.key];if(!flop)return null;
   const live=hand.living(),firstAfterButton=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b)),flopActions=hand.actionLog.filter(a=>a.street===1);
+  // The chart may have been re-solved since the library was built under the same
+  // name; answer only while both ranges still match the solved ones.
+  if(!sameRanges(spot,range,ip,oop))return null;
   // Library chips scale to this hand's pot (another open size or depth), as
   // long as the stack-to-pot ratio stays within a factor of 1.5.
   const potStart=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),stack=Math.min(...[ip,oop].map(i=>hand.stacks[i]+hand.streetPaid[i])),scale=potStart/spot.pot;
@@ -79,6 +82,11 @@
     warning:'Precomputed flop strategy for '+spot.label+' on '+board+' (the same flop up to suits), solved by TexasSolver for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.'}};
  }
 
+ function sameRanges(spot,range,ip,oop){
+  if(!spot.rangeIp||!spot.rangeOop||range.game!=='NLH')return false;
+  for(const [seat,solved]of [[ip,spot.rangeIp],[oop,spot.rangeOop]]){const w=range.seats[seat];if(!w)return false;for(let i=0;i<range.labels.length;i++){const now=w[i]>=.005?w[i]:0;if(Math.abs(now-(solved[range.labels[i]]||0))>.02)return false;}}
+  return true;
+ }
  // Range-weighted action frequencies at one node of a solved flop: each combo
  // counts with its chart weight times the frequency of the acting player's own
  // earlier actions on this line. For flop reports.

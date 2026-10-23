@@ -3,10 +3,10 @@
 // Checks that the app finds library answers for live hands: the preflop line
 // maps to the spot, suit-permuted flops find their canonical flop, hero combos
 // map through the same permutation, and flop bet sizes match or are refused.
-//   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz --charts preflop-library.json.gz
+//   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz
 const fs=require('fs'),zlib=require('zlib');
 const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),Lib=require('../../studio/postflop-library.js'),{SPOTS}=require('./library.cjs'),C=G.Core;
-const args={library:'postflop-work/postflop-library.json.gz',charts:'/mnt/project-files/chart-packs/preflop-library.json.gz'};
+const args={library:'postflop-work/postflop-library.json.gz',charts:require('path').join(__dirname,'charts-100bb.json.gz')};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const library=Lib.validate(read(args.library)),charts=read(args.charts),rng=G.rng(99);let pass=0,fail=0;
@@ -38,6 +38,7 @@ for(const spot of library.spots){
    ok(node.actions.length!==r.actions.length||direct.every((p,i)=>Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+' '+what+': same row as the stored node');
    ok(Math.abs(r.reference[r.best]-direct[best])<1e-9||node.actions.length!==r.actions.length,spot.id+' '+key+' '+what+': best action');
    for(const a of r.actions)ok((()=>{try{h.clone().act(a);return true;}catch{return false;}})(),spot.id+' '+key+' '+what+': legal action '+a.label);
+   if(what==='root'){const changed={...spot,rangeOop:{...spot.rangeOop,AA:(spot.rangeOop.AA||0)>.5?0:1}};ok(!Lib.query([{spots:[changed]}],range,h),spot.id+' '+key+': a re-solved chart with other ranges gets no answer');}
   }
  }
 }
