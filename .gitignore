@@ -12,6 +12,10 @@
 !/tools/local-solver/server.cjs
 !/tools/local-solver/install-mac.sh
 !/tools/local-solver/start.command
+!/tools/local-solver/check-bridge.cjs
+!/tools/plo-solver/
+!/tools/plo-solver/plo_solver.cpp
+!/tools/plo-solver/test.cjs
 !/tools/preflop/README.md
 !/tools/preflop/tree.cjs
 !/tools/preflop/solve.cjs
@@ -22,6 +26,13 @@
 !/tools/preflop/plo-equity.cpp
 !/tools/preflop/plo-model.cjs
 !/tools/preflop/plo-model.json
+!/tools/postflop/
+!/tools/postflop/README.md
+!/tools/postflop/library.cjs
+!/tools/postflop/flops.cjs
+!/tools/postflop/check.cjs
+!/tools/postflop/run-library.command
+!/tools/postflop/charts-100bb.json.gz
 !/studio/
 !/studio/app.js
 !/studio/bots.js
@@ -37,6 +48,7 @@
 !/studio/interface.css
 !/studio/verify-interface.cjs
 !/studio/multiway-exact.js
+!/studio/postflop-library.js
 !/studio/multiway-ui.js
 !/studio/opponents.js
 !/studio/policy.js

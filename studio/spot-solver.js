@@ -176,8 +176,13 @@
    // Production calculations use explicit ranges, a preceding solved strategy,
    // or prominently identified uniform assumptions, never bot personas.
    this.ranges=new Ranges(this.data,rawOptions.experimental||this.options.approximate?model:null,this.options);
-   try{const hand=reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)),live=hand.living(),simpleUtility=!this.data.config.rules.low&&!this.data.config.bounties.some(x=>x>0),uniformFolds=hand.folded.every((folded,seat)=>!folded||this.ranges.distributions[seat].uniform),exact=data.config.seats===2&&data.board.length===5&&simpleUtility&&(this.data.config.rules.hole===2||this.ranges.distributions.every(d=>!d.uniform&&d.count<=200));
+   try{const hand=reconstruct(this.data,this.ranges.draw(G.rng(971),true).holes,G.rng(975)),live=hand.living(),simpleUtility=!this.data.config.rules.low&&!this.data.config.bounties.some(x=>x>0),uniformFolds=hand.folded.every((folded,seat)=>!folded||this.ranges.distributions[seat].uniform),exact=data.config.seats===2&&data.board.length===5&&simpleUtility&&(this.data.config.rules.hole===2||this.ranges.distributions.every(d=>!d.uniform&&d.count<=300));
+    // Two players left in a PLO pot (folded seats' cards ignored) with explicit ranges
+    // go to the PLO solver on this computer when it is turned on.
+    const Local=root.PokerLocalSolver||(typeof require==='function'?require('./local-solver.js'):null),ploLocal=!exact&&this.options.localSolver&&Local&&this.data.config.variant==='PLO4'&&live.length===2&&data.board.length>=3&&simpleUtility&&live.every(seat=>!this.ranges.distributions[seat].uniform);let local=null;
+    if(ploLocal){try{local=new Local.Engine(this.data,this.ranges,this.options,hand);}catch{}}
     if(exact)this.engine=new ExactRiverSolver(this.data,this.ranges,this.options,extra);
+    else if(local)this.engine=local;
     else if(live.length===2&&uniformFolds&&simpleUtility&&data.config.variant==='NLH'&&data.board.length>=3){const postflop=root.PokerExactPostflop||(typeof require==='function'?require('./postflop-exact.js'):null);assert(postflop,'The exact postflop engine is unavailable.');this.engine=new postflop.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,terminalValues:ExactRiverSolver.prototype.terminalValues});}
     else if(rawOptions.experimental)this.engine=new SampledSolver(this.data,this.ranges,this.options,extra);
     else{const multiway=root.PokerExactMultiway||(typeof require==='function'?require('./multiway-exact.js'):null);assert(multiway,'The multiplayer exact engine is unavailable.');this.engine=new multiway.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,utility});}
