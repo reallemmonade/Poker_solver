@@ -9,13 +9,25 @@ function defaults(raw={}){
  const n=raw.seats||9,stack=raw.stack||200;
  return{seats:n,stack,sb:.5,bb:1,ante:0,open:2.5,sbOpen:3,threeBetIP:3,threeBetOOP:4,squeezePerCaller:1,fourBet:2.3,fiveBet:2.2,
   // Short stacks may also shove at every raise; deep stacks get a sized 5-bet.
-  extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,foldRemoval:true,realization:.12,playability:{},...raw,seats:n};
+  extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,foldRemoval:true,playability:{},
+  // Flop realization (solve.cjs matrices): position edge, extra edge for the last raiser, and
+  // sharpness, which makes hands that are behind realize less than their raw equity.
+  realization:.12,initiative:.06,sharpness:1.2,
+  // Flop pots pay all-in equity below allInSPR (stack behind / pot), the realization share above
+  // flopSPR, and a blend in between: with that little behind the money goes in on most flops.
+  allInSPR:.5,flopSPR:1.5,
+  // Facing a 4-bet or more, flatting is dropped (all-in or fold) when the call would leave
+  // less than callSPR times the pot behind.
+  callSPR:2.5,
+  // Share of an opponent's continuing range that CFR passes also send down every action.
+  tremble:1e-5,...raw,seats:n};
 }
 
 // Seats are relative to the button (seat 0). SB is 1 and BB 2, or 0 and 1 heads-up.
 function blinds(n){return n===2?[0,1]:[1,2];}
 function actionOrder(n){const [,bb]=blinds(n);return Array.from({length:n},(_,k)=>(bb+1+k)%n);}
-function postflopRank(n,seat){return(seat-blinds(n)[0]+n)%n;}
+// Postflop the button acts last, heads-up too (where it is also the small blind).
+function postflopRank(n,seat){return(seat-1+n)%n;}
 
 function build(raw){
  const o=defaults(raw),n=o.seats,[sbSeat,bbSeat]=blinds(n),order=actionOrder(n),nodes=[];
@@ -57,7 +69,9 @@ function build(raw){
   if(s.level===0)return actor===bbSeat?[]:[fold,...raises(s,actor)];
   if(s.level===1)return s.callers===0?[fold,call,...raises(s,actor)]:[fold,...raises(s,actor)];
   if(actor!==s.prevRaiser&&!(s.level===2&&actor===s.caller&&s.folded[s.prevRaiser]))return[];
-  return[fold,call,...raises(s,actor)];
+  const up=raises(s,actor),pot=sum(s.bets)+sum(dead)+s.bet-s.bets[actor];
+  if(s.level>=3&&up.length&&Math.min(cap[actor],cap[s.raiser])-s.bet<o.callSPR*pot)return[fold,...up];
+  return[fold,call,...up];
  }
  function step(s){
   while(s.pending.length){
@@ -94,8 +108,10 @@ function build(raw){
   const inv=bets.map((b,i)=>b+dead[i]),pot=sum(inv);
   if(live.length===1)return{type:'fold',winner:live[0],inv,pot};
   if(live.length!==2)throw Error('Trimmed tree reached a '+live.length+'-way pot.');
-  const [a,b]=live,ip=postflopRank(n,a)>postflopRank(n,b)?a:b;
-  return{type:s.allIn?'allin':'flop',players:[ip,ip===a?b:a],inv,pot};
+  const [a,b]=live,ip=postflopRank(n,a)>postflopRank(n,b)?a:b,spr=Math.min(cap[a]-bets[a],cap[b]-bets[b])/pot;
+  // commit: weight of all-in equity in a flop pot's payoff (1 when effectively all-in).
+  const commit=s.allIn?1:Math.min(1,Math.max(0,(o.flopSPR-spr)/(o.flopSPR-o.allInSPR)));
+  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,...commit>0&&commit<1?{commit}:{}};
  }
 }
 function sum(a){return a.reduce((x,y)=>x+y,0);}

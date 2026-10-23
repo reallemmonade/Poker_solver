@@ -27,15 +27,20 @@ function initInterface(){
  for(const id of ['button','hero','heroCards'])moveField(id,positionFields);
  positions.append(setup.querySelector('.seatHead'),$('seatInputs'));const seatHelp=setup.querySelector(':scope > .help');if(seatHelp)positions.append(seatHelp);$('allStacks').closest('.field').after(positions);
  const initial=details('Starting position'),initialFields=create('div','fields');initial.append(initialFields);for(const id of ['startStreet','pot','board'])moveField(id,initialFields);
- originalFinancial.querySelector('summary').textContent='Antes, rake & tournament rules';const financeFields=originalFinancial.querySelector('.fields');for(const id of ['ante','anteMode'])moveField(id,financeFields);
+ originalFinancial.querySelector('summary').textContent='Blinds, antes, rake & tournament rules';const financeFields=originalFinancial.querySelector('.fields');for(const id of ['ante','anteMode'])moveField(id,financeFields);
+ const sbField=create('div','field','<label for="sb">Small blind · bb</label><input class="input" id="sb" type="number" min="0" max="1" step=".01">');$('ante').closest('.field').before(sbField);$('sb').value=state.config?.sb??.5;$('sb').addEventListener('change',markDirty);
  sizing.querySelector('summary').textContent='Bet sizes';const sizeFields=sizing.querySelector('.fields');for(const id of ['openSizes','preRaises'])moveField(id,sizeFields);
  sizing.querySelector('.help').textContent='Defaults for action buttons and current-spot solves. Bets and raises can use different percentages. Legal all-ins remain available. Saved models retain their original training tree.';
  const legacySizes=create('div','hide');legacySizes.setAttribute('aria-hidden','true');for(const id of ['betSizes','raiseSizes'])moveField(id,legacySizes);modelTree.append(legacySizes);
  setup.insertBefore(initial,originalFinancial);setup.append(sizing,originalFinancial);setup.append($('apply').parentElement);$('apply').textContent='Apply game';
+ // Errors and the busy lock are explained inside the dialog, not behind its backdrop.
+ const gameError=create('p','ui-dialog-error');gameError.id='uiGameError';gameError.setAttribute('role','alert');gameError.tabIndex=-1;gameError.hidden=true;$('apply').parentElement.before(gameError);
+ const gameBusy=create('div','notice ui-game-busy','<span>A calculation is running, so the game settings are locked until it finishes.</span> '+button('Cancel calculation','id="uiGameCancel"'));gameBusy.id='uiGameBusy';gameBusy.setAttribute('role','status');gameBusy.hidden=true;gameDialog.querySelector('.ui-dialog-content').prepend(gameBusy);
  const globalStatus=details('Activity details');globalStatus.classList.add('ui-activity');globalStatus.append($('status'));settingsDialog.querySelector('.ui-dialog-content').append(globalStatus);
  const method=details('Coverage & limitations');$('method').classList.remove('view');method.append($('method'));settingsDialog.querySelector('.ui-dialog-content').append(method);
  const tools=details('Advanced solver tools');tools.classList.add('setup','ui-model-tools');tools.append(create('p','help','Reusable models are optional. Current-spot analysis has its own solve and reuses identical saved results.'),modelTree,training,$('newModel'),$('progress').parentElement);settingsDialog.querySelector('.ui-dialog-content').append(tools);
- const links=details('Calculators & exact river lab');links.append(create('p','help','<a href="poker-calculators.html">Equity & ICM calculators</a> · <a href="river-cfr-solver.html">Exact-card river lab</a>'));settingsDialog.querySelector('.ui-dialog-content').append(links);
+ const cardDisplay=details('Card display');cardDisplay.append(create('label','toggle','<input type="checkbox" id="uiFourColor">Four-colour deck (♦ blue, ♣ green)'));settingsDialog.querySelector('.ui-dialog-content').append(cardDisplay);
+ try{$('uiFourColor').checked=localStorage.getItem('range-lab-four-color')==='1'}catch{}document.body.classList.toggle('four-color',$('uiFourColor').checked);$('uiFourColor').onchange=()=>{document.body.classList.toggle('four-color',$('uiFourColor').checked);try{localStorage.setItem('range-lab-four-color',$('uiFourColor').checked?'1':'0')}catch{}};
  const bottomNote=setup.querySelector(':scope > .notice');if(bottomNote)training.append(bottomNote);
  if($('modelMismatch'))setup.prepend($('modelMismatch'));
  // Put one persistent game summary above the table, and the analysis beside it.
@@ -47,7 +52,7 @@ function initInterface(){
  const opponentSettings=play.querySelector('.opponent-settings');sessionOptions.append(opponentSettings,$('botSummary'));
  for(const id of ['controlAll','tableMotion','reveal','autoNextHand']){const label=$(id).closest('label');if(label)sessionOptions.append(label);}
  sessionOptions.append($('restartSession'));if(sessionDetails)sessionOptions.append(sessionDetails);
- tablePane.append($('table'));
+ tablePane.append($('table'));$('table').setAttribute('role','region');$('preflopCollection')?.setAttribute('aria-label','Reference collection');
  const handLine=create('div','ui-hand-line','<div id="uiHandLine" class="small muted"></div>'+button('Full history','data-history'));tablePane.append(handLine,$('playActions'));
  const custom=details('Custom bet / raise size');custom.id='uiCustomBet';custom.append($('customBet'));tablePane.append(custom);
  const sessionLine=create('div','ui-session-line');sessionLine.append($('sessionStatus'),$('deal'));tablePane.append(sessionLine,sessionOptions);
@@ -55,7 +60,7 @@ function initInterface(){
  play.querySelector('.table-legend')?.remove();playTop.remove();
  analysisPane.append(create('div','ui-analysis-title','<h2>This decision</h2>'),create('div','ui-analysis-controls'));
  const controls=analysisPane.querySelector('.ui-analysis-controls');controls.append($('autoAnalyze').closest('label'),$('analyze'),$('spotStop'));$('autoAnalyze').closest('label').lastChild.textContent=' Auto-analyze';
- const grading=details('Decision recording'),gradeLabel=$('gradeEvery').closest('label');gradeLabel.lastChild.textContent=' Record an assessment when I act';grading.append(gradeLabel);settingsDialog.querySelector('.ui-dialog-content').prepend(grading);
+ const grading=details('Decision recording'),gradeLabel=$('gradeEvery').closest('label');gradeLabel.lastChild.textContent=' Record an assessment when I act (runs in the background; play continues)';grading.append(gradeLabel);settingsDialog.querySelector('.ui-dialog-content').prepend(grading);
  const alert=create('div','ui-analysis-alert');alert.id='uiAnalysisAlert';analysisPane.append(alert,frequencies);
  const resultDetails=details('Values, ranges & analysis details');resultDetails.id='uiResultDetails';resultDetails.append($('playFeedback'));analysisPane.append(resultDetails,spotSettings);
  spotSettings.querySelector('summary').textContent='Analysis inputs & accuracy';
@@ -79,14 +84,19 @@ function initInterface(){
  document.querySelector('.foot').innerHTML='Saved on this device · <button type="button" class="ui-text-button" id="uiFilesShortcut">Backups & Files</button> · <button type="button" class="ui-text-button" id="uiHelpShortcut">Help & coverage</button>';
  function buttonNode(label,id){const node=create('button','btn secondary',label);node.id=id;node.type='button';return node;}
  function showDialog(d){ui.lastFocus=document.activeElement;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}}
- $('uiEditGame').onclick=()=>showDialog(gameDialog);$('uiSettingsButton').onclick=()=>showDialog(settingsDialog);$('uiHelpShortcut').onclick=()=>{showDialog(settingsDialog);method.open=true;};$('uiFilesShortcut').onclick=()=>navigate('transfer');
+ $('uiEditGame').onclick=()=>{gameError.hidden=true;showDialog(gameDialog);refresh();};$('uiGameCancel').onclick=()=>{if(state.job==='spotSolve')$('spotStop').onclick();else if(!$('stop').disabled)$('stop').onclick();};$('uiSettingsButton').onclick=()=>showDialog(settingsDialog);$('uiHelpShortcut').onclick=()=>{showDialog(settingsDialog);method.open=true;};$('uiFilesShortcut').onclick=()=>navigate('transfer');
  $('uiShowHistory').onclick=()=>showDialog(historyDialog);handLine.querySelector('[data-history]').onclick=()=>showDialog(historyDialog);
  $('uiTopicsButton').onclick=()=>{practiceTopics.open=!practiceTopics.open;if(practiceTopics.open)practiceTopics.scrollIntoView({block:'nearest',behavior:'smooth'});};$('uiQuizHistoryButton').onclick=()=>{quizHistory.open=!quizHistory.open;};
- const originalApply=$('apply').onclick;$('apply').onclick=()=>{originalApply();if(!state.dirty&&gameDialog.open)gameDialog.close();refresh();};
+ const originalApply=$('apply').onclick;$('apply').onclick=()=>{const ok=originalApply()!==false&&!state.dirty;if(ok&&gameDialog.open)gameDialog.close();else if(!ok)showGameError();refresh();};
+ function showGameError(){if(!gameDialog.open||!$('status').classList.contains('error'))return;gameError.textContent=$('status').textContent;gameError.hidden=false;gameError.focus();}
+ for(const id of ['spotBetSizes','spotRaiseSizes']){const save=$(id).onchange;$(id).onchange=()=>{if(save()===false)showGameError();};}
+ gameDialog.addEventListener('input',()=>{gameError.hidden=true;});
+ // Closing without Apply discards staged edits, so the next deal and auto-next keep the applied game.
+ gameDialog.addEventListener('close',()=>{const hadError=!gameError.hidden;gameError.hidden=true;writeSpotSizing(state.spotSizing);try{heroCardsFor(state.config,state.hero);}catch{$('heroCards').value='';}if(state.dirty&&state.config){writeForm(state.config,state.abstraction);$('hero').value=state.hero;state.dirty=false;renderModel();scheduleSessionNext();status('Unapplied game changes were discarded.');}else if(hadError)status('Unapplied game changes were discarded.');refresh();});
  $('hero').onchange=()=>{markDirty();refresh();};
  const originalWriteSizing=writeSpotSizing;writeSpotSizing=function(sizing){originalWriteSizing(sizing);$('betSizes').value=$('spotBetSizes').value;$('raiseSizes').value=$('spotRaiseSizes').value;};writeSpotSizing(state.spotSizing);
  const originalReadForm=readForm;readForm=function(){const sizes=parseSpotSizing();$('betSizes').value=sizes.betSizes.map(x=>x*100).join(', ');$('raiseSizes').value=sizes.raiseSizes.map(x=>x*100).join(', ');return originalReadForm();};
- const originalQuery=studyReferenceQuery;studyReferenceQuery=function(hand){const q=originalQuery(hand);if(displayPolicyReady(q))return q;const actions=G.modelActions(hand,{...state.abstraction,...state.spotSizing,jam:true});return{...q,actions,probs:actions.map(()=>0)};};
+ const originalQuery=studyReferenceQuery;studyReferenceQuery=function(hand){const q=originalQuery(hand);if(displayPolicyReady(q))return q;const actions=G.modelActions(hand,{...state.abstraction,...state.spotSizing,jam:true,jamAfterCap:true,maxAggressions:hand.aggressions+state.abstraction.maxAggressions});return{...q,actions,probs:actions.map(()=>0)};};
  // A Study decision owns the shared table with bots paused. Returning to Play
  // restores the user's prior control setting rather than forcing a new hand.
  const legacySwitch=switchTab;
@@ -113,13 +123,13 @@ function initInterface(){
  function compactLine(h){if(!h)return'';const names=G.positions(h.n,h.button),groups=[];for(let street=0;street<=h.street;street++){const actions=h.actionLog.filter(a=>a.street===street),parts=[];let folds=0;for(const a of actions){if(a.kind==='fold'){folds++;continue;}if(folds){parts.push(folds+' fold'+(folds>1?'s':''));folds=0;}parts.push(names[a.seat]+' '+(a.kind==='raise'||a.kind==='bet'?a.kind+'s to '+fmt(G.bb(a.target)):a.kind==='call'?'calls '+fmt(G.bb(a.paid)):a.kind+'s'));}if(folds)parts.push(folds+' fold'+(folds>1?'s':''));if(parts.length)groups.push(G.STREET[street]+': '+parts.join(' → '));}return groups.join(' · ')||'Blinds posted. First action pending.';}
  function refresh(){if(!ui.ready)return;const h=tableView.presented||state.hand,c=state.config;if(c){$('uiGameSummary').textContent=c.variant+' · '+(c.mode==='cash'?'Cash':'Tournament')+' · '+c.seats+' seats · '+fmt(c.stacks[state.hero]??c.stacks[0])+' bb';$('uiGameContext').textContent=(state.dirty?'Setup changes not applied · ':'')+(h?G.STREET[h.street]+' · '+(h.done?'Hand complete':G.positions(h.n,h.button)[h.actor]+' to act'):'');}
   document.body.dataset.format=$('mode').value;$('uiNotices').textContent=$('status').classList.contains('error')?$('status').textContent:'';
-  if(h){$('uiHandLine').textContent=compactLine(h);$('uiHistoryStart').textContent='Starting stacks: '+h.initial.map((s,i)=>G.positions(h.n,h.button)[i]+' '+fmt(G.bb(s))+' bb').join(' · ')+'. Blinds '+h.config.sb+'/'+h.config.bb+' bb'+(h.config.ante?', ante '+h.config.ante+' bb ('+h.config.anteMode+')':'')+'.';$('handLog').innerHTML=h.log.map(e=>'<div>'+esc(eventLabel(e))+'</div>').join('');
+  if(h){$('uiHandLine').textContent=compactLine(h);$('uiHistoryStart').textContent='Starting stacks: '+h.initial.map((s,i)=>G.positions(h.n,h.button)[i]+' '+fmt(G.bb(s))+' bb').join(' · ')+'. Blinds '+h.config.sb+'/'+h.config.bb+' bb'+(h.config.ante?', ante '+h.config.ante+' bb ('+h.config.anteMode+')':'')+'.';const names=seatNames(h,state.hero);$('handLog').innerHTML=[...h.log.map(e=>eventLabel(e,names)),...showdownLines(h,names),...handResultLines(h,names)].map(line=>'<div>'+esc(line)+'</div>').join('');
    $('uiCustomBet').hidden=$('customBet').classList.contains('hide');$('uiShowHistory').disabled=false;
-   const same=!h.done&&ui.feedbackKey===PokerSpot.publicKey(observedData(h)),solving=state.job==='spotSolve'&&!['quiz','quizPrepare','review'].includes(state.pending?.kind);$('uiResultDetails').hidden=!ui.feedbackKey&&!solving;$('uiResultDetails').querySelector('summary').textContent=solving?'Solving this position…':same?'Values, ranges & analysis details':'Previous decision details';if(solving||same&&ui.feedbackSupported===false)$('uiResultDetails').open=true;
+   const same=!h.done&&ui.feedbackKey===PokerSpot.publicKey(observedData(h)),assessing=state.job==='spotSolve'&&!!state.pending?.background,solving=!assessing&&state.job==='spotSolve'&&!['quiz','quizPrepare','review'].includes(state.pending?.kind);$('uiResultDetails').hidden=!ui.feedbackKey&&!solving&&!assessing;$('uiResultDetails').querySelector('summary').textContent=assessing?'Assessing your previous action…':solving?'Solving this position…':same?'Values, ranges & analysis details':'Previous decision details';if(solving||same&&ui.feedbackSupported===false)$('uiResultDetails').open=true;
    const result=h.done?null:activeSpotResult(h),broad=result?.solve?.rangeAssumptions?.filter(r=>r.source==='Broad uniform assumption')||[];$('uiAnalysisAlert').textContent=broad.length?'Broad uniform ranges assumed for '+broad.length+' player'+(broad.length>1?'s':'')+'. Edit Analysis inputs to enter study ranges.':'';
    if(!result&&$('currentPolicy').textContent.includes('Ready to solve this position'))$('currentPolicy').querySelector('.notice')?.classList.replace('notice','ui-ready-hint');
   }
-  $('spotStop').hidden=state.job!=='spotSolve';$('uiSavedEmpty').hidden=!!transferUI.drill;
+  $('spotStop').hidden=state.job!=='spotSolve';$('uiSavedEmpty').hidden=!!transferUI.drill;$('uiGameBusy').hidden=!state.busy;
   $('uiTopicSummary').textContent=[$('quizVariant').selectedOptions[0]?.textContent,$('quizFormat').selectedOptions[0]?.textContent,$('quizTopic').selectedOptions[0]?.textContent].filter(Boolean).join(' · ');
   const qh=state.quiz?.hand;document.body.dataset.practiceActive=String(ui.route==='quiz'&&!!qh&&!state.quiz.completedHand);document.body.dataset.practiceSeats=String(qh?.n||0);$('uiQuizLine').textContent=qh?compactLine(qh):'';quizHistory.hidden=!qh;$('uiQuizLine').parentElement.hidden=!qh;
   $('uiQuizHistoryButton').setAttribute('aria-expanded',String(quizHistory.open));$('uiTopicsButton').setAttribute('aria-expanded',String(practiceTopics.open));

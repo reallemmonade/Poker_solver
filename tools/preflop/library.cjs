@@ -1,12 +1,14 @@
 'use strict';
 // Builds the whole NLH and PLO preflop chart library and bundles it into one file.
-//   node tools/preflop/library.cjs --out dir [--jobs 4] [--iterations 2000] [--games nlh,plo]
+//   node tools/preflop/library.cjs --out dir [--jobs 4] [--iterations 2000] [--every 500] [--games nlh,plo]
+// Each chart keeps its averaged strategy from the checkpoint (every --every iterations) with the
+// lowest NashConv, since multiway CFR+ need not settle.
 // PLO needs plo-model.json (see plo-model.cjs).
 // Each chart is solved in its own process; finished charts are kept, so a rerun
 // only solves what is missing.
 const fs=require('fs'),path=require('path'),os=require('os'),{execFile}=require('child_process'),P=require('../../studio/preflop.js');
 
-const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,games:'nlh,plo'};
+const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,every:500,games:'nlh,plo'};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['out','games'].includes(k)?v:Number(v);}
 const SEATS=[2,3,4,5,6,7,8,9],DEPTHS=[10,20,50,100,150,200,500,1000],FORMATS=['cash','mtt'];
 fs.mkdirSync(args.out,{recursive:true});
@@ -20,7 +22,7 @@ let running=0;const report=[];
 function next(){
  if(!queue.length){if(!running)finish();return;}
  const s=queue.shift();running++;const t=Date.now();
- execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,'--iterations',String(args.iterations),'--every',String(args.iterations),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
+ execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,'--iterations',String(args.iterations),'--every',String(Math.min(args.every,args.iterations)),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
   running--;const line=stdout.trim().split('\n').slice(-2).join(' | ');
   console.log(`${path.basename(file(s))} ${((Date.now()-t)/60000).toFixed(1)} min ${error?'FAILED '+error.message:line}`);
   next();

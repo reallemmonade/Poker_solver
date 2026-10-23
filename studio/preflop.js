@@ -1,7 +1,7 @@
 (function(root){
  'use strict';
  const G=root.PokerGame||(typeof require==='function'?(()=>{try{return require('./hand-engine.js')}catch{return require('./game.js')}})():null),FORMAT='range-lab-preflop-reference-v1';
- const sum=a=>a.reduce((s,x)=>s+x,0),need=(v,m)=>{if(!v)throw Error(m)},ranks='AKQJT98765432';
+ const OFF_PATH=1e-4,sum=a=>a.reduce((s,x)=>s+x,0),need=(v,m)=>{if(!v)throw Error(m)},ranks='AKQJT98765432';
  const classes=[];for(let r=0;r<13;r++)for(let c=0;c<13;c++)classes.push(r===c?ranks[r]+ranks[c]:ranks[Math.min(r,c)]+ranks[Math.max(r,c)]+(r<c?'s':'o'));
  const text=(v,label,max=500)=>{need(typeof v==='string'&&v.trim()&&v.length<=max,'Provide '+label+'.');return v.trim();};
  const canonicalCards=cs=>cs.slice().sort((a,b)=>a-b).map(G.Core.cardName).join('');
@@ -18,7 +18,7 @@
  }
  const classIndex=new Map(classes.map((c,i)=>[c,i]));
  function rowFor(pack,node,cards){
-  if(node.table){const i=pack.groups?pack.groups.of[ploClasses().classOf(cards)]:classIndex.get(G.Core.handClass(cards));if(i===undefined)return null;const A=node.actions.length,row=[];for(let a=0;a<A;a++)row.push(node.table[i*A+a]/1000);return row;}
+  if(node.table){const i=pack.groups?pack.groups.of[ploClasses().classOf(cards)]:classIndex.get(G.Core.handClass(cards));if(i===undefined||ownReach(pack,node,i)<1e-3)return null;const A=node.actions.length,row=[];for(let a=0;a<A;a++)row.push(node.table[i*A+a]/1000);return row;}
   if(pack.groups)return node.strategy[pack.groups.labels[pack.groups.of[ploClasses().classOf(cards)]]]||null;
   return node.strategy[canonicalCards(cards)]||node.strategy[G.Core.handClass(cards)]||(node.defaultFold?node.foldRow:null);
  }
@@ -33,7 +33,7 @@
  // labels are reused instead of replaying every history, which keeps start-up fast.
  function validate(input,trusted=false){
   need(input&&input.format===FORMAT,'Use a Range Lab preflop reference JSON file.');// Rows are read, not changed, so the large row arrays are not copied.
-  const pack=JSON.parse(JSON.stringify({...input,nodes:[]}));need(Array.isArray(input.nodes),'Import one to 10,000 decision nodes.');pack.nodes=input.nodes.map(n=>({seat:n?.seat,history:JSON.parse(JSON.stringify(n?.history??null)),actions:JSON.parse(JSON.stringify(n?.actions??null)),strategy:n?.strategy,table:n?.table,defaultFold:n?.defaultFold,key:n?.key}));pack.name=text(pack.name,'a reference name',120);need(pack.source&&typeof pack.source==='object','Provide the solver reference source.');for(const name of ['name','url','solver','settings','createdAt'])pack.source[name]=text(pack.source[name],'source '+name,2000);need(/^https:\/\//i.test(pack.source.url),'Use an HTTPS source URL.');need(Number.isFinite(Date.parse(pack.source.createdAt)),'The source date must be valid.');
+  const pack=JSON.parse(JSON.stringify({...input,nodes:[]}));need(Array.isArray(input.nodes),'Import one to 10,000 decision nodes.');pack.nodes=input.nodes.map(n=>({seat:n?.seat,history:JSON.parse(JSON.stringify(n?.history??null)),actions:JSON.parse(JSON.stringify(n?.actions??null)),strategy:n?.strategy,table:n?.table,defaultFold:n?.defaultFold,key:n?.key,reach:n?.reach}));pack.name=text(pack.name,'a reference name',120);need(pack.source&&typeof pack.source==='object','Provide the solver reference source.');for(const name of ['name','url','solver','settings','createdAt'])pack.source[name]=text(pack.source[name],'source '+name,2000);need(/^https:\/\//i.test(pack.source.url),'Use an HTTPS source URL.');need(Number.isFinite(Date.parse(pack.source.createdAt)),'The source date must be valid.');
   pack.config=G.normalize(pack.config);need(['NLH','PLO4'].includes(pack.config.variant)&&pack.config.startStreet===0,'Preflop references currently support NLH and four-card PLO starting from the blinds.');const groups=pack.config.variant==='PLO4'?readGroups(pack.handGroups):null;pack.groups=groups;const labels=groups?groups.labels:classes;need(pack.config.button===0,'Reference seat numbers must start at the button (seat 0).');need(Array.isArray(pack.nodes)&&pack.nodes.length>0&&pack.nodes.length<=10000,'Import one to 10,000 decision nodes.');const seen=new Set(),base=new G.Hand(pack.config,{rng:G.rng(742)}),states=new Map();
   for(const node of pack.nodes){
    need(Array.isArray(node.history)&&node.history.length<=100&&Array.isArray(node.actions)&&node.actions.length>=2&&node.actions.length<=16,'A node needs its complete preflop history and two to sixteen actions.');
@@ -58,35 +58,74 @@
    delete node.table;need(node.strategy&&typeof node.strategy==='object'&&!Array.isArray(node.strategy),'Each node needs hand frequencies.');const normalized=Object.create(null);for(const [label,values]of Object.entries(node.strategy)){need(groups?groups.labels.includes(label):classes.includes(label)||/^(?:[2-9TJQKA][cdhs]){2}$/.test(label),'Invalid reference hand: '+label);const k=groups||classes.includes(label)?label:canonicalCards(G.Core.cards(label));need(!(k in normalized),'Duplicate reference combination.');need(Array.isArray(values)&&values.length===node.actions.length&&values.every(v=>Number.isFinite(v)&&v>=0&&v<=1)&&Math.abs(sum(values)-1)<1e-6,'Action frequencies must sum to one for '+label+'.');normalized[k]=values.slice();}node.strategy=normalized;node.defaultFold=node.defaultFold===true;need(!node.defaultFold||fold>=0,'defaultFold requires a fold action.');
    if(groups)need(groups.labels.every(l=>l in node.strategy),'A PLO reference node needs a row for every hand group.');else need(G.combinations(Array.from({length:52},(_,i)=>i),2).every(cs=>rowFor(pack,node,cs)),'A reference node must cover every combination or explicitly set defaultFold.');
    }
+   // reach (optional): how often the chart's own strategies arrive at this node, 0-1. Lines the
+   // chart (almost) never plays were solved against a token range, so query() flags them offPath.
+   if(node.reach===undefined||node.reach===null)delete node.reach;else need(Number.isFinite(node.reach)&&node.reach>=0&&node.reach<=1,'A node reach must be a number from 0 to 1.');
    need(!seen.has(node.key),'The reference contains duplicate history nodes.');seen.add(node.key);
   }
   pack.chipEV=pack.chipEV===true&&pack.config.mode==='icm';pack.family=G.familyId(pack.config);pack.index=new Map(pack.nodes.map(n=>[n.key,n]));return pack;
  }
+ // CFR leaves rows untrained (the uniform start or an early iterate) where an opponent never
+ // takes an action on the line, or where the acting hand never gets there itself. Packs carry
+ // no reach, so it is rebuilt from the rows: a node whose line the other players take with zero
+ // chart probability is off path, and a hand class reaching it with under 0.1% of its combos
+ // is unreached. query() serves neither as advice. Nodes a trimmed tree skips (players left to
+ // fold to a 3-bet) are forced folds, which leave ranges and the line unchanged.
+ // Each node is resolved on first use, so loading a library stays fast.
+ function pathOf(pack,node){
+  if(node.path!==undefined)return node.path;node.path=null;if(!node.table)return null;const steps=[];let key='';
+  for(const seg of node.key?node.key.split('/'):[]){const anc=pack.index.get(key),[seat,kind,target]=seg.split(':');if(anc){const k=+seat===anc.seat&&anc.table?anc.actions.findIndex(a=>a.kind===kind&&(kind!=='raise'||a.target===+target)):-1;if(k<0)return null;steps.push([anc,k]);}else if(kind!=='fold')return null;key=key?key+'/'+seg:seg;}
+  return node.path=steps;
+ }
+ function offPath(pack,node){
+  if(node.offPath!==undefined)return node.offPath;if(node.reach!==undefined&&node.reach<OFF_PATH)return node.offPath=true;const steps=pathOf(pack,node);node.offPath=false;if(!steps)return false;
+  if(!pack.prior){const L=pack.groups?pack.groups.labels.length:classes.length,prior=pack.prior=new Float64Array(L);if(pack.groups){const pc=ploClasses();for(let i=0;i<pc.counts.length;i++)prior[pack.groups.of[i]]+=pc.counts[i];}else classes.forEach((c,i)=>prior[i]=c.length===2?6:c[2]==='s'?4:12);}
+  const prior=pack.prior,L=prior.length,ranges=new Map();
+  for(const [anc,k] of steps){if(anc.seat===node.seat)continue;let r=ranges.get(anc.seat);if(!r)ranges.set(anc.seat,r=new Float64Array(L).fill(1));const A=anc.actions.length,t=anc.table;let m=0;for(let c=0;c<L;c++){r[c]*=t[c*A+k]/1000;m+=prior[c]*r[c];}if(!(m>0))return node.offPath=true;}
+  return false;
+ }
+ function ownReach(pack,node,i){const steps=pathOf(pack,node);let r=1;if(steps)for(const [anc,k] of steps)if(anc.seat===node.seat)r*=anc.table[i*anc.actions.length+k]/1000;return r;}
  // forStorage keeps compact rows as typed arrays for IndexedDB; otherwise the output is plain JSON.
- function serialize(pack,forStorage=false){return{format:FORMAT,name:pack.name,...pack.chipEV?{chipEV:true}:{},...pack.groups?{handGroups:{labels:pack.groups.labels,classes:pack.groups.classes}}:{},source:pack.source,config:pack.config,nodes:pack.nodes.map(n=>({seat:n.seat,history:n.history,actions:n.actions.map(a=>({kind:a.kind,...a.kind==='raise'?{to:G.bb(a.target)}:{}})),...forStorage?{key:n.key,actions:n.actions.map(a=>({kind:a.kind,id:a.id,...a.kind==='raise'?{target:a.target}:{},label:a.label}))}:{},...n.table?forStorage?{table:n.table}:{strategy:compactRows(n)}:{strategy:n.strategy,defaultFold:n.defaultFold}}))};}
+ function serialize(pack,forStorage=false){return{format:FORMAT,name:pack.name,...pack.chipEV?{chipEV:true}:{},...pack.groups?{handGroups:{labels:pack.groups.labels,classes:pack.groups.classes}}:{},source:pack.source,config:pack.config,nodes:pack.nodes.map(n=>({seat:n.seat,history:n.history,actions:n.actions.map(a=>({kind:a.kind,...a.kind==='raise'?{to:G.bb(a.target)}:{}})),...forStorage?{key:n.key,actions:n.actions.map(a=>({kind:a.kind,id:a.id,...a.kind==='raise'?{target:a.target}:{},label:a.label}))}:{},...n.table?forStorage?{table:n.table}:{strategy:compactRows(n)}:{strategy:n.strategy,defaultFold:n.defaultFold},...n.reach!==undefined?{reach:n.reach}:{}}))};}
  function compactRows(n){const A=n.actions.length,out=[];for(let i=0;i<n.table.length;i+=A){const r=Array.from(n.table.subarray(i,i+A)),pure=r.indexOf(1000);out.push(pure>=0?pure:r);}return out;}
  function query(pack,hand,controlActions=[]){
-  if(hand.done||hand.street!==0||hand.family!==pack.family)return null;const node=pack.index.get(historyKey(hand));if(!node)return null;const row=rowFor(pack,node,hand.holes[hand.actor]);if(!row)return null;const actions=node.actions.map(a=>({...a}));for(const a of controlActions)if(!actions.some(b=>b.kind===a.kind&&(!['raise','bet'].includes(a.kind)||b.target===a.target)))actions.push({...a});const probs=actions.map((a,i)=>i<row.length?row[i]:null);
-  return{supported:true,referenceOnly:true,referenceVersion:1,actions,reference:probs,probs,trained:true,displayEligible:true,visits:0,updates:0,referenceSource:{kind:'imported-preflop',name:pack.name,...pack.source},referenceKey:pack.family+'|'+node.key,handClass:G.Core.handClass(hand.holes[hand.actor]),units:hand.config.mode==='cash'?'bb':'prize units',game:{seats:hand.n,stacks:hand.config.stacks.slice(),ante:hand.config.ante,rakePct:hand.config.rakePct,rakeCap:hand.config.rakeCap}};
+  if(hand.done||hand.street!==0||hand.family!==pack.family)return null;const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return null;const row=rowFor(pack,node,hand.holes[hand.actor]);if(!row)return null;const actions=node.actions.map(a=>({...a}));for(const a of controlActions)if(!actions.some(b=>b.kind===a.kind&&(!['raise','bet'].includes(a.kind)||b.target===a.target)))actions.push({...a});const probs=actions.map((a,i)=>i<row.length?row[i]:null);
+  return{supported:true,referenceOnly:true,referenceVersion:1,actions,reference:probs,probs,trained:true,displayEligible:true,visits:0,updates:0,referenceSource:{kind:'imported-preflop',name:pack.name,...pack.source,packName:pack.name},referenceKey:pack.family+'|'+node.key,...node.reach!==undefined?{chartReach:node.reach,offPath:node.reach<OFF_PATH}:{},handClass:G.Core.handClass(hand.holes[hand.actor]),units:hand.config.mode==='cash'?'bb':'prize units',game:{seats:hand.n,stacks:hand.config.stacks.slice(),ante:hand.config.ante,rakePct:hand.config.rakePct,rakeCap:hand.config.rakeCap}};
  }
  // Live sessions carry stacks between hands, so exact-depth matches are rare.
- // This falls back to the closest-depth pack of the same game (within 25%),
- // replays the line in that pack's game and labels the depth substitution.
+ // This falls back to the closest-depth pack of the same game (within a factor of 1.6,
+ // which covers the library's 2.5x steps from 20 to 50bb and 200 to 500bb), replays the
+ // line in that pack's game and labels the depth substitution.
  // Chip-EV tournament charts ignore payouts and other tables' stacks, so they
- // stand in for any tournament with the same blinds and ante.
+ // stand in for any tournament with the same blinds and ante; the result says so.
  function shape(config,chipEV=false){const f=JSON.parse(G.familyId(config));delete f.stacks;if(chipEV){delete f.payouts;delete f.other;}return JSON.stringify(f);}
- function nearest(packs,hand,controlActions=[],tolerance=1.5){
+  // A pack's shape never changes; the table's two shapes are computed once per lookup.
+  const packShapes=new WeakMap();function packShape(pack){let s=packShapes.get(pack);if(s===undefined){s=shape(pack.config,pack.chipEV);packShapes.set(pack,s);}return s;}
+ const topRaise=l=>Math.min(l.allInTo,l.maxRaiseTo);
+ function nearest(packs,hand,controlActions=[],tolerance=1.6){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
-  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0};let best=null;
-  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)||shape(pack.config,pack.chipEV)!==shape(table,pack.chipEV)||best&&gap>=best.gap)continue;best={pack,gap,chart};}
-  if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)});
-  try{for(const a of hand.actionLog)proxy.act({kind:a.kind,target:a.target});}catch{return null;}
+  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth)),ev=pack.chipEV?1:0;if(gap>Math.log(tolerance)+1e-9||best&&gap>=best.gap)continue;if(tableShape[ev]===undefined)tableShape[ev]=shape(table,!!ev);if(packShape(pack)!==tableShape[ev])continue;best={pack,gap,chart};}
+  if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
+  // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
+  // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
+  const eff=Math.min(hand.initial[hero],Math.max(...others));
+  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal();if(a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff||a.target===rl.allInTo&&real.initial[real.actor]>=eff))target=top;}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
   proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
-  // The chart's all-in stands for this hand's all-in, whatever its depth.
-  const chartJam=proxy.legal().allInTo,jam=hand.legal().allInTo;for(const a of result.actions)if(a.kind==='raise'&&a.target===chartJam){a.target=jam;a.label='Raise to '+G.bb(jam)+' bb · all-in';}
+  // The chart's largest raise stands for this hand's; other sizes are kept within this hand's
+  // legal range, and actions that become the same are merged.
+  const l=hand.legal(),chartTop=topRaise(proxy.legal()),top=topRaise(l),actions=[],reference=[];
+  result.actions.forEach((a,i)=>{const x={...a};if(x.kind==='raise'){if(!l.canRaise){x.kind=l.toCall?'call':'check';delete x.target;}else x.target=x.target>=chartTop?top:Math.min(top,Math.max(x.target,l.minRaiseTo));}
+   x.label=x.kind==='raise'?'Raise to '+G.bb(x.target)+' bb'+(x.target===l.allInTo?' · all-in':''):x.kind==='call'?'Call '+G.bb(l.callCost)+' bb':x.kind==='check'?'Check':x.label;
+   try{hand.clone().act(x);}catch{return;}const j=actions.findIndex(b=>b.kind===x.kind&&b.target===x.target);if(j>=0)reference[j]+=result.reference[i];else{actions.push(x);reference.push(result.reference[i]);}});
+  const total=sum(reference);if(!(total>0)||actions.length<2)return null;result.actions=actions;result.reference=reference.map(p=>p/total);
   for(const a of controlActions)if(!result.actions.some(b=>b.kind===a.kind&&(!['raise','bet'].includes(a.kind)||b.target===a.target))){result.actions.push({...a});result.reference.push(null);}result.probs=result.reference;
-  result.depthMatch={chart:best.chart,actual:depth};result.referenceKey+='|depth:'+depth;return result;
+  const standIn=best.pack.chipEV&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}
+  result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
  }
  function isResult(r){return !!(r?.supported&&r.referenceOnly&&r.referenceVersion===1&&r.referenceSource?.kind==='imported-preflop'&&typeof r.referenceSource.name==='string'&&/^https:\/\//.test(r.referenceSource.url)&&Array.isArray(r.actions)&&r.actions.length>=2&&r.actions.length===r.reference?.length&&r.reference.every(x=>x===null||Number.isFinite(x)&&x>=0&&x<=1)&&Math.abs(sum(r.reference.map(x=>x||0))-1)<1e-6);}
- const api={FORMAT,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
+ // Redeals the actor's cards (from the hand's deck) until the chart answers for them; false when the
+ // node is off the chart's own line or no tried hand reaches it. For quiz questions drawn from pack nodes.
+ function deal(pack,hand,rng=Math.random,tries=400){const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return false;const h=hand.holes[hand.actor],d=hand.deck;for(let t=0;t<tries;t++){if(query(pack,hand,[]))return true;for(let k=0;k<h.length;k++){const j=Math.floor(rng()*d.length);[h[k],d[j]]=[d[j],h[k]];}}return false;}
+ const api={FORMAT,OFF_PATH,classes,ploClasses,validate,serialize,query,nearest,isResult,historyKey,row:rowFor,deal};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -6,6 +6,10 @@ function transferMessage(message,error=false){$('transferStatus').textContent=me
 function readStudyStores(includeModels=true){return openDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readonly'),out={models:[]};for(const name of studyStores){if(name==='models'&&!includeModels)continue;const request=tx.objectStore(name).getAll();request.onsuccess=()=>{out[name]=request.result;};}tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(tx.error||Error('Could not read study data.'));tx.onerror=()=>{};}));}
 function validRecordId(value){return typeof value==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(value);}
 function rowDate(row){return Date.parse(row.updatedAt||row.createdAt||'')||0;}
+// Preflop charts are one per name and game, as in addPreflopPacks; stored compact tables are typed arrays.
+function packKey(pack){try{return pack.name+'\u0000'+G.familyId(G.normalize(pack.config))}catch{return JSON.stringify(pack)}}
+function plainPack(pack){return{...pack,nodes:pack.nodes.map(n=>ArrayBuffer.isView(n.table)?{...n,table:Array.from(n.table)}:n)}}
+function spotQuality(row){if(!validSpotResult(row.result))return 0;return T.assessmentEvidence(row.result).usable?2:1;}
 function archiveSavedSpot(row){if(row.archived===true&&row.id==='archive-'+hash(row.key))return row;const key=typeof row.key==='string'?row.key:JSON.stringify(['legacy',row.id]);return{id:'archive-'+hash(key),key,archived:true,record:row,updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};}
 function savedSpotContext(row){
  const key=JSON.parse(row.key);if(!Array.isArray(key)||key[0]!=='spot-v3'||typeof key[1]!=='string')throw Error('Unsupported saved spot key.');
@@ -36,16 +40,20 @@ async function refreshTransferCounts(){
 function invalidatePreparedBackup(){transferUI.file=null;$('backupShare').disabled=true;$('backupDownload').disabled=true;$('backupReady').textContent='';}
 async function prepareStudyBackup(){
  if(transferUI.busy||state.busy){transferMessage('Finish or cancel the current calculation before preparing a backup.',true);return;}
- transferUI.busy=true;$('backupPrepare').disabled=true;invalidatePreparedBackup();transferMessage('Preparing your saved analyses and study data…');
+ transferUI.busy=true;$('backupPrepare').disabled=true;$('backupImport').disabled=true;invalidatePreparedBackup();transferMessage('Preparing your saved analyses and study data…');
  try{
-  const includeModels=$('backupContents').value==='complete';if(includeModels)await saveModel(false);const stores=await readStudyStores(includeModels);if(!includeModels)stores.meta=stores.meta.filter(row=>row.id!=='lastModel');let legacy=0;
-  stores.solves=stores.solves.map(row=>{try{return normalizeSavedSpot(row);}catch{legacy++;return archiveSavedSpot(row);}});
-  const exportedAt=new Date().toISOString(),data={format:backupFormat,version:1,contents:includeModels?'complete':'study',exportedAt,stores},text=JSON.stringify(data),name='range-lab-study-'+exportedAt.replace(/[:.]/g,'-')+'.json';
+  const includeModels=$('backupContents').value==='complete';if(includeModels)await saveModel(false);const stores=await readStudyStores(includeModels);stores.meta=stores.meta.filter(row=>row.id!=='quizDraft-v1'&&row.id!=='liveSession-broken'&&(includeModels||row.id!=='lastModel'));let legacy=0;
+  // A legacy row and its archived copy share one ID; keep the newest so the backup stays importable.
+  const solves=new Map();for(const row of stores.solves.map(row=>{try{return normalizeSavedSpot(row);}catch{legacy++;return archiveSavedSpot(row);}})){const old=solves.get(row.id);if(!old||rowDate(row)>rowDate(old))solves.set(row.id,row);}stores.solves=[...solves.values()];
+  // The study file lists reference charts by name (re-import them from their file); a complete backup carries them as plain arrays.
+  const charts=stores.meta.find(row=>row.id==='preflopReferences-v1'),references=(Array.isArray(charts?.value)?charts.value:[]).map(p=>({name:p.name,source:p.source,seats:p.config?.seats,stack:p.config?.stacks?.[0]}));if(charts)stores.meta=stores.meta.map(row=>row!==charts?row:includeModels?{id:row.id,value:row.value.map(plainPack)}:null).filter(Boolean);
+  const exportedAt=new Date().toISOString(),data={format:backupFormat,version:1,contents:includeModels?'complete':'study',exportedAt,...!includeModels&&references.length?{references}:{},stores},text=JSON.stringify(data),name='range-lab-study-'+exportedAt.replace(/[:.]/g,'-')+'.json';
+  if(text.length>250*1048576)throw Error('it would be '+fmt(text.length/1048576,0)+' MB, over the 250 MB import limit. Choose the Study file, which leaves out models and reference charts.');
   transferUI.file=new File([text],name,{type:'application/json'});$('backupDownload').disabled=false;
   let canShare=false;try{canShare=!!navigator.canShare?.({files:[transferUI.file]});}catch{}$('backupShare').disabled=!canShare;
   $('backupReady').textContent=fmt(transferUI.file.size/1048576,2)+' MB prepared at '+new Date(exportedAt).toLocaleTimeString()+'. '+(canShare?'Use Share to Files and choose iCloud Drive.':'Download the backup, then move it into iCloud Drive.');
-  transferMessage('Backup ready: '+stores.solves.length+' saved analyses, '+stores.models.length+' models, '+stores.hands.length+' hands and '+stores.grades.length+' assessments.'+(legacy?' '+legacy+' older analyses are preserved as records but may not support practice.':''));await refreshTransferCounts();
- }catch(error){transferMessage('Backup could not be prepared: '+error.message,true);}finally{transferUI.busy=false;$('backupPrepare').disabled=false;}
+  transferMessage('Backup ready: '+stores.solves.length+' saved analyses, '+stores.models.length+' models, '+stores.hands.length+' hands and '+stores.grades.length+' assessments.'+(legacy?' '+legacy+' older analyses are preserved as records but may not support practice.':'')+(data.references?' '+data.references.length+' preflop reference charts are listed but not included; re-import them from their reference file.':''));await refreshTransferCounts();
+ }catch(error){transferMessage('Backup could not be prepared: '+error.message,true);}finally{transferUI.busy=false;$('backupPrepare').disabled=false;$('backupImport').disabled=state.busy;}
 }
 function shareStudyBackup(){
  const file=transferUI.file;if(!file)return;
@@ -64,9 +72,9 @@ function validateBackupRow(store,row){
   return scrubSavedGrade({...row,config,mode:config.mode,variant:config.variant,units:config.mode==='cash'?'bb':'prize units',createdAt:new Date(row.createdAt).toISOString()});
  }
  if(store==='meta'){
-  const allowed=['lastModel','spotSizing','spotDealBudget','autoAnalyze','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
+  const allowed=['lastModel','spotSizing','spotDealBudget','autoAnalyze','gradeEvery','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
   if(row.id==='lastModel'&&!validRecordId(row.value))throw Error('Invalid model selection.');
-  if(row.id==='autoAnalyze'&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
+  if(['autoAnalyze','gradeEvery'].includes(row.id)&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
   if(row.id==='spotDealBudget'&&![20000,50000,100000,200000,500000].includes(row.value))throw Error('Invalid deal limit.');
   if(row.id==='spotSizing')T.normalizeAbstraction(row.value);
   if(row.id==='preflopReferences-v1'){if(!Array.isArray(row.value)||row.value.length>1000)throw Error('Invalid preflop reference collection.');for(const pack of row.value)PokerPreflop.validate(pack);}
@@ -83,15 +91,15 @@ async function validateStudyImport(data){
  const out={};let total=0;
  for(const name of studyStores){const rows=data.stores[name];if(!Array.isArray(rows)||rows.length>100000)throw Error('Invalid or oversized '+name+' collection.');total+=rows.length;}
  if(total>200000)throw Error('This backup has too many records for a browser import.');
- for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id))throw Error('Duplicate '+name+' record in backup.');ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
+ for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){if(name==='meta'&&data.stores[name][i]?.id==='quizDraft-v1')continue;const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id)){const at=out[name].findIndex(r=>r.id===row.id),old=out[name][at];if(name!=='solves'||!row.archived||!old.archived||old.key!==row.key)throw Error('Duplicate '+name+' record in backup.');if(rowDate(row)>rowDate(old))out[name][at]=row;continue;}ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
  return out;
 }
 function mergeStudyRows(existing,incoming){
  const updates={};let count=0,kept=0;
  for(const name of studyStores){updates[name]=[];const known=new Map(existing[name].map(row=>[row.id,row]));for(const row of incoming[name]){const old=known.get(row.id);let use=!old;
-   if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');use=validSpotResult(row.result)&&(!validSpotResult(old.result)||T.assessmentEvidence(row.result).usable&&!T.assessmentEvidence(old.result).usable||rowDate(row)>rowDate(old));}
+   if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');const q=spotQuality(row),p=spotQuality(old);use=q>0&&(q>p||q===p&&rowDate(row)>rowDate(old));}
    else if(old&&name==='models')use=row.snapshot.episodes>old.snapshot.episodes||row.snapshot.episodes===old.snapshot.episodes&&rowDate(row)>rowDate(old);
-   else if(old&&name==='meta'&&row.id==='preflopReferences-v1'){const values=Array.isArray(old.value)?old.value:[],seen=new Set(values.map(v=>JSON.stringify(v))),add=row.value.filter(v=>!seen.has(JSON.stringify(v)));if(add.length){updates[name].push({id:row.id,value:values.concat(add)});count++;}else kept++;continue;}
+   else if(name==='meta'&&row.id==='preflopReferences-v1'){const values=Array.isArray(old?.value)?old.value:[],charts=new Map(),newer=(v,o)=>!o||(Date.parse(v.source?.createdAt)||0)>(Date.parse(o.source?.createdAt)||0);for(const v of values){const k=packKey(v);if(newer(v,charts.get(k)))charts.set(k,v);}let changed=charts.size!==values.length;for(const v of row.value){const k=packKey(v);if(newer(v,charts.get(k))){charts.set(k,v);changed=true;}}if(changed){updates[name].push({id:row.id,value:[...charts.values()]});count++;}else kept++;continue;}
    else if(old&&name!=='meta'&&name!=='solves'&&name!=='models')use=rowDate(row)>rowDate(old);
    if(use){updates[name].push(row);count++;}else kept++;
   }}return{updates,count,kept};
@@ -99,13 +107,15 @@ function mergeStudyRows(existing,incoming){
 async function importStudyData(data){
  const incoming=await validateStudyImport(data),existing=await readStudyStores(),plan=mergeStudyRows(existing,incoming),db=await openDB();
  await new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readwrite');tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||Error('Import was rolled back.'));tx.onerror=()=>{};try{for(const name of studyStores)for(const row of plan.updates[name])tx.objectStore(name).put(row);}catch(error){tx.abort();reject(error);}});
- spotUI.cache.clear();spotUI.last=null;const stores=await readStudyStores();state.models=stores.models;state.histories=stores.hands.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));state.grades=stores.grades.map(scrubSavedGrade).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));renderLibrary();renderSavedHands();renderProgress();invalidatePreparedBackup();await refreshTransferCounts();
+ spotUI.cache.clear();spotUI.last=null;const stores=await readStudyStores();state.models=stores.models;state.histories=newestRows(stores.hands,validHandRow).rows;state.grades=newestRows(stores.grades.map(r=>{try{return scrubSavedGrade(r)}catch{return null}}),validGradeRow).rows;renderLibrary();renderSavedHands();renderProgress();invalidatePreparedBackup();
+ if(plan.updates.meta.some(row=>row.id==='preflopReferences-v1')){preflopLibrary.packs=[];restorePreflop(stores.meta);spotUI.last=null;renderPlay();renderRanges();}
+ await refreshTransferCounts();plan.references=Array.isArray(data?.references)?data.references.length:0;
  return plan;
 }
 async function importStudyFile(file){
- if(!file||transferUI.busy)return;if(state.busy){transferMessage('Finish or cancel the current calculation before importing.',true);return;}if(file.size>250*1048576){transferMessage('This file exceeds the 250 MB browser import limit. Export a smaller set of data for your phone.',true);return;}
+ if(!file)return;if(transferUI.busy||state.busy){transferMessage(transferUI.busy?'Wait for the current backup step to finish, then open the file again.':'Finish or cancel the current calculation before importing.',true);$('backupFile').value='';return;}if(file.size>250*1048576){transferMessage('This file exceeds the 250 MB browser import limit. Export a smaller set of data for your phone.',true);$('backupFile').value='';return;}
  transferUI.busy=true;lock('dataImport');$('stop').disabled=true;$('backupImport').disabled=true;$('backupPrepare').disabled=true;transferMessage('Reading '+file.name+'…');
- try{const data=JSON.parse(await file.text()),plan=await importStudyData(data);transferMessage('Imported '+fmt(plan.count,0)+' new or newer records; kept '+fmt(plan.kept,0)+' existing records. Open Saved spots to practice without recalculating.');$('backupReload').classList.remove('hide');}
+ try{const data=JSON.parse(await file.text()),plan=await importStudyData(data);transferMessage('Imported '+fmt(plan.count,0)+' new or newer records; kept '+fmt(plan.kept,0)+' existing records. Open Saved spots to practice without recalculating.'+(plan.references?' This file lists '+plan.references+' preflop reference charts that it does not include; import any you are missing from their reference file.':''));$('backupReload').classList.remove('hide');}
  catch(error){transferMessage('Import failed: '+error.message,true);}finally{transferUI.busy=false;$('backupImport').disabled=false;$('backupPrepare').disabled=false;$('backupFile').value='';lock();}
 }
 async function refreshSavedSpots(){
@@ -119,7 +129,7 @@ function startSavedSpot(id){
  try{const row=transferUI.rows.find(r=>r.id===id);if(!row)return;const {hand}=savedSpotContext(row),hero=hand.actor,labels=G.positions(hand.n,hand.button),known=Array(hand.n).fill(false);known[hero]=true;transferUI.drill={row,hand,answered:false};
  $('savedSpotDrill').classList.remove('hide');$('savedDrillTitle').textContent=hand.config.variant+' · '+hand.n+' seats · '+labels[hero]+' · '+G.STREET[hand.street];$('savedDrillScope').textContent='Saved result under the recorded ranges and bet tree. This drill uses the saved decision only; imported data has not been recalculated on this device.';
  const sb=hand.n===2?hand.button:(hand.button+1)%hand.n,bb=(hand.button+(hand.n===2?1:2))%hand.n,origin=hand.config.startStreet?'This study begins on '+G.STREET[hand.config.startStreet]+' with '+fmt(hand.config.pot)+' bb in the pot; earlier actions are not in the saved study.':'Initial stacks: '+hand.initial.map((amount,i)=>labels[i]+' '+fmt(G.bb(amount))+' bb').join(' · ')+'. '+labels[sb]+' posts '+hand.config.sb+' bb; '+labels[bb]+' posts '+hand.config.bb+' bb.'+(hand.config.ante?' Ante '+hand.config.ante+' bb ('+hand.config.anteMode+').':'');
- $('savedDrillHistory').innerHTML='<div class="history-start">'+esc(origin)+'</div>'+hand.log.map(event=>'<div>'+esc(eventLabel(event))+'</div>').join('')+'<div><strong>'+esc(labels[hero])+': your decision</strong></div>';
+ $('savedDrillHistory').innerHTML='<div class="history-start">'+esc(origin)+'</div>'+hand.log.map(event=>'<div>'+esc(eventLabel(event,seatNames(hand,hero)))+'</div>').join('')+'<div><strong>'+esc(labels[hero])+': your decision</strong></div>';
  paintTable($('savedDrillTable'),hand,hero,{known,caption:'Your saved practice decision'});$('savedDrillActions').innerHTML=row.result.actions.map((action,i)=>'<button class="btn" data-saved-action="'+i+'">'+esc(action.label)+'</button>').join('');$('savedDrillFeedback').textContent='Choose your action to reveal the saved analysis.';document.querySelectorAll('[data-saved-action]').forEach(button=>button.onclick=()=>answerSavedSpot(Number(button.dataset.savedAction)));$('savedSpotDrill').scrollIntoView({block:'start'});
  }catch(error){$('savedSpotStatus').textContent='This saved spot could not be reconstructed: '+error.message;}
 }

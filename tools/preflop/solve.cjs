@@ -13,13 +13,15 @@ const combos=Float64Array.from(classes,c=>c.length===2?6:c[2]==='s'?4:12),weight
 // Postflop playability multiplier on equity realization, by hand shape. Deep
 // stacks reward hands that make strong, well-disguised holdings (pairs that set
 // mine, suited and connected cards) and punish disconnected offsuit hands.
+// Offsuit connectors and one-gappers below 65 (32o-54o) make too few straights to earn a bonus,
+// and an ace- or king-high gapper takes half the gapper penalty.
 const PLAY={pair:.06,suited:.07,connector:.04,oneGap:.02,offsuitGapper:-.08};
 function playability(c,w=PLAY){
  if(c.length===2)return 1+w.pair;
  const hi=ranks.indexOf(c[0]),lo=ranks.indexOf(c[1]),gap=lo-hi,suited=c[2]==='s';
  let f=suited?1+w.suited:1;
- if(gap===1)f*=1+w.connector;else if(gap===2)f*=1+w.oneGap;
- if(!suited&&gap>=3&&lo>ranks.indexOf('T'))f*=1+w.offsuitGapper;
+ if(suited||lo<=ranks.indexOf('5')){if(gap===1)f*=1+w.connector;else if(gap===2)f*=1+w.oneGap;}
+ if(!suited&&gap>=3&&lo>ranks.indexOf('T'))f*=1+w.offsuitGapper*(hi<=ranks.indexOf('K')?.5:1);
  return f;
 }
 
@@ -32,16 +34,22 @@ function model(o){
  return{variant:'PLO4',K:m.labels.length,classes:m.labels,weight:Float64Array.from(m.combos,c=>c/total),compat:(i,j)=>m.compatibility[i][j],equity:(i,j)=>m.equity[i][j],play:m.playability,handGroups:{labels:m.labels,classes:m.classes}};
 }
 
+// Flop pots pay a share of the pot from the odds e/(1-e), raised to the power sharpness
+// (above 1, the hand behind realizes less than its raw equity and the favourite more) and
+// scaled by position, initiative (the last preflop raiser) and playability. The two
+// players' shares always sum to one. ip/oop: the in-position player raised last;
+// ipCaller/oopRaiser: the out-of-position player did.
 function matrices(o,m){
- const K=m.K,C=new Float64Array(K*K),allin=new Float64Array(K*K),ip=new Float64Array(K*K),oop=new Float64Array(K*K),play=m.play;
- const rIP=1+o.realization,rOOP=1-o.realization;
- for(let i=0;i<K;i++)for(let j=0;j<K;j++){
-  const c=m.compat(i,j),e=m.equity(i,j),x=i*K+j;
-  C[x]=c;allin[x]=c*e;
-  const a=e*rIP*play[i],b=(1-e)*rOOP*play[j];ip[x]=a+b>0?c*a/(a+b):0;
-  const a2=e*rOOP*play[i],b2=(1-e)*rIP*play[j];oop[x]=a2+b2>0?c*a2/(a2+b2):0;
+ const K=m.K,C=new Float64Array(K*K),allin=new Float64Array(K*K),play=m.play;
+ const rIP=1+o.realization,rOOP=1-o.realization,g=o.sharpness??1,ini=1+(o.initiative||0);
+ for(let i=0;i<K;i++)for(let j=0;j<K;j++){const c=m.compat(i,j),x=i*K+j;C[x]=c;allin[x]=c*m.equity(i,j);}
+ function share(ri,rj){
+  const out=new Float64Array(K*K);
+  for(let i=0;i<K;i++)for(let j=0;j<K;j++){const e=m.equity(i,j),x=i*K+j,a=e**g*ri*play[i],b=(1-e)**g*rj*play[j];out[x]=a+b>0?C[x]*a/(a+b):0;}
+  return out;
  }
- return{C,allin,ip,oop};
+ const ip=share(rIP*ini,rOOP),oop=share(rOOP,rIP*ini);
+ return{C,allin,ip,oop,ipCaller:ini===1?ip:share(rIP,rOOP*ini),oopRaiser:ini===1?oop:share(rOOP*ini,rIP)};
 }
 
 function matvec(M,v,out){
@@ -87,8 +95,10 @@ class Solver{
   }
   const q=p===ipSeat?oopSeat:ipSeat;let f=1;
   for(let k=0;k<this.n;k++)if(k!==p&&k!==q&&reach[k]!==this.ones)f*=this.mass(reach[k]);
-  const share=node.type==='allin'?this.M.allin:p===ipSeat?this.M.ip:this.M.oop;
+  const M=this.M,share=node.type==='allin'?M.allin:node.aggressor===oopSeat?(p===ipSeat?M.ipCaller:M.oopRaiser):p===ipSeat?M.ip:M.oop;
   const won=matvec(share,reach[q],new Float64Array(K)),seen=matvec(this.M.C,reach[q],new Float64Array(K));
+  // Low stack-to-pot flop pots blend in all-in equity (tree.cjs commit).
+  if(node.commit){const all=matvec(this.M.allin,reach[q],new Float64Array(K));for(let i=0;i<K;i++)won[i]+=node.commit*(all[i]-won[i]);}
   for(let i=0;i<K;i++)out[i]=f*(node.pot*won[i]-node.inv[p]*seen[i]);
   return out;
  }
@@ -109,27 +119,29 @@ class Solver{
    if(mode==='best'){out.fill(-Infinity);for(const v of values)for(let i=0;i<K;i++)if(v[i]>out[i])out[i]=v[i];return out;}
    for(let k=0;k<A;k++)for(let i=0;i<K;i++)out[i]+=sigma[k*K+i]*values[k][i];
    if(mode==='cfr'){
-    const own=reach[p];
-    for(let k=0;k<A;k++)for(let i=0;i<K;i++){const x=k*K+i;node.regret[x]=Math.max(0,node.regret[x]+values[k][i]-out[i]);node.sum[x]+=this.t*own[i]*sigma[x];}
+    // Regrets are added per unit of opponent reach, so a line that opponents stop taking
+    // keeps learning at the same rate, instead of being ruled by the first iterations'
+    // regrets (when every range was still wide) for the rest of the solve.
+    const own=reach[p];let f=1;for(let q=0;q<this.n;q++)if(q!==p&&reach[q]!==this.ones)f*=this.mass(reach[q]);f=f>0?1/f:0;
+    for(let k=0;k<A;k++)for(let i=0;i<K;i++){const x=k*K+i;node.regret[x]=Math.max(0,node.regret[x]+(values[k][i]-out[i])*f);node.sum[x]+=this.t*own[i]*sigma[x];}
    }
    return out;
   }
+  // Trembling opponent (CFR passes only): every action also carries a tiny share (tremble) of
+  // the opponent's non-folding range at this node. Lines an opponent (almost) never takes are
+  // then still solved against a sensible range, instead of keeping whatever regret matching
+  // held when the line was dropped, so a deviation into them meets a real strategy.
+  let nf=null;
+  if(mode==='cfr'&&this.o.tremble>0){const f=node.actions.findIndex(x=>x.kind==='fold');nf=new Float64Array(K);let m=0;
+   for(let i=0;i<K;i++){let c=0;for(let j=0;j<A;j++)if(j!==f)c+=sigma[j*K+i];nf[i]=reach[a][i]*c;m+=nf[i];}
+   if(!(m>0))nf.set(reach[a]);for(let i=0;i<K;i++)nf[i]*=this.o.tremble;}
   for(let k=0;k<A;k++){
    const next=reach.slice(),r=new Float64Array(K);let any=false;
-   for(let i=0;i<K;i++){r[i]=reach[a][i]*sigma[k*K+i];if(r[i]>0)any=true;}
-   // An opponent never takes this action, so p's values below are zero; p's average
-   // strategy there still needs its own reach, or a deviation into the line meets noise.
-   if(!any){if(mode==='cfr')this.accumulate(node.children[k],p,reach[p]);continue;}next[a]=r;
+   for(let i=0;i<K;i++){r[i]=reach[a][i]*sigma[k*K+i]+(nf?nf[i]:0);if(r[i]>0)any=true;}
+   if(!any)continue;next[a]=r;
    const v=this.walk(node.children[k],p,next,mode);for(let i=0;i<K;i++)out[i]+=v[i];
   }
   return out;
- }
- accumulate(node,p,own){
-  if(node.type!=='decision')return;
-  const K=this.K,A=node.actions.length;
-  if(node.actor!==p){for(const c of node.children)this.accumulate(c,p,own);return;}
-  const sigma=this.strategy(node,false);
-  for(let k=0;k<A;k++){const r=new Float64Array(K);for(let i=0;i<K;i++){const x=k*K+i;node.sum[x]+=this.t*own[i]*sigma[x];r[i]=own[i]*sigma[x];}this.accumulate(node.children[k],p,r);}
  }
  iterate(count=1){
   for(let c=0;c<count;c++){
