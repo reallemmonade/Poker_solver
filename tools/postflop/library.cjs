@@ -80,7 +80,9 @@ async function solve(){
   fs.writeFileSync(path.join(dir,'spot.json'),JSON.stringify({id,label:spot.label,chart:{name:spot.pack.name,key:spot.range.key},pot:spot.pot,stack:spot.stack,tree:TREE,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop},null,1));
   console.log(spot.label+': pot '+G.bb(spot.pot)+' bb, stack '+G.bb(spot.stack)+' bb, '+flops.length+' flops');
   for(const f of flops){
-   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file))continue;
+   // Solved flops are skipped, unless --redo-above asks to re-solve those that
+   // stopped above that exploitability (% of pot), for example with more iterations.
+   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)){const redo=Number(args['redo-above']);if(!(redo>0))continue;let e=null;try{e=JSON.parse(fs.readFileSync(file,'utf8')).exploitability;}catch{}if(!(e>redo))continue;}
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:'out.json'}),work);
@@ -107,5 +109,5 @@ function bundle(){
 if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(e.message);process.exit(1);});
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N]');}
+else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct]');}
 module.exports={SPOTS,TREE,prepare,spec,nodes};

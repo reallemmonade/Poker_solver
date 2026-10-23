@@ -11,7 +11,7 @@ node tools/postflop/library.cjs bundle --out postflop-work   # writes postflop-w
 
 On a Mac, double-click `tools/postflop/run-library.command`. It writes to `~/Desktop/Poker_Solver/postflop-work`, keeps the Mac awake while it runs, and bundles at the end. Set `CHARTS`, `OUT`, `SPOTS` or `FLOPS` to change these.
 
-Each solved flop is written to `<out>/<spot>/<flop>.json` as soon as it finishes. A stopped run resumes where it left off. Options: `--threads` (default: all cores), `--accuracy` (stop at this exploitability, % of pot, default 1), `--iterations` (default 200), `--flops N` or `--flops all` (all 1,755).
+Each solved flop is written to `<out>/<spot>/<flop>.json` as soon as it finishes. A stopped run resumes where it left off. Options: `--threads` (default: all cores), `--accuracy` (stop at this exploitability, % of pot, default 1), `--iterations` (default 200), `--flops N` or `--flops all` (all 1,755), `--redo-above pct` (re-solve flops saved above this exploitability, for example `--redo-above 1.05 --iterations 400`).
 
 ## Spots
 
