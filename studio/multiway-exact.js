@@ -16,10 +16,13 @@
    this.rootHand=api.reconstruct(data,ranges.draw(G.rng(971),true).holes,G.rng(975));this.seats=this.rootHand.living();this.player=seat=>this.seats.indexOf(seat);this.hero=this.player(data.actor);need(this.hero>=0,'A folded player cannot be the acting seat.');
    this.hands=this.seats.map(seat=>ranges.rows(seat));this.sizes=this.hands.map(h=>h.length);this.lookups=this.hands.map(h=>new Map(h.map((r,i)=>[r.key,i])));this.ones=this.sizes.map(s=>new Float64Array(s).fill(1));this.heroIndex=this.lookups[this.hero].get(key(data.heroCards));need(this.heroIndex!==undefined,'Your hand is excluded from your range.');
    this.variables=[];for(let seat=0;seat<data.config.seats;seat++){const p=this.player(seat);if(p>=0||!ranges.distributions[seat].uniform){const rows=p>=0?this.hands[p]:ranges.rows(seat);this.variables.push({seat,player:p,rows:rows.map(r=>({...r,...mask(r.cards)}))});}}
-   this.privateCount=this.variables.length*this.rootHand.rules.hole;this.worlds=[];this.enumerate(0,mask(data.board),1,[],Array(this.seats.length).fill(0));need(this.worlds.length,'These ranges contain no compatible joint deals.');this.normalizer=sum(this.worlds.map(w=>w.weight));for(const w of this.worlds)w.weight/=this.normalizer;
+   this.privateCount=this.variables.length*this.rootHand.rules.hole;this.worlds=[];this.enumerate(0,mask(data.board),1,[],Array(this.seats.length).fill(0));need(this.worlds.length,'These ranges contain no compatible joint deals.');this.normalizer=sum(this.worlds.map(w=>w.weight));for(const w of this.worlds)w.weight/=this.normalizer;this.worldWeights=Float64Array.from(this.worlds,w=>w.weight);this.worldIndices=this.seats.map((_,p)=>Int32Array.from(this.worlds,w=>w.indices[p]));
    this.heroMass=this.worlds.reduce((s,w)=>s+(w.indices[this.hero]===this.heroIndex?w.weight:0),0);need(this.heroMass>0,'Your hand has no compatible joint opponent ranges.');
-   this.account(sum(this.sizes)*64);this.estimate(this.rootHand.clone());this.root=this.build(this.rootHand.clone());this.actions=this.root.actions;need(this.actions?.length,'The root must be an open decision.');this.threshold=data.config.mode==='cash'?Math.max(.0001,G.bb(this.rootHand.pot)*opt.tolerance):Math.max(.000001,sum(data.config.payouts)*opt.tolerance*.01);this.handThreshold=5*this.threshold;
+   this.account(sum(this.sizes)*64);this.estimate(this.rootHand.clone());this.root=this.build(this.rootHand.clone());this.actions=this.root.actions;need(this.actions?.length,'The root must be an open decision.');this.threshold=data.config.mode==='cash'?Math.max(.0001,G.bb(this.rootHand.pot)*opt.tolerance):Math.max(.000001,sum(data.config.payouts)*opt.tolerance*.01);this.handThreshold=5*this.threshold;this.paced(this.label());
   }
+  // One timed iteration shows whether the time budget can reach the number
+  // of iterations a solve needs, so a hopeless tree goes to the fallback now.
+  paced(label){const t=clock();this.step();const per=clock()-t,left=this.options.milliseconds-(clock()-this.started);need(this.complete||per*100<=left,'One iteration of this exact '+label+' tree takes '+(per/1000).toFixed(1)+' s, so the remaining '+Math.max(0,Math.round(left/1000))+' s of the time budget allows fewer than 100 iterations, too few to converge. Use fewer bet sizes or raises.');}
   account(bytes=0){
    this.bytes+=bytes;
    this.overBudget(this.nodes.length,this.bytes);
@@ -71,14 +74,16 @@
   // there; its current regret-matched choice values that line, not 1/A.
   setStrategy(average=false){const floor=1e-9*(this.iterations+1)**2;for(const n of this.nodes)if(n.kind==='decision'){const A=n.actions.length;for(let h=0;h<this.sizes[n.actor];h++){let source=average?n.average:n.regrets,total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);if(average&&total<=floor){source=n.regrets;total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);}for(let a=0;a<A;a++)n.strategy[h*A+a]=total?Math.max(0,source[h*A+a])/total:1/A;}}}
   aggregate(player,reach,values,board,chance){
-   const out=new Float64Array(this.sizes[player]);for(let j=0;j<this.worlds.length;j++)if(board.valid[j]){const w=this.worlds[j];let mass=w.weight*chance;for(let p=0;p<this.seats.length;p++)if(p!==player)mass*=reach[p][w.indices[p]];out[w.indices[player]]+=mass*(values?values[j]:1);}return out;
+   const out=new Float64Array(this.sizes[player]),P=this.seats.length,W=this.worldWeights,I=this.worldIndices,own=I[player],valid=board.valid;for(let j=0;j<W.length;j++)if(valid[j]){let mass=W[j]*chance;for(let p=0;p<P&&mass;p++)if(p!==player)mass*=reach[p][I[p][j]];if(mass)out[own[j]]+=mass*(values?values[j]:1);}return out;
   }
   buffers(depth){return this.scratch[depth]??={v:this.sizes.map(s=>new Float64Array(s)),reach:this.sizes.map(s=>new Float64Array(s))};}
+  // An update pass needs only the updating player's values and the
+  // averaging pass needs none, so terminals aggregate only what is used.
   walk(n,reach,chance=1,update=-1,averageWeight=0,depth=0){
-   const buf=this.buffers(depth),v=buf.v;if(n.utility){for(let p=0;p<this.seats.length;p++)v[p]=this.aggregate(p,reach,n.utility[p],n.board,chance);return v;}for(const a of v)a.fill(0);
-   if(n.kind==='chance'){for(const child of n.children){const value=this.walk(child,reach,chance*n.probability,update,averageWeight,depth+1);for(let p=0;p<this.seats.length;p++)for(let h=0;h<this.sizes[p];h++)v[p][h]+=value[p][h];}return v;}
+   const buf=this.buffers(depth),v=buf.v,used=this.seats.map((_,q)=>update<0?!averageWeight:q===update);if(n.utility){for(let p=0;p<this.seats.length;p++)if(used[p])v[p]=this.aggregate(p,reach,n.utility[p],n.board,chance);return v;}for(const a of v)a.fill(0);
+   if(n.kind==='chance'){for(const child of n.children){const value=this.walk(child,reach,chance*n.probability,update,averageWeight,depth+1);for(let p=0;p<this.seats.length;p++)if(used[p])for(let h=0;h<this.sizes[p];h++)v[p][h]+=value[p][h];}return v;}
    const p=n.actor,A=n.actions.length,H=this.sizes[p],next=reach.slice(),own=reach[p];next[p]=buf.reach[p];
-   for(let a=0;a<A;a++){for(let h=0;h<H;h++)next[p][h]=own[h]*n.strategy[h*A+a];const value=this.walk(n.children[a],next,chance,update,averageWeight,depth+1);for(let h=0;h<H;h++)n.actionValues[h*A+a]=value[p][h];for(let q=0;q<this.seats.length;q++)for(let h=0;h<this.sizes[q];h++)v[q][h]+=value[q][h]*(q===p?n.strategy[h*A+a]:1);}
+   for(let a=0;a<A;a++){for(let h=0;h<H;h++)next[p][h]=own[h]*n.strategy[h*A+a];const value=this.walk(n.children[a],next,chance,update,averageWeight,depth+1);if(used[p])for(let h=0;h<H;h++)n.actionValues[h*A+a]=value[p][h];for(let q=0;q<this.seats.length;q++)if(used[q])for(let h=0;h<this.sizes[q];h++)v[q][h]+=value[q][h]*(q===p?n.strategy[h*A+a]:1);}
    if(update===p)for(let h=0;h<H;h++)for(let a=0;a<A;a++){const i=h*A+a;n.regrets[i]=Math.max(0,n.regrets[i]+n.actionValues[i]-v[p][h]);}
    if(averageWeight)for(let h=0;h<H;h++)for(let a=0;a<A;a++)n.average[h*A+a]+=averageWeight*own[h]*n.strategy[h*A+a];return v;
   }
