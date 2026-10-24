@@ -37,8 +37,8 @@ function pass(text){console.log('PASS '+text);count++;}
  const pre=new G.Hand({variant:'NLH',seats:2,button:0,stacks:[10,10]},{});pre.act({kind:'raise',target:250});assert.deepEqual(labels(pre),['Fold','Call 1.5 bb','Raise to 10 bb · all-in']);
  const jam=new G.Hand({variant:'NLH',seats:2,button:0,stacks:[100,100]},{});jam.act({kind:'raise',target:10000});assert.deepEqual(labels(jam,{rootSizes:[4.5,9]}),['Fold','Call 99 bb · all-in']);
  const h=spot({stacks:[2,2]},['AcAd','6h6s']),s=new S.Solver(null,{config:h.config,actor:h.actor,heroCards:h.holes[h.actor],board:h.board,actions:h.actionLog},S.options({ranges:['AA,AK,JJ','T9,66,JT'],abstraction:{betSizes:[.5],raiseSizes:[1],maxAggressions:1},approximate:false}));while(!s.complete)s.step();const r=s.result();
- assert.ok(r.reliable&&r.reference[0]<.01&&Math.abs(r.mean[0]-2.652)<.01,'A never-chosen check is valued with untrained play: '+r.mean[0]);
- pass('Solver trees merge effective all-ins, skip unusable root sizes and value never-chosen actions with the best continuation');}
+ assert.ok(r.reliable&&r.reference[0]<.01&&Math.abs(r.mean[0]-2.652)<.01,'A never-chosen check is valued with untrained play: '+r.mean[0]);assert.equal(r.solve.revision,S.REVISION,'Results do not carry the solver revision that decides when saved results are solved again.');
+ pass('Solver trees merge effective all-ins, skip unusable root sizes, value never-chosen actions with the best continuation and carry the solver revision');}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
 await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');
