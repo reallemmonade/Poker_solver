@@ -26,7 +26,7 @@
    need(clock()-this.started<this.options.preparationMilliseconds,'Exact multiplayer tree preparation exceeds the configured time budget. The full private-deal and public-card tree is too large for this request. No sampled recommendation was substituted.');
   }
   enumerate(k,used,weight,chosen,indices){
-   if(k===this.variables.length){need(this.worlds.length<this.dealLimit,'Exact multiplayer private ranges exceed the '+this.dealLimit.toLocaleString()+' joint-deal budget. Narrow the current ranges or use a larger compute budget; additional rollout samples do not remove this requirement.');this.account(120+this.variables.length*32+this.seats.length*8);this.worlds.push({weight,lo:used.lo,hi:used.hi,chosen:chosen.slice(),indices:indices.slice()});return;}
+   if(k===this.variables.length){need(this.worlds.length<this.dealLimit,'Exact private ranges exceed the '+this.dealLimit.toLocaleString()+' joint-deal budget. Narrow the current ranges or use a larger compute budget; additional rollout samples do not remove this requirement.');this.account(120+this.variables.length*32+this.seats.length*8);this.worlds.push({weight,lo:used.lo,hi:used.hi,chosen:chosen.slice(),indices:indices.slice()});return;}
    const v=this.variables[k];for(let i=0;i<v.rows.length;i++){if(++this.trials%2048===0)this.account();need(this.trials<Math.max(2000000,this.dealLimit*100),'Exact joint-deal enumeration exceeds the compatibility-search budget. Use narrower ranges.');const r=v.rows[i];if((r.lo&used.lo)||(r.hi&used.hi))continue;chosen[k]=i;if(v.player>=0)indices[v.player]=i;this.enumerate(k+1,{lo:used.lo|r.lo,hi:used.hi|r.hi},weight*r.prob,chosen,indices);}
   }
   board(cards){
