@@ -21,15 +21,17 @@ function tournamentFinish(h){
 }
 function nextPersistentSessionConfig(){
  const h=state.hand;if(!h?.done)return state.config;
- const alive=h.stacks.map((amount,seat)=>amount>0?seat:-1).filter(seat=>seat>=0),finish=tournamentFinish(h);
+ // Cash tables keep their size: a bot that busts or drops below half its starting stack rebuys to that stack.
+ const root=liveSession.rootConfig,rebuy=h.config.mode==='cash'&&$('botRebuy')?.checked!==false&&root?.stacks?.length===h.n&&h.stacks[state.hero]>0,stacks=h.stacks.map((amount,seat)=>rebuy&&seat!==state.hero&&root.stacks[seat]>0&&G.bb(amount)<root.stacks[seat]/2?G.units(root.stacks[seat]):amount),reloaded=stacks.filter((amount,seat)=>amount!==h.stacks[seat]).length;
+ const alive=stacks.map((amount,seat)=>amount>0?seat:-1).filter(seat=>seat>=0),finish=tournamentFinish(h);
  if(!alive.includes(state.hero)||alive.length<2||finish){
   const busted=!alive.includes(state.hero);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';saveBotSettings();liveSession.round++;liveSession.handNumber=0;state.sessionHands=0;liveSession.message=finish?'Tournament finished · restarting with the original setup.':busted?'You busted · restarting with the original setup.':'You won the table · starting a new session.';return G.normalize(liveSession.rootConfig);
  }
  let nextButton=(h.button+1)%h.n;while(!alive.includes(nextButton))nextButton=(nextButton+1)%h.n;
- const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(h.stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
+ const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
  state.hero=alive.indexOf(state.hero);remapBotSeats(alive);
  if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1),scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
- liveSession.message=(h.n-alive.length?h.n-alive.length+' opponent(s) eliminated · ':'')+'Dealer moved to the next active seat.';return G.normalize(config);
+ liveSession.message=(h.n-alive.length?h.n-alive.length+' opponent(s) eliminated · ':'')+(reloaded?reloaded+' bot'+(reloaded>1?'s':'')+' rebought to the starting stack · ':'')+'Dealer moved to the next active seat.';return G.normalize(config);
 }
 function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootConfig)beginLiveSession();liveSession.handNumber++;}
 function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
