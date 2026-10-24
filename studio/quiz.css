@@ -11,3 +11,4 @@
 .live-frequencies{margin:14px 0;border:1px solid var(--line);border-radius:9px;padding:12px;background:#101e20}.live-frequencies h3{margin:0 0 8px}.frequency-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.frequency-grid .policyRow{margin:0}.frequency-grid .bar{margin-bottom:0}.rollout-diagnostics{border:1px dashed #5c5140;padding:11px;border-radius:7px}.rollout-diagnostics summary{color:var(--gold)}.rollout-diagnostics strong{color:var(--muted)}.notice ul{margin:6px 0;padding-left:18px}
 
 .session-status{font-size:12px;color:var(--gold);margin:10px 0}#capacityReached button{white-space:normal}#capacityLimitNote{margin:0 0 9px}
+.quiz-grade-better{display:block;margin:5px 0 0 17px;font-size:12px;font-weight:500;color:var(--gold);white-space:normal}
