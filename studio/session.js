@@ -39,7 +39,7 @@ function renderSessionStatus(){
  $('sessionElsewhere')?.classList.toggle('hide',!liveSession.passive);const h=state.hand;if(!h){$('deal').textContent='Deal hand';$('deal').disabled=playBusy()||tableView.playing;return;}
  $('sessionStatus').textContent='Session '+liveSession.round+' · hand '+Math.max(1,liveSession.handNumber)+' · '+(h.done&&tableView.playing?'Finishing the hand…':liveSession.message);// the result waits for the end-of-hand animation
  $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').disabled=playBusy()||tableView.playing||!h.done;
- $('restartSession').disabled=state.busy;renderCapacityActions();
+ $('restartSession').disabled=state.busy||liveSession.passive;renderCapacityActions();
 }
 function scheduleSessionNext(){
  cancelSessionNext();const hand=state.hand;
@@ -74,16 +74,16 @@ function restoreLiveSession(value){
  finally{liveSession.ready=true;saveLiveSession();renderSessionStatus();}
 }
 function restartLiveSession(){
- if(state.busy)return;cancelSessionNext();stopTableMotion();if(!liveSession.rootConfig)beginLiveSession();
+ if(state.busy||liveSession.passive)return;cancelSessionNext();stopTableMotion();if(!liveSession.rootConfig)beginLiveSession();
  state.config=G.normalize(liveSession.rootConfig);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';state.dirty=false;liveSession.round++;writeForm(state.config,state.abstraction);$('hero').value=state.hero;deal(false);
 }
 function renderCapacityActions(){
  if(!$('capacityReached')||!state.model)return;const max=state.model.abstraction.maxInfos,size=state.model.table.entries.size,reached=/capacity/i.test(state.snapshot?.halted||'')||size>=max-1;
  $('capacityReached').classList.toggle('hide',!reached);$('capacityLimitNote').textContent=max<2000000?'Your learning is preserved. Increase the memory budget to remember more situations.':'This model has reached the 2,000,000-state browser budget. The checkpoint is preserved; a larger run needs a larger training memory budget.';
- $('resumeCapacity').textContent=max<1000000?'Increase to 1,000,000 & resume':'Increase to 2,000,000 & resume';$('resumeCapacity').disabled=state.busy||max>=2000000||state.dirty;
+ $('resumeCapacity').textContent=max<1000000?'Increase to 1,000,000 & resume':'Increase to 2,000,000 & resume';$('resumeCapacity').disabled=state.busy||liveSession.passive||max>=2000000||state.dirty;
 }
 function resumeWithMoreCapacity(){
- if(state.busy||state.dirty||!state.model)return;const capacity=state.model.abstraction.maxInfos<1000000?1000000:2000000;if(state.model.abstraction.maxInfos>=2000000)return;
+ if(state.busy||liveSession.passive||state.dirty||!state.model)return;const capacity=state.model.abstraction.maxInfos<1000000?1000000:2000000;if(state.model.abstraction.maxInfos>=2000000)return;
  const snapshot={...state.snapshot,halted:null,abstraction:{...state.model.abstraction,maxInfos:capacity}};setModel(snapshot);state.abstraction=state.model.abstraction;selectValue('capacity',capacity);train();
 }
 function initSessions(){
