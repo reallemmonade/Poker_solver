@@ -27,11 +27,11 @@ function normalizeSavedSpot(row){
  const context=savedSpotContext(row);for(const action of row.result.actions)context.hand.clone().act(action);
  return{id:row.id,key:row.key,result:row.result,observed:context.observed,options:context.options,extraAction:context.extraAction,updatedAt:new Date(rowDate(row)||Date.now()).toISOString()};
 }
-function portableSpot(observed,options,result,extraAction=null){
+function portableSpot(observed,options,result,extraAction=null,updatedAt=null){
  if(!validSpotResult(result))throw Error('This analysis is not a supported saved result.');
  const opts=PokerSpot.options(options),holes=Array(observed.config.seats).fill(null);holes[observed.actor]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(9181));
  if(!extraAction){const regular=PokerSpot.actionsAt(hand,hand,opts,null),extra=result.actions.filter(a=>T.matchAction(regular,a)<0);if(extra.length>1)throw Error('The analysis contains unrecorded custom actions. Export a full study backup instead.');extraAction=extra[0]||null;}
- const key=JSON.stringify(['spot-v3',PokerSpot.publicKey(observed),opts,extraAction]);return normalizeSavedSpot({id:'spot-'+hash(key),key,result,observed,options:opts,extraAction,updatedAt:new Date().toISOString()});
+ const key=JSON.stringify(['spot-v3',PokerSpot.publicKey(observed),opts,extraAction]);return normalizeSavedSpot({id:'spot-'+hash(key),key,result,observed,options:opts,extraAction,updatedAt:Number.isFinite(Date.parse(updatedAt))?updatedAt:new Date().toISOString()});
 }
 function exportPortableSpot(){try{const result=state.hand&&!state.hand.done?activeSpotResult(state.hand):null;if(!result)return;const key=spotUI.last.cacheKey,row=key?normalizeSavedSpot({id:'spot-'+hash(key),key,result,observed:observedData(state.hand),options:spotUI.last.options,updatedAt:new Date().toISOString()}):portableSpot(observedData(state.hand),spotUI.last.options,result);exportJSON({format:'range-lab-spot-solve-v1',...row},'range-lab-spot-analysis.json');}catch(error){status(error.message,true);}}
 async function refreshTransferCounts(){
@@ -84,20 +84,20 @@ function validateBackupRow(store,row){
 }
 async function validateStudyImport(data){
  if(data?.format==='range-lab-spot-solve-v1'){
-  const row=data.key?normalizeSavedSpot({...data,id:'spot-'+hash(data.key)}):portableSpot(data.observed,data.options,data.result,data.extraAction);
+  const row=data.key?normalizeSavedSpot({...data,id:'spot-'+hash(data.key)}):portableSpot(data.observed,data.options,data.result,data.extraAction,data.updatedAt||data.exportedAt);
   return Object.fromEntries(studyStores.map(name=>[name,name==='solves'?[row]:[]]));
  }
  if(data?.format!==backupFormat||data.version!==1||!data.stores||typeof data.stores!=='object')throw Error('Choose a Range Lab study backup or exported spot analysis.');
  const out={};let total=0;
  for(const name of studyStores){const rows=data.stores[name];if(!Array.isArray(rows)||rows.length>100000)throw Error('Invalid or oversized '+name+' collection.');total+=rows.length;}
  if(total>200000)throw Error('This backup has too many records for a browser import.');
- for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){if(name==='meta'&&data.stores[name][i]?.id==='quizDraft-v1')continue;const row=validateBackupRow(name,data.stores[name][i]);if(ids.has(row.id)){const at=out[name].findIndex(r=>r.id===row.id),old=out[name][at];if(name!=='solves'||!row.archived||!old.archived||old.key!==row.key)throw Error('Duplicate '+name+' record in backup.');if(rowDate(row)>rowDate(old))out[name][at]=row;continue;}ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
+ for(const name of studyStores){out[name]=[];const ids=new Set();for(let i=0;i<data.stores[name].length;i++){if(name==='meta'&&data.stores[name][i]?.id==='quizDraft-v1')continue;let row;try{row=validateBackupRow(name,data.stores[name][i]);}catch(error){const id=data.stores[name][i]?.id;throw Error(({hands:'Saved hand',grades:'Practice decision',solves:'Saved analysis',models:'Model',meta:'Setting'})[name]+' '+(i+1)+' of '+data.stores[name].length+(typeof id==='string'?' ('+id.slice(0,80)+')':'')+' is invalid: '+error.message+' No data was changed.');}if(ids.has(row.id)){const at=out[name].findIndex(r=>r.id===row.id),old=out[name][at];if(name!=='solves'||!row.archived||!old.archived||old.key!==row.key)throw Error('Duplicate '+name+' record in backup.');if(rowDate(row)>rowDate(old))out[name][at]=row;continue;}ids.add(row.id);out[name].push(row);if(i%25===0){transferMessage('Checking '+name+' records: '+(i+1)+' / '+data.stores[name].length);await new Promise(resolve=>setTimeout(resolve,0));}}}
  return out;
 }
 function mergeStudyRows(existing,incoming){
  const updates={};let count=0,kept=0;
  for(const name of studyStores){updates[name]=[];const known=new Map(existing[name].map(row=>[row.id,row]));for(const row of incoming[name]){const old=known.get(row.id);let use=!old;
-   if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');const q=spotQuality(row),p=spotQuality(old);use=q>0&&(q>p||q===p&&rowDate(row)>rowDate(old));}
+   if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');const q=spotQuality(row),p=spotQuality(old);use=q>0&&(q>p||q===p&&rowDate(row)>rowDate(old))&&JSON.stringify(row.result)!==JSON.stringify(old.result);}
    else if(old&&name==='models')use=row.snapshot.episodes>old.snapshot.episodes||row.snapshot.episodes===old.snapshot.episodes&&rowDate(row)>rowDate(old);
    else if(name==='meta'&&row.id==='preflopReferences-v1'){const values=Array.isArray(old?.value)?old.value:[],charts=new Map(),newer=(v,o)=>!o||(Date.parse(v.source?.createdAt)||0)>(Date.parse(o.source?.createdAt)||0);for(const v of values){const k=packKey(v);if(newer(v,charts.get(k)))charts.set(k,v);}let changed=charts.size!==values.length;for(const v of row.value){const k=packKey(v);if(newer(v,charts.get(k))){charts.set(k,v);changed=true;}}if(changed){updates[name].push({id:row.id,value:[...charts.values()]});count++;}else kept++;continue;}
    else if(old&&name!=='meta'&&name!=='solves'&&name!=='models')use=rowDate(row)>rowDate(old);
@@ -105,7 +105,7 @@ function mergeStudyRows(existing,incoming){
   }}return{updates,count,kept};
 }
 async function importStudyData(data){
- const incoming=await validateStudyImport(data),existing=await readStudyStores(),plan=mergeStudyRows(existing,incoming),db=await openDB();
+ const incoming=await validateStudyImport(data),existing=await readStudyStores(),plan=mergeStudyRows(existing,incoming),db=await openDB();if(plan.count)transferMessage('Saving '+fmt(plan.count,0)+' record'+(plan.count===1?'':'s')+'…');
  await new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readwrite');tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||Error('Import was rolled back.'));tx.onerror=()=>{};try{for(const name of studyStores)for(const row of plan.updates[name])tx.objectStore(name).put(row);}catch(error){tx.abort();reject(error);}});
  spotUI.cache.clear();spotUI.last=null;const stores=await readStudyStores();state.models=stores.models;state.histories=newestRows(stores.hands,validHandRow).rows;state.grades=newestRows(stores.grades.map(r=>{try{return scrubSavedGrade(r)}catch{return null}}),validGradeRow).rows;renderLibrary();renderSavedHands();renderProgress();invalidatePreparedBackup();
  if(plan.updates.meta.some(row=>row.id==='preflopReferences-v1')){preflopLibrary.packs=[];restorePreflop(stores.meta);spotUI.last=null;renderPlay();renderRanges();}
@@ -115,7 +115,7 @@ async function importStudyData(data){
 async function importStudyFile(file){
  if(!file)return;if(transferUI.busy||state.busy){transferMessage(transferUI.busy?'Wait for the current backup step to finish, then open the file again.':'Finish or cancel the current calculation before importing.',true);$('backupFile').value='';return;}if(file.size>250*1048576){transferMessage('This file exceeds the 250 MB browser import limit. Export a smaller set of data for your phone.',true);$('backupFile').value='';return;}
  transferUI.busy=true;lock('dataImport');$('stop').disabled=true;$('backupImport').disabled=true;$('backupPrepare').disabled=true;transferMessage('Reading '+file.name+'…');
- try{const data=JSON.parse(await file.text()),plan=await importStudyData(data);transferMessage('Imported '+fmt(plan.count,0)+' new or newer records; kept '+fmt(plan.kept,0)+' existing records. Open Saved spots to practice without recalculating.'+(plan.references?' This file lists '+plan.references+' preflop reference charts that it does not include; import any you are missing from their reference file.':''));$('backupReload').classList.remove('hide');}
+ try{let data;try{data=JSON.parse(await file.text());}catch(error){if(error instanceof SyntaxError)throw Error('This file is incomplete or damaged, so it cannot be read as a backup. It may not have finished downloading (common with iCloud or other cloud folders); download or export it again and retry. No data was changed.');throw error;}const plan=await importStudyData(data);transferMessage('Imported '+fmt(plan.count,0)+' new or newer records; kept '+fmt(plan.kept,0)+' existing records. Open Saved spots to practice without recalculating.'+(plan.references?' This file lists '+plan.references+' preflop reference charts that it does not include; import any you are missing from their reference file.':''));$('backupReload').classList.toggle('hide',!plan.updates.meta.length);}
  catch(error){transferMessage('Import failed: '+error.message,true);}finally{transferUI.busy=false;$('backupImport').disabled=false;$('backupPrepare').disabled=false;$('backupFile').value='';lock();}
 }
 async function refreshSavedSpots(){

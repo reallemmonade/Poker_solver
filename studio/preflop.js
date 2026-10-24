@@ -9,8 +9,10 @@
  // PLO4 hands fall into 16,432 suit-isomorphic classes; a PLO pack maps each class to
  // one of its hand groups. Classes are numbered in order of first appearance when the
  // 270,725 combos are enumerated in colex order.
- let plo=null;const perms=[];(function permute(a,rest){if(!rest.length)return perms.push(a);rest.forEach((x,i)=>permute(a.concat(x),rest.filter((_,j)=>j!==i)));})([],[0,1,2,3]);
- function ploCode(cs){let best=Infinity;for(const p of perms){const m=cs.map(c=>(c&~3)|p[c&3]).sort((x,y)=>y-x),v=((m[0]*52+m[1])*52+m[2])*52+m[3];if(v<best)best=v;}return best;}
+ let plo=null;const perms=[],PLO_CLASSES=16432;(function permute(a,rest){if(!rest.length)return perms.push(a);rest.forEach((x,i)=>permute(a.concat(x),rest.filter((_,j)=>j!==i)));})([],[0,1,2,3]);
+ // Suit permutation applied, then a four-card sorting network (descending) with no array allocation; the class table is
+ // built 270,725×24 times through here, so this keeps the first PLO lookup fast.
+ function ploCode(cs){const a=cs[0],b=cs[1],c=cs[2],d=cs[3];let best=Infinity;for(const p of perms){let w=(a&~3)|p[a&3],x=(b&~3)|p[b&3],y=(c&~3)|p[c&3],z=(d&~3)|p[d&3],t;if(w<x){t=w;w=x;x=t}if(y<z){t=y;y=z;z=t}if(w<y){t=w;w=y;y=t}if(x<z){t=x;x=z;z=t}if(x<y){t=x;x=y;y=t}const v=((w*52+x)*52+y)*52+z;if(v<best)best=v;}return best;}
  function ploClasses(){
   if(plo)return plo;const index=new Map(),keys=[],reps=[],counts=[];
   for(let d=3;d<52;d++)for(let c=2;c<d;c++)for(let b=1;b<c;b++)for(let a=0;a<b;a++){const code=ploCode([a,b,c,d]);let k=index.get(code);if(k===undefined){k=keys.length;index.set(code,k);const cs=[Math.floor(code/140608),Math.floor(code/2704)%52,Math.floor(code/52)%52,code%52];keys.push(cs.map(G.Core.cardName).join(''));reps.push(cs);counts.push(0);}counts[k]++;}
@@ -24,7 +26,7 @@
  }
  // handGroups: {labels:[name per group], classes: two base-36 digits per PLO class giving its group}.
  function readGroups(raw){
-  const n=ploClasses().keys.length;need(raw&&Array.isArray(raw.labels)&&raw.labels.length>=2&&raw.labels.length<=1296&&typeof raw.classes==='string'&&raw.classes.length===2*n,'A PLO reference needs hand groups covering all '+n+' PLO hand classes.');
+  const n=plo?plo.keys.length:PLO_CLASSES;need(raw&&Array.isArray(raw.labels)&&raw.labels.length>=2&&raw.labels.length<=1296&&typeof raw.classes==='string'&&raw.classes.length===2*n,'A PLO reference needs hand groups covering all '+n+' PLO hand classes.');
   const labels=raw.labels.map(l=>text(l,'a hand group name',120));need(new Set(labels).size===labels.length,'Hand group names must be unique.');
   const of=new Uint16Array(n);for(let i=0;i<n;i++){const g=parseInt(raw.classes.substr(2*i,2),36);need(g>=0&&g<labels.length,'A PLO hand class points to a missing hand group.');of[i]=g;}
   return{labels,classes:raw.classes,of};
@@ -41,19 +43,22 @@
    delete node.key;
    // Replays start from the longest history prefix already replayed for this pack.
    const keys=[''];for(const e of node.history)keys.push(keys[keys.length-1]+'/'+e?.seat+e?.kind+(e?.to??''));let k=keys.length-1;while(k>0&&!states.has(keys[k]))k--;const h=(states.get(keys[k])||base).clone();
-   for(let i=k;i<node.history.length;i++){const e=node.history[i];need(!h.done&&h.street===0&&e.seat===h.actor,'The reference history has an invalid actor or street.');h.act({kind:e.kind,target:['raise','bet'].includes(e.kind)?G.units(e.to):undefined});states.set(keys[i+1],h.clone());}
-   need(!h.done&&h.street===0&&node.seat===h.actor,'The node seat does not match its action history.');const ids=new Set();node.actions=node.actions.map((a,i)=>{need(['fold','check','call','raise'].includes(a.kind),'Use fold, check, call or raise in a preflop reference.');const action={kind:a.kind,id:'pf'+i,...a.kind==='raise'?{target:a.to===undefined&&Number.isInteger(a.target)?a.target:G.units(a.to)}:{}};h.clone().act(action);const signature=a.kind+':'+(action.target||0);need(!ids.has(signature),'A reference node contains duplicate actions.');ids.add(signature);const l=h.legal();action.label=a.kind==='raise'?'Raise to '+G.bb(action.target)+' bb'+(action.target===l.allInTo?' · all-in':''):a.kind==='call'?'Call '+G.bb(l.callCost)+' bb':a.kind==='check'?'Check':'Fold';return action;});
+   for(let i=k;i<node.history.length;i++){const e=node.history[i];need(!h.done&&h.street===0&&e.seat===h.actor,'The reference history has an invalid actor or street.');h.act({kind:e.kind,target:['raise','bet'].includes(e.kind)?G.units(e.to):undefined});states.set(keys[i+1],i+1<node.history.length?h.clone():h);}
+   // Fold, check and call are checked against legal() exactly as Hand.act checks them; only raises replay on a copy.
+   need(!h.done&&h.street===0&&node.seat===h.actor,'The node seat does not match its action history.');const ids=new Set(),l0=h.legal();node.actions=node.actions.map((a,i)=>{need(['fold','check','call','raise'].includes(a.kind),'Use fold, check, call or raise in a preflop reference.');const action={kind:a.kind,id:'pf'+i,...a.kind==='raise'?{target:a.to===undefined&&Number.isInteger(a.target)?a.target:G.units(a.to)}:{}};if(a.kind==='raise')h.clone().act(action);else need(a.kind==='fold'?l0.fold:a.kind==='check'?l0.check:l0.toCall>0,a.kind==='fold'?'Checking is available; folding to no bet is disabled.':a.kind==='check'?'A bet is outstanding.':'There is no bet to call.');const signature=a.kind+':'+(action.target||0);need(!ids.has(signature),'A reference node contains duplicate actions.');ids.add(signature);const l=h.legal();action.label=a.kind==='raise'?'Raise to '+G.bb(action.target)+' bb'+(action.target===l.allInTo?' · all-in':''):a.kind==='call'?'Call '+G.bb(l.callCost)+' bb':a.kind==='check'?'Check':'Fold';return action;});
    node.key=historyKey(h);}
    const A=node.actions.length,fold=node.actions.findIndex(a=>a.kind==='fold');node.foldRow=node.actions.map((_,i)=>i===fold?1:0);
    // Compact packs list one row per class in PokerPreflop.classes order (NLH) or hand group
    // order (PLO): an action index for a pure row, or per-mille frequencies. They are kept
    // as one per-mille table per node, which stays small in memory and storage.
    if(node.table||Array.isArray(node.strategy)){
+    // A trusted stored table is already a checked Uint16Array: it is kept as it is, without the per-row checks.
+    if(trusted&&node.table instanceof Uint16Array&&node.table.length===labels.length*A){node.defaultFold=false;delete node.strategy;}else{
     const t=new Uint16Array(labels.length*A);
     if(node.table){const src=ArrayBuffer.isView(node.table)||Array.isArray(node.table)?node.table:Object.values(node.table);need(src.length===t.length&&Array.prototype.every.call(src,v=>Number.isInteger(v)&&v>=0&&v<=1000),'A compact node needs one row per hand class.');t.set(src);}
     else{need(node.strategy.length===labels.length,'A compact node needs one row per hand class.');node.strategy.forEach((r,i)=>{if(Number.isInteger(r)){need(r>=0&&r<A,'A compact row names a missing action.');t[i*A+r]=1000;}else{need(Array.isArray(r)&&r.length===A&&r.every(v=>Number.isInteger(v)&&v>=0&&v<=1000),'Compact rows use per-mille frequencies.');t.set(r,i*A);}});}
     for(let i=0;i<labels.length;i++){let x=0;for(let a=0;a<A;a++)x+=t[i*A+a];need(x===1000,'Action frequencies must sum to one for '+labels[i]+'.');}
-    node.table=t;delete node.strategy;node.defaultFold=false;
+    node.table=t;delete node.strategy;node.defaultFold=false;}
    }else{
    delete node.table;need(node.strategy&&typeof node.strategy==='object'&&!Array.isArray(node.strategy),'Each node needs hand frequencies.');const normalized=Object.create(null);for(const [label,values]of Object.entries(node.strategy)){need(groups?groups.labels.includes(label):classes.includes(label)||/^(?:[2-9TJQKA][cdhs]){2}$/.test(label),'Invalid reference hand: '+label);const k=groups||classes.includes(label)?label:canonicalCards(G.Core.cards(label));need(!(k in normalized),'Duplicate reference combination.');need(Array.isArray(values)&&values.length===node.actions.length&&values.every(v=>Number.isFinite(v)&&v>=0&&v<=1)&&Math.abs(sum(values)-1)<1e-6,'Action frequencies must sum to one for '+label+'.');normalized[k]=values.slice();}node.strategy=normalized;node.defaultFold=node.defaultFold===true;need(!node.defaultFold||fold>=0,'defaultFold requires a fold action.');
    if(groups)need(groups.labels.every(l=>l in node.strategy),'A PLO reference node needs a row for every hand group.');else need(G.combinations(Array.from({length:52},(_,i)=>i),2).every(cs=>rowFor(pack,node,cs)),'A reference node must cover every combination or explicitly set defaultFold.');
