@@ -25,13 +25,14 @@
     }
     let value=adapter.utility(updating)/scale;
     for(let t=trajectory.length-1;t>=0;t--){const s=trajectory[t],own=s.actor===updating,values=s.sigma.map((_,a)=>own?s.entry.baseline[a]:0),oldBaseline=values[s.a];values[s.a]+=(value-oldBaseline)/s.behavior[s.a];const estimate=values.reduce((v,x,a)=>v+s.sigma[a]*x,0);
-      if(own){const cf=s.otherReach/s.behaviorReach*chanceWeight,avgWeight=s.ownReach/s.behaviorReach*chanceWeight;for(let a=0;a<s.sigma.length;a++){s.entry.regrets[a]+=cf*(values[a]-estimate);s.entry.average[a]+=avgWeight*s.sigma[a];if(!Number.isFinite(s.entry.regrets[a])||!Number.isFinite(s.entry.average[a]))throw Error('Numerical overflow in sampled regret estimates. Use a shallower model.')}s.entry.baseline[s.a]=.95*oldBaseline+.05*Math.max(-4,Math.min(4,value));s.entry.updates++;if(s.entry.updates%(STABLE_UPDATES*s.sigma.length)===0)refreshDrift(s.entry);}
+      if(own){const cf=s.otherReach/s.behaviorReach*chanceWeight,avgWeight=s.ownReach/s.behaviorReach*chanceWeight;for(let a=0;a<s.sigma.length;a++){s.entry.regrets[a]+=cf*(values[a]-estimate);s.entry.average[a]+=avgWeight*s.sigma[a];if(!Number.isFinite(s.entry.regrets[a])||!Number.isFinite(s.entry.average[a]))throw Error('Numerical overflow in sampled regret estimates. Use a shallower model.')}s.entry.baseline[s.a]=.95*oldBaseline+.05*Math.max(-4,Math.min(4,value));s.entry.updates++;{const k=s.entry.updates/(STABLE_UPDATES*s.sigma.length);if(Number.isInteger(k)&&!(k&(k-1)))refreshDrift(s.entry);}}
       value=estimate;
     }
     return trajectory.length;
   }
-  // Every STABLE_UPDATES updates per action, a state's average policy is compared with the previous
-  // check; drift is the total-variation change between the two (Infinity until two checks exist).
+  // When a state's updates reach STABLE_UPDATES per action times 1, 2, 4, 8…, its average policy is
+  // compared with the previous check, so the later half of its updates is compared with the earlier
+  // half; drift is that total-variation change (Infinity until two checks exist).
   const STABLE_UPDATES=25,STABLE_VISITS=200,STABLE_DRIFT=.1;
   function refreshDrift(e){const p=matching(e.average);e.drift=e.snap?p.reduce((d,x,i)=>d+Math.abs(x-e.snap[i]),0)/2:Infinity;e.snap=Float64Array.from(p);}
   class Model{
