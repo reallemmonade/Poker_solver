@@ -7,7 +7,7 @@ function referencePolicyHTML(query){
 function analysisFailureHTML(result,fallback=false){const why=result?.message||'No reliable solution is available.',size=/budget|cannot fit|exceed|memory|did not settle/i.test(why);return '<div class="notice analysis-failure"><strong>No solver answer for this spot</strong><br>'+(size?'This spot is too big to solve reliably in the browser.':'The solver could not produce a reliable answer here.')+(fallback?' The reference suggestion below is shown instead.':' Fewer players, shallower stacks or narrower ranges (Analysis inputs) can make it solvable.')+'<details class="analysis-why"><summary>Why?</summary><p class="help">'+esc(why)+'</p></details></div>';}
 function decisionResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
- if(result?.solve?.version===1&&result.supported)return validSpotResult(result)?spotResultHTML(result,grade):'<div class="notice">This saved solve has invalid or incomplete metadata. Analyze the spot again to replace it.</div>';
+ if(result?.solve?.version===1&&result.supported)return validSpotResult(result)?spotResultHTML(result,grade).replace(/([2-9TJQKA][cdhs]):(\d+\.\d{3,})/g,(m,card,w)=>card+':'+ +(+w).toFixed(2)):'<div class="notice">This saved solve has invalid or incomplete metadata. Analyze the spot again to replace it.</div>';
  if(!result?.supported)return analysisFailureHTML(result);
  return '<div class="notice"><strong>Older rollout estimate — no reliable recommendation</strong><br>This saved estimate has no measured equilibrium accuracy. Its percentages and EV rankings are excluded from advice and grades.</div>';
 }
