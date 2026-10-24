@@ -4,7 +4,7 @@ const state={config:null,abstraction:null,spotSizing:{betSizes:[1/3,2/3,1.5],rai
 const savedHandRows=new WeakMap();
 const base={variant:'NLH',seats:2,button:0,stacks:[10,10],sb:.5,bb:1,ante:0,mode:'cash',rakePct:0,rakeCap:3,noFlopNoDrop:true,startStreet:0,board:'',pot:0,otherStacks:[],payouts:[500,300,200],bounties:[]};
 // Tournament presets use the 1 bb big-blind ante of the bundled MTT chart library, so imported charts can answer them.
-const presets={hu:{...base},cash6:{...base,seats:6,stacks:Array(6).fill(100)},mtt6:{...base,seats:6,stacks:[30,18,12,45,8,24],mode:'icm',ante:1,anteMode:'bigblind',payouts:[500,300,200]},plo4:{...base,variant:'PLO4',seats:6,stacks:Array(6).fill(40)},plo5:{...base,variant:'PLO5',seats:6,stacks:Array(6).fill(40)},hilo:{...base,variant:'PLO8',seats:6,stacks:Array(6).fill(40)},satellite:{...base,seats:4,stacks:[35,18,8,22],mode:'icm',ante:1,anteMode:'bigblind',payouts:[100,100,100]}};
+const presets={hu:{...base},cash6:{...base,seats:6,stacks:Array(6).fill(100)},mtt6:{...base,seats:6,stacks:[30,18,12,45,8,24],mode:'icm',ante:1,anteMode:'bigblind',payouts:[500,300,200]},plo4:{...base,variant:'PLO4',seats:6,stacks:Array(6).fill(100)},plo5:{...base,variant:'PLO5',seats:6,stacks:Array(6).fill(100)},hilo:{...base,variant:'PLO8',seats:6,stacks:Array(6).fill(100)},satellite:{...base,seats:4,stacks:[35,18,8,22],mode:'icm',ante:1,anteMode:'bigblind',payouts:[100,100,100]}};
 function esc(s){return String(s).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]))}
 function fmt(x,d=2){return Number.isFinite(x)?x.toLocaleString(undefined,{maximumFractionDigits:d}):'—'}
 function signed(x,d=2){return(x>0?'+':'')+fmt(x,d)}
@@ -58,13 +58,13 @@ function practiceLatest(){if(state.job!=='train')return;state.worker?.postMessag
 function newHandOptions(){const holes=Array(state.config.seats).fill(null),cards=heroCardsFor(state.config,state.hero);if(cards)holes[state.hero]=cards;return{holes}}
 function nextSessionConfig(){return nextPersistentSessionConfig();}
 function deal(carry=true){if(playBusy()||state.busy&&state.dirty)return false;clearCustomBetError();if(carry&&state.hand&&!state.hand.done){status('Finish the current hand, or restart the session.');return false;}stopTableMotion();let rollback=null;try{if(state.dirty){if(!applySetup(false,false))return false}rollback=captureSessionTransition();if(carry)state.config=nextSessionConfig();beforeLiveDeal(carry);state.hero=Math.min(state.hero,state.config.seats-1);state.hand=new G.Hand(state.config,newHandOptions());state.handSaved=false;state.currentGrades=[];saveLiveSession();writeForm(state.config,state.abstraction);$('hero').value=state.hero;$('playFeedback').textContent='Choose an action. Reference coverage and rollout uncertainty are reported with the analysis.';startTableDeal().catch(error=>{stopTableMotion();renderAll();status(error.message,true)});return true;}catch(error){if(rollback)rollbackSessionTransition(rollback);status(error.message,true);return false}}
-function onHandEnd(){if(!state.hand?.done||state.handSaved)return;state.handSaved=true;state.sessionHands++;const record=H.record(state.hand,{hero:state.hero,grading:state.currentGrades}),row={id:id('h'),createdAt:record.createdAt,record};savedHandRows.set(state.hand,row);state.histories.unshift(row);dbPut('hands',row).catch(saveFailed);renderSavedHands();sessionHandEnded();}
+function onHandEnd(){if(!state.hand?.done||state.handSaved)return;state.handSaved=true;state.sessionHands++;const record=H.record(state.hand,{hero:state.hero,grading:state.currentGrades}),row={id:id('h'),createdAt:record.createdAt,record};savedHandRows.set(state.hand,row);state.histories.unshift(row);dbPut('hands',row).then(()=>postStudio({type:'hands'}),saveFailed);renderSavedHands();sessionHandEnded();}
 function observedData(hand){return{config:hand.config,actor:hand.actor,heroCards:hand.holes[hand.actor],board:hand.board,actions:hand.actionLog}}
 function analyze(hand,pending={kind:'inspect'},extraAction=null){return analyzeSpot(hand,pending,extraAction);}
 // The hero's action always applies at once. Its assessment (when recorded) and automatic
 // analysis run as background jobs that never block the table; see softJob().
 function softJob(job=state.job){return job==='spotSolve'&&!!(state.pending?.automatic||state.pending?.background)}
-function playBusy(){return state.busy&&!softJob()}
+function playBusy(){return state.busy&&!softJob()||liveSession.passive}
 // A custom-size error shows by the input and in the status line until the next action or hand.
 function customBetError(message){state.customError=message;status(message,true);$('legalHint').textContent=message;}
 function clearCustomBetError(){if(state.customError&&$('status').textContent===state.customError)status('');state.customError=null;}
