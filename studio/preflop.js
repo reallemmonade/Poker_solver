@@ -136,6 +136,52 @@
   const standIn=best.pack.chipEV&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
  }
+ // Postflop starting ranges from a chart: replays the preflop line in the
+ // closest-depth chart of the same game and multiplies, for every hand class
+ // (NLH) or hand group (PLO), the frequency of each action the player took.
+ // Raises map to the chart raise of the nearest size, and an all-in maps to
+ // the chart's all-in. Returns null when the line leaves the chart's tree
+ // (limps, extra callers), so callers keep their other range sources.
+ function rowAt(pack,node,i){
+  const A=node.actions.length;if(node.table)return Array.from(node.table.subarray(i*A,i*A+A),v=>v/1000);
+  const label=pack.groups?pack.groups.labels[i]:classes[i];return node.strategy[label]||(node.defaultFold?node.foldRow:null);
+ }
+ function postflopRanges(packs,config,actions,tolerance=1.5){
+  config=G.normalize(config);const pre=actions.filter(a=>a.street===0),n=config.seats,real=new G.Hand(config,{rng:G.rng(744)});
+  try{for(const a of pre)real.act(a);}catch{return null;}
+  if(real.street===0&&!real.done)return null;const live=real.living();if(live.length<2)return null;
+  const depth=G.bb(Math.min(...live.map(i=>real.initial[i]).sort((a,b)=>b-a).slice(0,2))),table={...config,button:0};let best=null;
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)||shape(pack.config,pack.chipEV)!==shape(table,pack.chipEV)||best&&gap>=best.gap)continue;best={pack,gap,chart};}
+  if(!best)return null;const pack=best.pack,labels=pack.groups?pack.groups.labels:classes,relative=i=>(i-config.button+n)%n,proxy=new G.Hand(pack.config,{rng:G.rng(745)}),replay=new G.Hand(config,{rng:G.rng(746)});
+  const weights=Array.from({length:n},()=>new Float64Array(labels.length).fill(1));
+  for(const a of pre){
+   const node=pack.index.get(historyKey(proxy));if(!node||proxy.actor!==relative(a.seat))return null;
+   const kinds=a.kind==='bet'?['raise']:a.kind==='check'||a.kind==='call'?[a.kind,a.kind==='check'?'call':'check']:[a.kind];let pick=-1;
+   for(const kind of kinds){const options=node.actions.map((x,i)=>({x,i})).filter(o=>o.x.kind===kind);if(!options.length)continue;
+    if(kind!=='raise'){pick=options[0].i;break;}
+    const jam=replay.legal().allInTo,chartJam=proxy.legal().allInTo,want=G.bb(a.target);
+    if(a.target>=jam){const all=options.find(o=>o.x.target===chartJam);if(all){pick=all.i;break;}}
+    pick=options.filter(o=>o.x.target!==chartJam||a.target>=jam).sort((p,q)=>Math.abs(Math.log(G.bb(p.x.target)/want))-Math.abs(Math.log(G.bb(q.x.target)/want)))[0]?.i??options[0].i;break;}
+   if(pick<0)return null;const w=weights[a.seat];
+   for(let i=0;i<labels.length;i++){const row=rowAt(pack,node,i);w[i]*=row?row[pick]:0;}
+   const chosen=node.actions[pick];proxy.act({kind:chosen.kind,target:chosen.target});replay.act(a);
+  }
+  const seats={};for(const seat of live){const w=weights[seat],peak=Math.max(...w);if(!(peak>0))return null;seats[seat]=Array.from(w,x=>x/peak);}
+  return{pack,name:pack.name,game:pack.groups?'PLO4':'NLH',labels,seats,depthMatch:best.gap>1e-9?{chart:best.chart,actual:depth}:null,key:historyKey(proxy),chart:proxy,live:live.map(relative)};
+ }
+ // Range text the spot solver parses: hand classes with weights (NLH).
+ function classRangeText(weights,floor=.001){return classes.map((c,i)=>[c,weights[i]]).filter(([,w])=>w>=floor).map(([c,w])=>w>=.9995?c:c+':'+(Math.round(w*1000)/1000)).join(',');}
+ // PLO: every four-card combo off the board, weighted by its group, then a
+ // sample of at most limit combos drawn in proportion to weight (systematic
+ // sampling, so each kept combo stands for an equal share of the range).
+ function ploCombos(range,board,{limit=200,include=null,seed=1}={}){
+  const P=ploClasses(),blocked=new Set(board),of=range.pack.groups.of,w=[];let total=0;const deck=Array.from({length:52},(_,i)=>i).filter(c=>!blocked.has(c));
+  for(let d=3;d<deck.length;d++)for(let c=2;c<d;c++)for(let b=1;b<c;b++)for(let a=0;a<b;a++){const cs=[deck[a],deck[b],deck[c],deck[d]],x=range.weights[of[P.classOf(cs)]];if(x>0){total+=x;w.push([cs,x]);}}
+  if(!w.length)return[];const rng=G.rng(seed),step=total/Math.min(limit,w.length),out=new Map();let next=rng()*step,acc=0;
+  for(const [cs,x]of w){acc+=x;let k=0;while(acc>next){k++;next+=step;}if(k)out.set(cs.join('.'),{cards:cs,weight:k});}
+  if(include){const k=include.slice().sort((a,b)=>a-b),key=k.join('.');if(!out.has(key))out.set(key,{cards:k,weight:0});}
+  return[...out.values()];
+ }
  // Open size and re-raise multiplier the closest matching chart uses at this game's depth, so a
  // model, its bots and the hero's buttons play the chart's tree; null parts when no chart applies.
  function chartSizes(packs,config){
@@ -149,5 +195,5 @@
  // Redeals the actor's cards (from the hand's deck) until the chart answers for them; false when the
  // node is off the chart's own line or no tried hand reaches it. For quiz questions drawn from pack nodes.
  function deal(pack,hand,rng=Math.random,tries=400){const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return false;const h=hand.holes[hand.actor],d=hand.deck;for(let t=0;t<tries;t++){if(query(pack,hand,[]))return true;for(let k=0;k<h.length;k++){const j=Math.floor(rng()*d.length);[h[k],d[j]]=[d[j],h[k]];}}return false;}
- const api={FORMAT,OFF_PATH,classes,ploClasses,validate,serialize,query,nearest,chartSizes,isResult,historyKey,row:rowFor,deal};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
+const api={FORMAT,OFF_PATH,classes,ploClasses,validate,serialize,query,nearest,chartSizes,isResult,historyKey,row:rowFor,deal,postflopRanges,classRangeText,ploCombos};root.PokerPreflop=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
