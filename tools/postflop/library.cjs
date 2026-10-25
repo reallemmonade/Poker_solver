@@ -21,6 +21,13 @@ const SPOTS={
  'sb-bb':{label:'6-max 100bb · SB opens, BB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','raise','call'])},
  'btn-bb-3bet':{label:'6-max 100bb · BTN opens, BB 3-bets, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','raise','fold','raise','call'])},
  'hu-srp':{label:'Heads-up 100bb · button opens, BB calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','call'])},
+ 'co-btn':{label:'6-max 100bb · CO opens, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','call','fold','fold'])},
+ 'hj-btn':{label:'6-max 100bb · HJ opens, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','fold','call','fold','fold'])},
+ 'utg-btn':{label:'6-max 100bb · UTG opens, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','fold','fold','call','fold','fold'])},
+ 'co-bb-3bet':{label:'6-max 100bb · CO opens, BB 3-bets, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','fold','fold','raise','call'])},
+ 'btn-sb-3bet':{label:'6-max 100bb · BTN opens, SB 3-bets, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','raise','raise','fold','call'])},
+ 'sb-bb-3bet':{label:'6-max 100bb · SB opens, BB 3-bets, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','raise','raise','call'])},
+ 'hu-3bet':{label:'Heads-up 100bb · button opens, BB 3-bets, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','call'])},
 };
 // One bet size per street, raises only on the flop (all-in after that), no
 // donk bets: the tree a 100bb flop fits in about 5 GB and solves in minutes.
@@ -36,7 +43,10 @@ function prepare(id,packs){
  const def=SPOTS[id];if(!def)throw Error('Unknown spot '+id+'. Known: '+Object.keys(SPOTS).join(', '));
  const raw=packs.find(p=>p.name.startsWith(def.chart+' '));if(!raw)throw Error('The chart library has no "'+def.chart+'" pack.');
  const pack=P.validate(raw),h=new G.Hand(pack.config,{rng:G.rng(5)}),actions=[];
- for(const kind of def.steps){const node=pack.index.get(P.historyKey(h));if(!node)throw Error('Line leaves the chart at '+kind+'.');const options=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0));if(!options.length)throw Error('The chart has no '+kind+' here.');const a={seat:h.actor,street:0,kind,target:options[0].target};actions.push(a);h.act({kind,target:a.target});}
+ for(const kind of def.steps){const node=pack.index.get(P.historyKey(h));
+  // A chart leaves out decisions that are always folds (BB behind an SB 3-bet).
+  if(!node&&kind==='fold'){actions.push({seat:h.actor,street:0,kind});h.act({kind});continue;}
+  if(!node)throw Error('Line leaves the chart at '+kind+'.');const options=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0));if(!options.length)throw Error('The chart has no '+kind+' here.');const a={seat:h.actor,street:0,kind,target:options[0].target};actions.push(a);h.act({kind,target:a.target});}
  if(h.street!==1)throw Error('The line does not reach the flop.');
  const range=P.postflopRanges([pack],pack.config,actions);if(!range||range.key!==P.historyKey(h))throw Error('Could not derive ranges for '+id+'.');
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));

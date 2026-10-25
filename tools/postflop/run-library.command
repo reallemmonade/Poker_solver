@@ -7,5 +7,5 @@ charts="${CHARTS:-tools/postflop/charts-100bb.json.gz}"
 out="${OUT:-$HOME/Desktop/Poker_Solver/postflop-work}"
 [ -f "$charts" ] || { echo "Chart file $charts not found (set CHARTS)."; exit 1; }
 caffeinate -i node tools/postflop/library.cjs solve --charts "$charts" --out "$out" \
-  --spots "${SPOTS:-btn-bb,co-bb,sb-bb,btn-bb-3bet,hu-srp,utg-bb}" --flops "${FLOPS:-100}" --accuracy 1 --iterations 150
+  --spots "${SPOTS:-btn-bb,co-bb,sb-bb,btn-bb-3bet,hu-srp,utg-bb,co-btn,btn-sb-3bet,hu-3bet,co-bb-3bet,sb-bb-3bet,hj-btn,utg-btn}" --flops "${FLOPS:-100}" --accuracy 1 --iterations 150
 node tools/postflop/library.cjs bundle --out "$out"

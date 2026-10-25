@@ -2,7 +2,8 @@
 'use strict';
 // Checks that the app finds library answers for live hands: the preflop line
 // maps to the spot, suit-permuted flops find their canonical flop, hero combos
-// map through the same permutation, and flop bet sizes match or are refused.
+// map through the same permutation, flop bet sizes match or are refused, and
+// unsolved flops are answered by a labelled stand-in of the same texture.
 //   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz
 const fs=require('fs'),zlib=require('zlib');
 const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),Lib=require('../../studio/postflop-library.js'),{SPOTS}=require('./library.cjs'),C=G.Core;
@@ -40,6 +41,18 @@ for(const spot of library.spots){
    for(const a of r.actions)ok((()=>{try{h.clone().act(a);return true;}catch{return false;}})(),spot.id+' '+key+' '+what+': legal action '+a.label);
    if(what==='root'){const changed={...spot,rangeOop:{...spot.rangeOop,AA:(spot.rangeOop.AA||0)>.5?0:1}};ok(!Lib.query([{spots:[changed]}],range,h),spot.id+' '+key+': a re-solved chart with other ranges gets no answer');}
   }
+ }
+ // Unsolved flops get the nearest solved flop of the same texture: move the
+ // top card of a solved flop up or down a rank and expect a labelled stand-in.
+ let tried=0;
+ for(const key of Object.keys(spot.flops)){
+  const canon=C.cards(key).sort((x,y)=>y-x),moved=[4,-4].map(d=>[canon[0]+d,canon[1],canon[2]]).find(b=>b[0]<52&&(b[0]>>2)>(b[1]>>2)&&!spot.flops[Lib.canonical(b).key]);if(!moved)continue;
+  const h=new G.Hand(pack.config,{runout:moved,rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(h)),t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;h.act({kind,target:t});}
+  const range=P.postflopRanges(packs,h.config,h.actionLog);let r=null;
+  for(let t=0;t<200&&!r;t++){const a=Math.floor(rng()*52),b=Math.floor(rng()*52);if(a===b||moved.includes(a)||moved.includes(b))continue;h.holes[h.actor]=[a,b];r=Lib.query([library],range,h);}
+  ok(r&&r.solve.library.standIn&&r.solve.library.flop!==Lib.canonical(moved).key&&/^Stand-in/.test(r.solve.warning),spot.id+' '+moved.map(C.cardName).join('')+': answered by a labelled stand-in flop');
+  if(r)ok(Math.abs(r.reference.reduce((a,b)=>a+b,0)-1)<1e-9,spot.id+' stand-in frequencies sum to 1');
+  if(++tried>=5)break;
  }
 }
 console.log(pass+' checks passed, '+fail+' failed.');process.exit(fail?1:0);
