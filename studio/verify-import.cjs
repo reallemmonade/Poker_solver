@@ -32,12 +32,15 @@ pass(`Chart bundle imports through the file picker: ${n} charts in ${(a.ms/1000)
 // A second import of the same bundle replaces charts by name instead of adding copies.
 const again=await pick(charts,/^Loaded \d+ charts/);assert.equal(await ev('preflopLibrary.packs.length'),names.length);pass(`Re-importing the bundle replaces charts by name (${(again.ms/1000).toFixed(1)} s)`);
 // Lookups: a 6-max 100bb open, the deep 5-bet jam line where KK used to fold, a PLO open and a short-stack MTT spot.
-const look=(cfg,acts,cards)=>ev(`(()=>{const h=new G.Hand(G.normalize(${JSON.stringify(cfg)}),{rng:G.rng(3)});for(const [kind,to] of ${JSON.stringify(acts)})h.act(kind==='raise'?{kind,target:G.units(to)}:{kind});h.holes[h.actor]=G.Core.cards(${JSON.stringify(cards)});const r=PokerPreflop.nearest(preflopLibrary.packs,h);return r&&PokerPreflop.isResult(r)?{name:r.referenceSource?.name||'',labels:r.actions.map(x=>x.label),freq:r.reference}:null})()`);
+const look=(cfg,acts,cards)=>ev(`(()=>{const h=new G.Hand(G.normalize(${JSON.stringify(cfg)}),{rng:G.rng(3)});for(const [kind,to] of ${JSON.stringify(acts)})h.act(kind==='raise'?{kind,target:G.units(to)}:{kind});h.holes[h.actor]=G.Core.cards(${JSON.stringify(cards)});const r=PokerPreflop.nearest(preflopLibrary.packs,h);return r&&PokerPreflop.isResult(r)?{name:r.referenceSource?.name||'',labels:r.actions.map(x=>x.label),freq:r.reference,rakeFree:!!r.rakeStandIn}:null})()`);
 const six=n=>({variant:'NLH',seats:6,button:0,stacks:Array(6).fill(n)});
 const open6=await look(six(100),[['fold'],['fold']],'AsAh');assert.ok(open6&&open6.freq[0]<.01,'No 6-max 100bb chart answer for AA in the CO: '+JSON.stringify(open6));
 const kk=await look(six(200),[['fold'],['fold'],['raise',2.5],['fold'],['fold'],['raise',10],['raise',23],['raise',200]],'KsKh');assert.ok(kk,'No chart answer facing the 200bb 5-bet jam');const kkFold=kk.freq[kk.labels.findIndex(l=>/^Fold/.test(l))];assert.ok(kkFold<.1,'KK folds '+(100*kkFold).toFixed(1)+'% to the 200bb 5-bet jam: '+JSON.stringify(kk));
 const plo=await look({variant:'PLO4',seats:6,button:0,stacks:Array(6).fill(100)},[['fold'],['fold']],'AsAhKsKh');assert.ok(plo&&plo.freq[0]<.01,'No PLO chart answer for AAKK: '+JSON.stringify(plo));
 const mtt=await look({variant:'NLH',seats:9,button:0,stacks:Array(9).fill(20),mode:'icm',ante:1,anteMode:'bigblind',payouts:[50,30,20]},[],'7c2d');assert.ok(mtt&&mtt.freq[0]>.99,'No 9-handed 20bb MTT answer folding 72o UTG: '+JSON.stringify(mtt));
+// A raked table with no raked chart for its rake gets the rake-free chart, labelled.
+const raked=await look({...six(100),rakePct:7,rakeCap:4},[['fold'],['fold']],'AsAh');assert.ok(raked&&raked.freq[0]<.01&&raked.rakeFree&&/rake is not modelled/.test(raked.name),'No labelled rake-free answer at a raked table: '+JSON.stringify(raked));
+pass(`Imported charts answer: a 7% raked table gets the rake-free chart, labelled;`);
 pass(`Imported charts answer: 6-max 100bb AA opens, KK calls the 200bb 5-bet jam (folds ${(100*kkFold).toFixed(1)}%), PLO AAKK opens, 9-handed 20bb MTT folds 72o`);
 if(flops){
  const b=await pick(flops,/^Loaded .*flops/);const spots=await ev('postflopLibrary.libraries.flatMap(l=>l.spots).map(s=>({label:s.label,flops:Object.keys(s.flops).length}))');assert.ok(spots.length&&spots.every(s=>s.flops>0),JSON.stringify(spots));

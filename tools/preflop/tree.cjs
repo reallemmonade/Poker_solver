@@ -19,6 +19,9 @@ function defaults(raw={}){
   // Facing a 4-bet or more, flatting is dropped (all-in or fold) when the call would leave
   // less than callSPR times the pot behind.
   callSPR:2.5,
+  // Cash rake (percent of the pot, capped in bb), taken only from pots that see a flop. A flop
+  // pot is raked as if it grew rakeGrowth times by the river; all-in pots as they stand.
+  rake:0,rakeCap:3,rakeGrowth:2,
   // Share of an opponent's continuing range that CFR passes also send down every action.
   tremble:1e-5,...raw,seats:n};
 }
@@ -111,7 +114,8 @@ function build(raw){
   const [a,b]=live,ip=postflopRank(n,a)>postflopRank(n,b)?a:b,spr=Math.min(cap[a]-bets[a],cap[b]-bets[b])/pot;
   // commit: weight of all-in equity in a flop pot's payoff (1 when effectively all-in).
   const commit=s.allIn?1:Math.min(1,Math.max(0,(o.flopSPR-spr)/(o.flopSPR-o.allInSPR)));
-  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,...commit>0&&commit<1?{commit}:{}};
+  const rake=Math.min(o.rakeCap,o.rake/100*pot*(1+(1-Math.min(1,commit))*(o.rakeGrowth-1)));
+  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,...commit>0&&commit<1?{commit}:{},...rake>0?{net:pot-rake}:{}};
  }
 }
 function sum(a){return a.reduce((x,y)=>x+y,0);}

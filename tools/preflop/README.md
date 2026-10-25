@@ -16,6 +16,10 @@ node tools/preflop/library.cjs --out preflop-library --jobs 4   # every chart, b
 - They use a 1bb big-blind ante and chip EV, with no ICM.
 - They are marked `chipEV`, so they match tournament tables whatever the payouts.
 
+**Raked cash charts:** `library.cjs --rake 5 --rakeCap 3 --games nlh` builds NLH cash charts with 5% rake capped at 3bb, no flop no drop, at 50, 100, 150 and 200bb (`--depths` to change), into files ending `-rake5-cap3.json` and a bundle of their own. Import that bundle as well as the main one. `export.cjs` takes the same `--rake` and `--rakeCap`. Pots that end preflop pay no rake. All-in pots pay rake on the pot as it stands. A flop pot is raked as if it doubled by the river (`rakeGrowth`), because postflop play is not modelled. In 6-max 100bb, rake mainly cuts the big blind's flats against a button open, from 51% to 35% of hands, and tightens the button and small-blind opens by about 2 points.
+
+A table matches a raked chart only with the same rake and cap. Any other raked table gets the rake-free chart, and the answer says the rake is not modelled.
+
 **Short and deep stacks:**
 - Below 40bb, opens are 2bb.
 - At 25bb or less, all-in is offered at every raise.
@@ -78,7 +82,7 @@ The 9-handed charts are only as good as the realization model. Compared with ful
 - no limping;
 - simplified multiway play, so in-position flats stay rarer than in full solves;
 - with the 1bb big-blind ante (MTT charts) the BB still defends almost every hand against late-position opens, and openers rarely fold to a 3-bet;
-- at 150bb, where 4-bet flats remain, KK still folds 59-100% to the 5-bet jam after 4-betting on 9 lines of the 6-max cash chart. `checks()` reports each such line (NLH, 40-200bb) when a pack is built;
+- up to 200bb, facing a 4-bet, there are no flats when the call would leave under 6x the pot behind, so Practice never grades a flat there. `checks()` still reports any line (NLH, 40-200bb) where KK folds to the 5-bet jam;
 - PLO hand groups are coarse: a group plays one strategy, so a hand such as 9876 single-suited is folded from the CO with the weaker rundowns in its group.
 
 The bundled `preflop-library.json.gz` in the app's chart packs was built before the current model. Its settings text has no "odds to the power" clause. Until it is rebuilt, Practice grades against the old charts: the heads-up button opens 36.7%, premiums fold to some squeezes, and so on. Rebuilding the bundled library after a model change takes several hours on four cores: `node tools/preflop/library.cjs --out preflop-library --jobs 4` (delete the folder's chart files first, since finished charts are kept).
