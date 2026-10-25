@@ -19,6 +19,9 @@ const SPOTS={
  'plo-sb-bb':{label:'PLO 6-max 100bb · SB opens, BB calls',chart:'PLO cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','raise','call'])},
  'plo-btn-bb-3bet':{label:'PLO 6-max 100bb · BTN opens, BB 3-bets, BTN calls',chart:'PLO cash 6-handed 100bb',...line(6,['fold','fold','fold','raise','fold','raise','call'])},
  'plo-hu-srp':{label:'PLO heads-up 100bb · button opens, BB calls',chart:'PLO cash 2-handed 100bb',...line(2,['raise','call'])},
+ // Limped pots exist only in charts built with --limp 1 (the SB completes, the BB checks).
+ 'plo-sb-bb-limp':{label:'PLO 6-max 100bb · SB limps, BB checks',chart:'PLO cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','call','check'])},
+ 'plo-hu-limp':{label:'PLO heads-up 100bb · button limps, BB checks',chart:'PLO cash 2-handed 100bb',...line(2,['call','check'])},
 };
 // The app's PLO tree (studio/local-solver.js): one bet size per street, pot raises.
 const TREE=L.PLO_TREE;

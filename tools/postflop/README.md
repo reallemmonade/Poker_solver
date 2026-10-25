@@ -83,6 +83,8 @@ node tools/postflop/plo-library.cjs bundle --out plo-work
 | `plo-sb-bb` | SB opens, BB calls |
 | `plo-btn-bb-3bet` | BTN opens, BB 3-bets, BTN calls |
 | `plo-hu-srp` | Heads-up: the button opens, BB calls |
+| `plo-sb-bb-limp` | SB limps, BB checks (needs charts built with `--limp 1`) |
+| `plo-hu-limp` | Heads-up: the button limps, BB checks (needs charts built with `--limp 1`) |
 
 A PLO range has hundreds of thousands of combos, so each flop is solved for a systematic sample of each range (`--combos`, default 500 a side), the same sampling the app uses for live PLO solves. The flop stores those combos and their weights. The app answers a stored combo from its own row. Any other hand gets the stored combo closest in made-hand strength (its share of the stored combos) and in the number of turn cards that improve its hand category, and the answer says so. Unsolved flops get a stand-in flop as for NLH, and ranges must still match the chart's hand-group weights. On the 4-core container, 120 combos a side took about 50 s a flop for 20 iterations. Expect a few minutes a flop on a Mac at 500 combos.
 

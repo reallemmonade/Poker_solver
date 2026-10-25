@@ -114,7 +114,11 @@
  // combos) and number of turn cards that improve the hand category.
  const ploFeatures=new WeakMap();
  function ploIndex(flop,player,cards,board,rules){
-  const nameOf=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),list=flop.combos[player],exact=list.indexOf(nameOf(cards));if(exact>=0)return{index:exact,similar:null};
+  const nameOf=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),list=flop.combos[player];
+  // On a board with suit symmetry (4h4d4c, 5d5c3c) several relabellings give the
+  // same canonical board, and the solver stored each combo under one of them.
+  const key=board.slice().sort((a,b)=>b-a).join();
+  for(const map of PERMS){const move=c=>(c&~3)|map[c&3];if(board.map(move).sort((a,b)=>b-a).join()!==key)continue;const exact=list.indexOf(nameOf(cards.map(move)));if(exact>=0)return{index:exact,similar:null};}
   const feature=cs=>{const used=new Set([...cs,...board]),high=G.evaluate(cs,board,rules).high,cat=Math.floor(high/15**5);let outs=0;for(let t=0;t<52;t++)if(!used.has(t)&&Math.floor(G.evaluate(cs,[...board,t],rules).high/15**5)>cat)outs++;return{high,outs};};
   let cache=ploFeatures.get(flop);if(!cache){cache={};ploFeatures.set(flop,cache);}
   const stored=cache[player]||(cache[player]=list.map(n=>feature(C.cards(n)))),me=feature(cards),sorted=stored.map(f=>f.high).sort((a,b)=>a-b),pct=h=>{let lo=0,hi=sorted.length;while(lo<hi){const m=lo+hi>>1;if(sorted[m]<h)lo=m+1;else hi=m;}return lo/sorted.length;};
