@@ -7,13 +7,14 @@ const fs=require('fs'),{Solver,PLAY}=require('./solve.cjs');
 const P=require('../../studio/preflop.js');
 
 // NLH open sizes by format and depth: 2bb when short, 2.2bb in tournaments, 2.5bb in cash.
+// Up to 200bb NLH drops 4-bet flats that leave under 6x the pot behind, so the 5-bet jam range keeps KK and AK (see README).
 // PLO raises are always pot-sized. PLO equities run closer, so realization is sharper (hands
 // behind realize much less), position counts for more and the last raiser gets no extra edge;
 // this matches published 6-max opening ranges and leaves room to flat in position.
 function game({seats,stack,format,game='nlh'}){
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;
  if(game==='plo')return{seats,stack,ante,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
- return{seats,stack,ante,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3};
+ return{seats,stack,ante,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{}};
 }
 
 // Rows are rounded to 4 decimals; the largest entry absorbs the rounding error.
