@@ -20,6 +20,8 @@ node tools/preflop/library.cjs --out preflop-library --jobs 4   # every chart, b
 
 A table matches a raked chart only with the same rake and cap. Any other raked table gets the rake-free chart, and the answer says the rake is not modelled.
 
+**Limps (`--limp 1`, off by default):** the small blind may complete when everyone else has folded, and heads-up the button may limp. The big blind then checks or raises to 3.5bb (`isoRaise`). A limped pot is paid by the same realization model as a raised one, with the usual postflop positions (heads-up the button is in position, otherwise the big blind). In tests at 100bb, the heads-up button limps 20% and raises 68%, the 6-max small blind limps 8% and raises 43%, and the big blind raises about half its hands against a limp. That raise rate is likely high, because the realization model rewards initiative. Turning limps on changes the blind and heads-up ranges, so the flop libraries built on these charts must be rebuilt as well.
+
 **Short and deep stacks:**
 - Below 40bb, opens are 2bb.
 - At 25bb or less, all-in is offered at every raise.
@@ -79,7 +81,7 @@ The packs carry `handGroups` (group names, plus two base-36 digits per class in 
 The 9-handed charts are only as good as the realization model. Compared with full postflop solvers, expect these differences:
 
 - fewer suited connectors (the SB folds 54s and 76s first in), because implied odds are only partly captured;
-- no limping;
+- no limping unless built with `--limp 1`;
 - simplified multiway play, so in-position flats stay rarer than in full solves;
 - with the 1bb big-blind ante (MTT charts) the BB still defends almost every hand against late-position opens, and openers rarely fold to a 3-bet;
 - up to 200bb, facing a 4-bet, there are no flats when the call would leave under 6x the pot behind, so Practice never grades a flat there. `checks()` still reports any line (NLH, 40-200bb) where KK folds to the 5-bet jam;
