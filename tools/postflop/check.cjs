@@ -23,7 +23,7 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
   ok(Lib.canonical(board).key===key,spot.id+' '+key+' canonical key');
   for(const [what,flopLine,openScale]of [['root',[],1],['vs check',['check'],1],['vs bet',['check','bet'],1],['vs bet 40%',['check','bet40'],1],['vs bet 120%',['check','bet120'],1],['3bb open',['check'],1.2]]){
    const h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});
-   const proxy=new G.Hand(pack.config,{rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(proxy)),t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;proxy.act({kind,target:t});h.act({kind,target:kind==='raise'?Math.round(t*openScale/50)*50:undefined});}
+   const proxy=new G.Hand(pack.config,{rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(proxy));if(!node){proxy.act({kind});h.act({kind});continue;}const t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;proxy.act({kind,target:t});h.act({kind,target:kind==='raise'?Math.round(t*openScale/50)*50:undefined});}
    const pot=h.pot;for(const s of flopLine){if(s==='check')h.act({kind:'check'});else{const f={bet:.33,bet40:.4,bet120:1.2}[s];h.act({kind:'bet',target:Math.round(pot*f)});}}
    // Hero: a random combo off the board that the solved range holds.
    const range=P.postflopRanges(packs,h.config,h.actionLog),hero=h.actor;let cards;
@@ -48,7 +48,7 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
  let tried=0;
  for(const key of Object.keys(spot.flops)){
   const canon=C.cards(key).sort((x,y)=>y-x),moved=[4,-4].map(d=>[canon[0]+d,canon[1],canon[2]]).find(b=>b[0]<52&&(b[0]>>2)>(b[1]>>2)&&!spot.flops[Lib.canonical(b).key]);if(!moved)continue;
-  const h=new G.Hand(pack.config,{runout:moved,rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(h)),t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;h.act({kind,target:t});}
+  const h=new G.Hand(pack.config,{runout:moved,rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(h));if(!node){h.act({kind});continue;}const t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;h.act({kind,target:t});}
   const range=P.postflopRanges(packs,h.config,h.actionLog);let r=null;
   for(let t=0;t<200&&!r;t++){const a=Math.floor(rng()*52),b=Math.floor(rng()*52);if(a===b||moved.includes(a)||moved.includes(b))continue;h.holes[h.actor]=[a,b];r=Lib.query([library],range,h);}
   ok(r&&r.solve.library.standIn&&r.solve.library.flop!==Lib.canonical(moved).key&&/^Stand-in/.test(r.solve.warning),spot.id+' '+moved.map(C.cardName).join('')+': answered by a labelled stand-in flop');
