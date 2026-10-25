@@ -155,7 +155,11 @@
   if(!best)return null;const pack=best.pack,labels=pack.groups?pack.groups.labels:classes,relative=i=>(i-config.button+n)%n,proxy=new G.Hand(pack.config,{rng:G.rng(745)}),replay=new G.Hand(config,{rng:G.rng(746)});
   const weights=Array.from({length:n},()=>new Float64Array(labels.length).fill(1));
   for(const a of pre){
-   const node=pack.index.get(historyKey(proxy));if(!node||proxy.actor!==relative(a.seat))return null;
+   const node=pack.index.get(historyKey(proxy));if(proxy.actor!==relative(a.seat))return null;
+   // Charts leave out decisions that are always folds (BB behind an SB 3-bet); a
+   // fold there ends that seat's range, so the line goes on.
+   if(!node&&a.kind==='fold'){proxy.act({kind:'fold'});replay.act(a);continue;}
+   if(!node)return null;
    const kinds=a.kind==='bet'?['raise']:a.kind==='check'||a.kind==='call'?[a.kind,a.kind==='check'?'call':'check']:[a.kind];let pick=-1;
    for(const kind of kinds){const options=node.actions.map((x,i)=>({x,i})).filter(o=>o.x.kind===kind);if(!options.length)continue;
     if(kind!=='raise'){pick=options[0].i;break;}

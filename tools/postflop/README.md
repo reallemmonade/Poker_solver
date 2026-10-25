@@ -26,8 +26,15 @@ The two charts the spots use (NLH cash 6-handed and 2-handed 100bb, copied uncha
 | `sb-bb` | SB opens, BB calls |
 | `btn-bb-3bet` | BTN opens, BB 3-bets, BTN calls |
 | `hu-srp` | Heads-up: the button opens, BB calls |
+| `co-btn` | CO opens, BTN calls |
+| `hj-btn` | HJ opens, BTN calls |
+| `utg-btn` | UTG opens, BTN calls |
+| `co-bb-3bet` | CO opens, BB 3-bets, CO calls |
+| `btn-sb-3bet` | BTN opens, SB 3-bets, BTN calls |
+| `sb-bb-3bet` | SB opens, BB 3-bets, SB calls |
+| `hu-3bet` | Heads-up: the button opens, BB 3-bets, the button calls |
 
-The line uses the chart's own sizes (the smallest raise at each step). Ranges are the chart's frequencies for each action on the line, per hand class.
+The line uses the chart's own sizes (the smallest raise at each step). Ranges are the chart's frequencies for each action on the line, per hand class. A seat the chart has no decision for (in the chart model, players behind a 3-bet fold) folds.
 
 ## Flops
 
@@ -47,7 +54,7 @@ The tree is smaller than the live local solver's, so a 100bb flop fits in about 
 A flop decision is answered from the library only when all of these hold:
 
 - The hand's preflop line maps to the spot's chart line in the same chart. The chart is chosen by the nearest depth, and raises map to the nearest chart size.
-- The flop is the same up to suits.
+- The flop is the same up to suits. Otherwise the nearest solved flop with the same suit pattern and pairing stands in: the closest one by card ranks and the gaps between them, with your cards moved onto it (a board rank becomes the stand-in's rank, any other rank keeps its place between the board ranks). The answer says it is a stand-in and names the flop. The library always holds a flop of each suit pattern and pairing, so every flop gets an answer, if a rougher one.
 - The stack-to-pot ratio is within a factor of 1.5. Chip amounts scale to the hand's pot.
 - Each flop bet or raise is within a factor of 1.5 of a solved size. The answer says when a nearest size stands in.
 - Your hand is in the solved range.

@@ -57,7 +57,7 @@
  function query(libraries,range,hand){
   if(!range||hand.done||hand.street!==1||range.live.length!==2)return null;
   const spot=libraries.flatMap(l=>l.spots).find(s=>s.chart.name===range.name&&s.chart.key===range.key);if(!spot)return null;
-  const c=canonical(hand.board),flop=spot.flops[c.key];if(!flop)return null;
+  const c=canonical(hand.board),hero=hand.holes[hand.actor],candidates=spot.flops[c.key]?[{key:c.key,move:x=>(x&~3)|c.map[x&3]}]:standIns(spot,c.cards).slice(0,8).map(s=>({key:s.key,move:s.move&&(x=>s.move((x&~3)|c.map[x&3]))}));
   const live=hand.living(),firstAfterButton=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b)),flopActions=hand.actionLog.filter(a=>a.street===1);
   // The chart may have been re-solved since the library was built under the same
   // name; answer only while both ranges still match the solved ones.
@@ -68,20 +68,41 @@
   if(Math.abs(Math.log((stack/potStart)/(spot.stack/spot.pot)))>Math.log(1.5))return null;
   const steps=[],paid={[ip]:0,[oop]:0};let facing=0;
   for(const a of flopActions){if(['bet','raise'].includes(a.kind)){steps.push({kind:a.kind,amount:a.target-paid[a.seat],allIn:!!a.allIn});paid[a.seat]=a.target;facing=a.target;}else{steps.push({kind:a.kind});if(a.kind==='call')paid[a.seat]=facing;}}
-  const found=walk(flop,steps,scale);if(!found||found.node.player!==(hand.actor===ip?'ip':'oop'))return null;
-  const cards=hand.holes[hand.actor].map(x=>(x&~3)|c.map[x&3]),r=row(found.node,comboIndex(cards));if(!r)return null;
+  // A stand-in flop is used only where it holds this decision and, with the
+  // hero's cards moved onto it, a strategy for them.
+  let flop,key,found,r;
+  for(const cand of candidates){const f=spot.flops[cand.key],w=f&&walk(f,steps,scale);if(!w||w.node.player!==(hand.actor===ip?'ip':'oop'))continue;const cards=hero.map(cand.move),board=C.cards(cand.key);if(cards.some(x=>x==null||board.includes(x))||cards[0]===cards[1])continue;const q=row(w.node,comboIndex(cards));if(q){flop=f;key=cand.key;found=w;r=q;break;}}
+  if(!r)return null;const standIn=key!==c.key;
   const legal=hand.legal(),actions=[],probs=[];
   found.node.actions.forEach((label,i)=>{const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};else if(kind==='CHECK')action={kind:'check',label:'Check'};else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
    else{const k=hand.currentBet?'raise':'bet',target=Math.min(legal.allInTo,Math.max(k==='raise'?legal.minRaiseTo:1,hand.streetPaid[hand.actor]+Math.round(parseFloat(amount)*scale)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
    action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
-  const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),board=c.key.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name;
+  const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[{seat:ip,range:'Chart range',source},{seat:oop,range:'Chart range',source}],
-    library:{spot:spot.label,flop:c.key,line:found.path,sizesMatched:!found.substituted,scale},
-    warning:'Precomputed flop strategy for '+spot.label+' on '+board+' (the same flop up to suits), solved by TexasSolver for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.'}};
+    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,scale},
+    warning:(standIn?'Stand-in flop strategy for '+spot.label+': '+board+' is not in the library, so the nearest solved flop of the same texture, '+spaced(key)+', answers, with your cards moved to match. Treat it as a rough guide. It was':'Precomputed flop strategy for '+spot.label+' on '+spaced(key)+' (the same flop up to suits),')+' solved by TexasSolver for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.'}};
  }
 
+ // Solved flops that can stand in for an unsolved one, nearest first: same suit
+ // pattern and pairing, ranked by how far each card and each gap between the
+ // cards moves (gaps carry straight draws). cards is a canonical flop, highest
+ // first. move(card) carries a card onto the stand-in: board suits and ranks
+ // map to the stand-in's, and any other rank keeps its place between the board
+ // ranks; null where the stand-in leaves it no room.
+ function standIns(spot,cards){
+  const shape=cs=>cs.map(x=>cs.map(y=>((x>>2)===(y>>2)?1:0)+((x&3)===(y&3)?2:0)).join('')).join('|'),want=shape(cards),rank=cards.map(x=>x>>2),out=[];
+  for(const key of Object.keys(spot.flops)){
+   const to=C.cards(key).sort((x,y)=>y-x);if(to.length!==3||shape(to)!==want)continue;const tr=to.map(x=>x>>2);
+   let d=0;for(let i=0;i<3;i++)d+=Math.abs(rank[i]-tr[i])+(i<2?Math.abs(rank[i]-rank[i+1]-tr[i]+tr[i+1]):0);
+   const suit=[-1,-1,-1,-1];cards.forEach((x,i)=>{suit[x&3]=to[i]&3;});const free=[0,1,2,3].filter(s=>!suit.includes(s));for(let s=0;s<4;s++)if(suit[s]<0)suit[s]=free.shift();
+   const fixed=[[13,13],...rank.map((r,i)=>[r,tr[i]]),[-1,-1]];
+   const moveRank=r=>{const same=fixed.find(f=>f[0]===r);if(same)return same[1];const hi=fixed.filter(f=>f[0]>r).pop(),lo=fixed.find(f=>f[0]<r);if(hi[1]-lo[1]<2)return null;return Math.min(hi[1]-1,Math.max(lo[1]+1,Math.round(lo[1]+(r-lo[0])*(hi[1]-lo[1])/(hi[0]-lo[0]))));};
+   out.push({key,distance:d,move:x=>{const r=moveRank(x>>2);return r==null?null:r*4+suit[x&3];}});
+  }
+  return out.sort((a,b)=>a.distance-b.distance||(a.key<b.key?-1:1));
+ }
  function sameRanges(spot,range,ip,oop){
   if(!spot.rangeIp||!spot.rangeOop||range.game!=='NLH')return false;
   for(const [seat,solved]of [[ip,spot.rangeIp],[oop,spot.rangeOop]]){const w=range.seats[seat];if(!w)return false;for(let i=0;i<range.labels.length;i++){const now=w[i]>=.005?w[i]:0;if(Math.abs(now-(solved[range.labels[i]]||0))>.02)return false;}}
@@ -98,6 +119,6 @@
   for(let i=0;i<reach.length;i++)if(reach[i]){const r=row(node,i);if(!r)continue;mass+=reach[i];r.forEach((p,a)=>total[a]+=reach[i]*p);}
   return mass?{actions:node.actions,player:node.player,freq:total.map(x=>x/mass)}:null;
  }
- const api={FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,walk,aggregate};
+ const api={FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,walk,aggregate,standIns};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerPostflopLibrary=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
