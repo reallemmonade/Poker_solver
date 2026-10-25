@@ -1,11 +1,18 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
 const G=require('./game.js'),T=require('./trainer.js'),S=require('./spot-solver.js');
+function findChrome(){
+ const env=process.env,local=env.LOCALAPPDATA||'',pw=env.PLAYWRIGHT_BROWSERS_PATH||'';
+ const listed=[env.CHROME_PATH,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',local&&path.join(local,'Google/Chrome/Application/chrome.exe'),'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ...(pw&&fs.existsSync(pw)?fs.readdirSync(pw).filter(d=>/^chromium-\d+$/.test(d)).map(d=>path.join(pw,d,'chrome-linux/chrome')):[]),
+  ...(env.PATH||'').split(path.delimiter).flatMap(d=>['google-chrome','google-chrome-stable','chromium','chromium-browser'].map(n=>path.join(d,n)))];
+ const found=listed.find(f=>f&&fs.existsSync(f));if(!found)throw Error('Chrome was not found. Install Chrome or set CHROME_PATH to its executable.');return found;
+}
 async function main(){
  const html=fs.readFileSync(path.join(__dirname,'render-site/index.html')),server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(req.url==='/seed'?'<html><title>Storage setup</title></html>':html);});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url='http://127.0.0.1:'+server.address().port;
  const profile=path.resolve(__dirname,'../transfer-check-'+process.pid),downloads=path.join(profile,'downloads');fs.mkdirSync(downloads,{recursive:true});
- const browser=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--disable-background-networking','--disable-component-update','--no-first-run','--no-default-browser-check','--remote-debugging-pipe','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe'],windowsHide:true});
+ const browser=spawn(findChrome(),['--headless=new','--no-sandbox','--disable-gpu','--disable-background-networking','--disable-component-update','--no-first-run','--no-default-browser-check','--remote-debugging-pipe','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe'],windowsHide:true});
  let seq=0,buffer='',checks=0;const pending=new Map(),errors=[],downloadEvents=[];browser.stderr.on('data',()=>{});
  browser.stdio[4].on('data',chunk=>{buffer+=chunk.toString();let end;while((end=buffer.indexOf('\0'))>=0){const raw=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!raw)continue;const msg=JSON.parse(raw);if(msg.id){const p=pending.get(msg.id);if(p){pending.delete(msg.id);clearTimeout(p.timer);msg.error?p.reject(Error(msg.error.message)):p.resolve(msg.result);}}else if(msg.method?.startsWith('Browser.download'))downloadEvents.push({method:msg.method,...msg.params});else if(msg.method==='Runtime.exceptionThrown')errors.push(msg.params.exceptionDetails.exception?.description||msg.params.exceptionDetails.text);}});
  function cmd(method,params={},sessionId){const id=++seq;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout: '+method));},30000);pending.set(id,{resolve,reject,timer});browser.stdio[3].write(JSON.stringify({id,method,params,...sessionId?{sessionId}:{}})+'\0');});}
