@@ -99,7 +99,8 @@ class Solver{
   const won=matvec(share,reach[q],new Float64Array(K)),seen=matvec(this.M.C,reach[q],new Float64Array(K));
   // Low stack-to-pot flop pots blend in all-in equity (tree.cjs commit).
   if(node.commit){const all=matvec(this.M.allin,reach[q],new Float64Array(K));for(let i=0;i<K;i++)won[i]+=node.commit*(all[i]-won[i]);}
-  for(let i=0;i<K;i++)out[i]=f*(node.pot*won[i]-node.inv[p]*seen[i]);
+  // The winner gets the pot after rake (tree.cjs net).
+  const pot=node.net??node.pot;for(let i=0;i<K;i++)out[i]=f*(pot*won[i]-node.inv[p]*seen[i]);
   return out;
  }
  // mode: 'cfr' updates p's regrets, 'value' evaluates the averaged strategy, 'best' best-responds for p.
