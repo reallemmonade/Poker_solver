@@ -64,6 +64,26 @@ Otherwise the app solves the spot as before: in the browser, or with TexasSolver
 
 **Flop reports** (under the import controls) average each flop's strategy over the acting player's range. For example, they show how often BB checks, or how often BTN c-bets after a check, on each solved flop.
 
+## PLO
+
+`plo-library.cjs` does the same for pot-limit Omaha with this project's PLO solver (`tools/plo-solver`). It uses the app's PLO tree: one bet size per street and pot-sized raises. On a Mac, double-click `tools/postflop/run-plo-library.command`. It writes to `~/Desktop/Poker_Solver/plo-work`, and the bundle is `plo-postflop-library.json.gz`, imported like the NLH one.
+
+```
+node tools/postflop/plo-library.cjs list
+node tools/postflop/plo-library.cjs solve --charts preflop-library.json.gz --spots plo-btn-bb --flops 40 --combos 500 --out plo-work
+node tools/postflop/plo-library.cjs bundle --out plo-work
+```
+
+| Id | Line (PLO cash 100bb, 6-max unless noted) |
+| --- | --- |
+| `plo-btn-bb` | BTN opens, BB calls |
+| `plo-co-bb` | CO opens, BB calls |
+| `plo-sb-bb` | SB opens, BB calls |
+| `plo-btn-bb-3bet` | BTN opens, BB 3-bets, BTN calls |
+| `plo-hu-srp` | Heads-up: the button opens, BB calls |
+
+A PLO range has hundreds of thousands of combos, so each flop is solved for a systematic sample of each range (`--combos`, default 500 a side), the same sampling the app uses for live PLO solves. The flop stores those combos and their weights. The app answers a stored combo from its own row. Any other hand gets the stored combo closest in made-hand strength (its share of the stored combos) and in the number of turn cards that improve its hand category, and the answer says so. Unsolved flops get a stand-in flop as for NLH, and ranges must still match the chart's hand-group weights. On the 4-core container, 120 combos a side took about 50 s a flop for 20 iterations. Expect a few minutes a flop on a Mac at 500 combos.
+
 ## Format
 
 `range-lab-postflop-library-v1`:
