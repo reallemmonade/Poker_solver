@@ -3,17 +3,18 @@
 // Checks that the app finds library answers for live hands: the preflop line
 // maps to the spot, suit-permuted flops find their canonical flop, hero combos
 // map through the same permutation, flop bet sizes match or are refused, and
-// unsolved flops are answered by a labelled stand-in of the same texture.
+// unsolved flops are answered by a labelled stand-in of the same texture. PLO
+// spots answer stored combos from their rows and other hands from a similar one.
 //   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz
 const fs=require('fs'),zlib=require('zlib');
-const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),Lib=require('../../studio/postflop-library.js'),{SPOTS}=require('./library.cjs'),C=G.Core;
+const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),Lib=require('../../studio/postflop-library.js'),{SPOTS:NLH}=require('./library.cjs'),{SPOTS:PLO}=require('./plo-library.cjs'),SPOTS={...NLH,...PLO},C=G.Core;
 const args={library:'postflop-work/postflop-library.json.gz',charts:require('path').join(__dirname,'charts-100bb.json.gz')};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const library=Lib.validate(read(args.library)),charts=read(args.charts),rng=G.rng(99);let pass=0,fail=0;
 const ok=(cond,msg)=>{if(cond)pass++;else{fail++;console.log('FAIL '+msg);}};
 
-for(const spot of library.spots){
+for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
  const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name===spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
  const pack=P.validate(raw),packs=[pack];
  for(const [key,flop]of Object.entries(spot.flops).slice(0,5)){
@@ -53,6 +54,24 @@ for(const spot of library.spots){
   ok(r&&r.solve.library.standIn&&r.solve.library.flop!==Lib.canonical(moved).key&&/^Stand-in/.test(r.solve.warning),spot.id+' '+moved.map(C.cardName).join('')+': answered by a labelled stand-in flop');
   if(r)ok(Math.abs(r.reference.reduce((a,b)=>a+b,0)-1)<1e-9,spot.id+' stand-in frequencies sum to 1');
   if(++tried>=5)break;
+ }
+}
+// PLO spots (--charts must hold the PLO chart): a stored combo answers from its
+// own row; any other hand answers from the most similar stored combo, labelled.
+for(const spot of library.spots.filter(s=>s.game==='PLO4')){
+ const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name===spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
+ const pack=P.validate(raw);
+ for(const [key,flop]of Object.entries(spot.flops).slice(0,3)){
+  const perm=[0,1,2,3].sort(()=>rng()-.5),board=C.cards(key).map(c=>(c&~3)|perm[c&3]),h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});
+  for(const kind of def.steps){const node=pack.index.get(P.historyKey(h));if(!node){h.act({kind});continue;}const t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;h.act({kind,target:t});}
+  const range=P.postflopRanges([pack],h.config,h.actionLog),who=flop.nodes.find(n=>n.path==='').player,inv=[0,1,2,3].map(s=>perm.indexOf(s));
+  const stored=C.cards(flop.combos[who][0]).map(c=>(c&~3)|perm[c&3]);h.holes[h.actor]=stored;let r=Lib.query([library],range,h);
+  ok(r&&!r.solve.library.similarCombo,spot.id+' '+key+': a stored combo answers from its own row');
+  const node=flop.nodes.find(n=>n.path===''),direct=Lib.row(node,0);ok(r&&direct.every((p,i)=>node.actions.length!==r.actions.length||Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+': same row as the stored node');
+  let other=null;for(let t=0;t<500&&!other;t++){const d=[...Array(52).keys()].filter(c=>!board.includes(c)).sort(()=>rng()-.5).slice(0,4),n=d.map(c=>(c&~3)|inv[c&3]).sort((a,b)=>b-a).map(C.cardName).join('');if(!flop.combos[who].includes(n))other=d;}
+  h.holes[h.actor]=other;r=Lib.query([library],range,h);
+  ok(r&&r.solve.library.similarCombo&&/most similar one/.test(r.solve.warning)&&Math.abs(r.reference.reduce((a,b)=>a+b,0)-1)<1e-9,spot.id+' '+key+': another hand answers from a labelled similar combo');
+  for(const a of r?r.actions:[])ok((()=>{try{h.clone().act(a);return true;}catch{return false;}})(),spot.id+' '+key+': legal action '+a.label);
  }
 }
 console.log(pass+' checks passed, '+fail+' failed.');process.exit(fail?1:0);

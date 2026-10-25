@@ -31,6 +31,8 @@
 !/tools/postflop/library.cjs
 !/tools/postflop/flops.cjs
 !/tools/postflop/check.cjs
+!/tools/postflop/plo-library.cjs
+!/tools/postflop/run-plo-library.command
 !/tools/postflop/run-library.command
 !/tools/postflop/charts-100bb.json.gz
 !/studio/
