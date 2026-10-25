@@ -27,6 +27,9 @@ const SPOTS={
  'co-bb-3bet':{label:'6-max 100bb · CO opens, BB 3-bets, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','fold','fold','raise','call'])},
  'btn-sb-3bet':{label:'6-max 100bb · BTN opens, SB 3-bets, BTN calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','raise','raise','fold','call'])},
  'sb-bb-3bet':{label:'6-max 100bb · SB opens, BB 3-bets, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','raise','raise','call'])},
+ // Limped pots exist only in charts built with --limp 1 (the SB completes, the BB checks).
+ 'sb-bb-limp':{label:'6-max 100bb · SB limps, BB checks',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','call','check'])},
+ 'hu-limp':{label:'Heads-up 100bb · button limps, BB checks',chart:'NLH cash 2-handed 100bb',...line(2,['call','check'])},
  'hu-3bet':{label:'Heads-up 100bb · button opens, BB 3-bets, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','call'])},
 };
 // One bet size per street, raises only on the flop (all-in after that), no
