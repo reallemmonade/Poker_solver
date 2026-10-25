@@ -33,6 +33,8 @@ The two charts the spots use (NLH cash 6-handed and 2-handed 100bb, copied uncha
 | `btn-sb-3bet` | BTN opens, SB 3-bets, BTN calls |
 | `sb-bb-3bet` | SB opens, BB 3-bets, SB calls |
 | `hu-3bet` | Heads-up: the button opens, BB 3-bets, the button calls |
+| `sb-bb-limp` | SB limps, BB checks (needs charts built with `--limp 1`) |
+| `hu-limp` | Heads-up: the button limps, BB checks (needs charts built with `--limp 1`) |
 
 The line uses the chart's own sizes (the smallest raise at each step). Ranges are the chart's frequencies for each action on the line, per hand class. A seat the chart has no decision for (in the chart model, players behind a 3-bet fold) folds.
 
