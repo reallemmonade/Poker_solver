@@ -72,9 +72,10 @@ function validateBackupRow(store,row){
   return scrubSavedGrade({...row,config,mode:config.mode,variant:config.variant,units:config.mode==='cash'?'bb':'prize units',createdAt:new Date(row.createdAt).toISOString()});
  }
  if(store==='meta'){
-  const allowed=['lastModel','spotSizing','spotDealBudget','autoAnalyze','gradeEvery','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
+  const allowed=['lastModel','spotSizing','spotDealBudget','spotLocalSolver','autoAnalyze','gradeEvery','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
   if(row.id==='lastModel'&&!validRecordId(row.value))throw Error('Invalid model selection.');
   if(['autoAnalyze','gradeEvery'].includes(row.id)&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
+  if(row.id==='spotLocalSolver'&&!['','http://127.0.0.1:8787'].includes(row.value))throw Error('Invalid local solver setting.');
   if(row.id==='spotDealBudget'&&![20000,50000,100000,200000,500000].includes(row.value))throw Error('Invalid deal limit.');
   if(row.id==='spotSizing')T.normalizeAbstraction(row.value);
   if(row.id==='preflopReferences-v1'){if(!Array.isArray(row.value)||row.value.length>1000)throw Error('Invalid preflop reference collection.');for(const pack of row.value)PokerPreflop.validate(pack);}
