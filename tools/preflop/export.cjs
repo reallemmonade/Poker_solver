@@ -13,7 +13,7 @@ const P=require('../../studio/preflop.js');
 // this matches published 6-max opening ranges and leaves room to flat in position.
 function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0}){
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;rake=mtt?0:rake;
- if(game==='plo')return{seats,stack,ante,rake,rakeCap,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
+ if(game==='plo')return{seats,stack,ante,rake,rakeCap,limp:!!limp,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
  return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{}};
 }
 
