@@ -17,7 +17,7 @@ for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''
 const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1').split(',').map(s=>s.trim()).filter(Boolean);
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
-let job=null;
+let job=null,finished=null;
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
@@ -54,7 +54,9 @@ const server=http.createServer((req,res)=>{
  if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,busy:!!job,version:1});
  if(req.method==='GET'&&req.url==='/status')return send(req,res,200,job?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
  if(req.method==='POST'&&req.url==='/cancel'){if(!job)return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
- if(req.method==='POST'&&req.url==='/solve'){
+ // A background solve's outcome, collected once: 202 while it runs.
+ if(req.method==='GET'&&req.url==='/result'){if(job)return send(req,res,202,{busy:true});if(!finished)return send(req,res,404,{error:'No finished solve to collect.'});const f=finished;finished=null;return f.error?send(req,res,500,{error:f.error}):send(req,res,200,f.result);}
+ if(req.method==='POST'&&(req.url==='/solve'||req.url==='/solve-async')){
   if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
   let body='';req.on('data',d=>{body+=d;if(body.length>2e6)req.destroy();});
   req.on('end',async()=>{
@@ -62,6 +64,9 @@ const server=http.createServer((req,res)=>{
    // Checked again here: two requests can both pass the check above before
    // either body has arrived.
    if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
+   // /solve-async answers at once and keeps the outcome for GET /result, so a
+   // solve of many minutes needs no long-open request.
+   if(req.url==='/solve-async'){finished=null;solve(spec).then(result=>{finished={result};},error=>{finished={error:error.message};});return send(req,res,202,{started:true});}
    try{send(req,res,200,await solve(spec));}catch(error){send(req,res,500,{error:error.message});}
   });
   return;

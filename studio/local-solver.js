@@ -231,8 +231,16 @@
   step(){
    if(this.waiting||this.complete)return;this.waiting=true;
    if(!this.fetch){this.fail('This browser cannot reach the local solver.');return;}
-   this.poll=setInterval(()=>this.fetch(this.url+'/status').then(r=>r.json()).then(s=>{this.status=s;}).catch(()=>{}),3000);
-   this.fetch(this.url+'/solve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.spec)}).then(r=>r.json().catch(()=>({error:'The local solver sent an unreadable reply ('+r.status+').'})).then(body=>{if(!r.ok)throw Object.assign(Error(body.error||('Local solver error '+r.status)),{http:true});return body;})).then(body=>{clearInterval(this.poll);this.body=body;this.complete=true;this.waiting=false;},error=>{clearInterval(this.poll);this.fail(!error.http?'The local solver is not running on this computer at '+this.url+'. Start it with tools/local-solver/start.command, or turn it off under Analysis settings.':error.message);});
+   const reply=r=>r.json().catch(()=>({error:'The local solver sent an unreadable reply ('+r.status+').'})).then(body=>{if(!r.ok)throw Object.assign(Error(body.error||('Local solver error '+r.status)),{http:true});return body;});
+   const done=body=>{clearInterval(this.poll);this.body=body;this.complete=true;this.waiting=false;};
+   const failed=error=>{clearInterval(this.poll);this.fail(!error.http?'The local solver is not running on this computer at '+this.url+'. Start it with tools/local-solver/start.command, or turn it off under Analysis settings.':error.message);};
+   const post=path=>this.fetch(this.url+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.spec)});
+   // Long solves run in the background on the bridge and the result is collected by
+   // polling, so no request stays open for minutes; an older bridge only has /solve.
+   let polling=false;
+   this.poll=setInterval(()=>{this.fetch(this.url+'/status').then(r=>r.json()).then(s=>{this.status=s;}).catch(()=>{});
+    if(!polling||this.complete)return;this.fetch(this.url+'/result').then(r=>r.status===202?null:reply(r)).then(body=>{if(body&&!this.complete)done(body);},error=>{if(error.http)failed(error);});},3000);
+   post('/solve-async').then(r=>{if(r.status===404)return post('/solve').then(reply).then(done);return reply(r).then(()=>{polling=true;});}).catch(failed);
   }
   fail(message){this.error=message;this.complete=true;this.waiting=false;}
   cancel(){clearInterval(this.poll);if(this.waiting&&this.fetch)this.fetch(this.url+'/cancel',{method:'POST'}).catch(()=>{});}
