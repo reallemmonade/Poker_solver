@@ -88,6 +88,10 @@ git -C "$src" submodule update --init --recursive --quiet
 # macOS target. Link OpenMP through CMake's imported target instead.
 cd "$src"
 git checkout --quiet -- CMakeLists.txt
+# Per-hand root EVs in the dumped result ("evs"), used to calibrate the preflop model
+# (tools/preflop/calibrate.cjs). Reset first so a second install applies it cleanly.
+git checkout --quiet -- include src
+git apply "$here/texassolver-evs.patch"
 sed -i.bak -e 's/ *-fopenmp//g' -e '/CMAKE_OSX_DEPLOYMENT_TARGET/d' CMakeLists.txt
 echo 'target_link_libraries(TexasSolver OpenMP::OpenMP_CXX)' >> CMakeLists.txt
 

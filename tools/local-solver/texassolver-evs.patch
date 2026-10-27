@@ -1,0 +1,97 @@
+diff --git a/include/solver/BestResponse.h b/include/solver/BestResponse.h
+index 9e36411..89f632a 100644
+--- a/include/solver/BestResponse.h
++++ b/include/solver/BestResponse.h
+@@ -45,6 +45,9 @@ public:
+             );
+     float printExploitability(shared_ptr<GameTreeNode> root, int iterationCount, float initial_pot, uint64_t initialBoard);
+     float getBestReponseEv(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard,int deal);
++    // Per-hand EV (chips, net of half the starting pot) of a best response to the
++    // opponent's average strategy; -1e30 for hands that collide with the board.
++    vector<float> handEvs(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard);
+ 
+ private:
+     vector<float> bestResponse(shared_ptr<GameTreeNode> node, int player, const vector<vector<float>>& reach_probs, uint64_t board,int deal);
+diff --git a/src/solver/BestResponse.cpp b/src/solver/BestResponse.cpp
+index 49e2560..a9046bb 100644
+--- a/src/solver/BestResponse.cpp
++++ b/src/solver/BestResponse.cpp
+@@ -458,3 +458,23 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
+     return payoffs;
+ }
+ 
++
++vector<float> BestResponse::handEvs(shared_ptr<GameTreeNode> node, int player, vector<vector<float>> reach_probs,
++                                    uint64_t initialBoard) {
++    const vector<float> private_cards_evs = bestResponse(node, player, reach_probs, initialBoard, 0);
++    vector<PrivateCards>& player_combo = this->private_combos[player];
++    vector<PrivateCards>& oppo_combo = this->private_combos[1 - player];
++    vector<float> out(player_combo.size(), -1e30f);
++    for(int player_hand = 0;player_hand < player_combo.size();player_hand ++){
++        uint64_t private_long = player_combo[player_hand].toBoardLong();
++        if(Card::boardsHasIntercept(private_long,initialBoard)) continue;
++        float oppo_sum = 0;
++        for(int oppo_hand = 0;oppo_hand < oppo_combo.size();oppo_hand ++){
++            uint64_t private_long_oppo = oppo_combo[oppo_hand].toBoardLong();
++            if(Card::boardsHasIntercept(private_long,private_long_oppo) || Card::boardsHasIntercept(private_long_oppo,initialBoard)) continue;
++            oppo_sum += oppo_combo[oppo_hand].weight;
++        }
++        if(oppo_sum > 0) out[player_hand] = private_cards_evs[player_hand] / oppo_sum;
++    }
++    return out;
++}
+diff --git a/include/solver/PCfrSolver.h b/include/solver/PCfrSolver.h
+index 3bcfcf2..5417e89 100644
+--- a/include/solver/PCfrSolver.h
++++ b/include/solver/PCfrSolver.h
+@@ -92,6 +92,8 @@ public:
+     );
+     void train() override;
+     json dumps(bool with_status,int depth);
++    // Per-hand EVs at the root for both players, keyed by combo.
++    json dumpEvs();
+ private:
+     vector<vector<PrivateCards>> ranges;
+     vector<PrivateCards> range1;
+diff --git a/src/solver/PCfrSolver.cpp b/src/solver/PCfrSolver.cpp
+index f0e022b..5f289b9 100644
+--- a/src/solver/PCfrSolver.cpp
++++ b/src/solver/PCfrSolver.cpp
+@@ -966,3 +966,23 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+     return std::move(retjson);
+ }
+ 
++
++json PCfrSolver::dumpEvs() {
++    vector<vector<PrivateCards>> player_privates(this->player_number);
++    player_privates[0] = pcm.getPreflopCards(0);
++    player_privates[1] = pcm.getPreflopCards(1);
++    BestResponse br = BestResponse(player_privates,this->player_number,this->pcm,this->rrm,this->deck,this->debug,this->color_iso_offset,this->split_round,this->num_threads);
++    vector<vector<float>> reach_probs(this->player_number);
++    for(int p = 0;p < this->player_number;p ++){
++        reach_probs[p] = vector<float>(player_privates[p].size());
++        for(int i = 0;i < player_privates[p].size();i ++) reach_probs[p][i] = player_privates[p][i].weight;
++    }
++    json out;
++    for(int p = 0;p < this->player_number;p ++){
++        vector<float> evs = br.handEvs(this->tree->getRoot(), p, reach_probs, this->initial_board_long);
++        json one;
++        for(int i = 0;i < player_privates[p].size();i ++) if(evs[i] > -1e29f) one[player_privates[p][i].toString()] = evs[i];
++        out[std::to_string(p)] = one;
++    }
++    return out;
++}
+diff --git a/src/runtime/PokerSolver.cpp b/src/runtime/PokerSolver.cpp
+index 0cf7fc4..c48a1a7 100644
+--- a/src/runtime/PokerSolver.cpp
++++ b/src/runtime/PokerSolver.cpp
+@@ -96,6 +96,9 @@ void PokerSolver::train(string p1_range, string p2_range, string boards, string
+ 
+ void PokerSolver::dump_strategy(string dump_file,int dump_rounds) {
+     json dump_json = this->solver->dumps(false,dump_rounds);
++    // Per-hand root EVs, for calibrating preflop realization from flop solves.
++    shared_ptr<PCfrSolver> pcfr = std::dynamic_pointer_cast<PCfrSolver>(this->solver);
++    if(pcfr) dump_json["evs"] = pcfr->dumpEvs();
+     ofstream fileWriter;
+     fileWriter.open(dump_file);
+     fileWriter << dump_json;

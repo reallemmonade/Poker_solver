@@ -29,7 +29,8 @@ function playability(c,w=PLAY){
 // that are disjoint and in each class), all-in equity and playability.
 let ploModel=null;
 function model(o){
- if(o.variant!=='PLO4')return{variant:'NLH',K:169,classes,weight,compat:(i,j)=>table.compatibility[i][j]/1225,equity:(i,j)=>table.equity[i][j],play:classes.map(c=>playability(c,{...PLAY,...o.playability}))};
+ // o.playTable (class -> multiplier, from tools/preflop/calibrate.cjs) replaces the shape rule.
+ if(o.variant!=='PLO4')return{variant:'NLH',K:169,classes,weight,compat:(i,j)=>table.compatibility[i][j]/1225,equity:(i,j)=>table.equity[i][j],play:classes.map(c=>o.playTable?.[c]??playability(c,{...PLAY,...o.playability}))};
  ploModel=ploModel||JSON.parse(fs.readFileSync(path.join(__dirname,'plo-model.json'),'utf8'));const m=ploModel,total=m.combos.reduce((a,b)=>a+b,0);
  return{variant:'PLO4',K:m.labels.length,classes:m.labels,weight:Float64Array.from(m.combos,c=>c/total),compat:(i,j)=>m.compatibility[i][j],equity:(i,j)=>m.equity[i][j],play:m.playability,handGroups:{labels:m.labels,classes:m.classes}};
 }

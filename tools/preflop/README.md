@@ -22,6 +22,8 @@ A table matches a raked chart only with the same rake and cap. Any other raked t
 
 **Limps (`--limp 1`, off by default):** the small blind may complete when everyone else has folded, and heads-up the button may limp. The big blind then checks or raises to 3.5bb (`isoRaise`); in PLO charts the raise is pot-sized, to 3bb. A limped pot is paid by the same realization model as a raised one, with the usual postflop positions (heads-up the button is in position, otherwise the big blind). In tests at 100bb, the heads-up button limps 20% and raises 68%, the 6-max small blind limps 8% and raises 43%, and the big blind raises about half its hands against a limp. That raise rate is likely high, because the realization model rewards initiative. Turning limps on changes the blind and heads-up ranges, so the flop libraries built on these charts must be rebuilt as well.
 
+**Calibration (`--calibration file.json`, NLH only):** the realization model can be fitted to real flop play. Solve flop spots with `tools/postflop/library.cjs` using a TexasSolver built with `tools/local-solver/texassolver-evs.patch` (the installer applies it), which saves each hand class's EV. `node tools/preflop/calibrate.cjs --work postflop-work --out calibration.json` then fits the sharpness, position and initiative factors and a playability multiplier per hand class so the model's pot shares match the solved ones, and `export.cjs --calibration calibration.json` builds charts with them. The fit is only as good as the spots solved: 100bb 6-max and heads-up spots calibrate those charts best.
+
 **Short and deep stacks:**
 - Below 40bb, opens are 2bb.
 - At 25bb or less, all-in is offered at every raise.
