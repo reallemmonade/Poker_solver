@@ -86,6 +86,15 @@ function nodes(tree){
  return out;
 }
 
+// Root EVs per hand class (chips, net of half the starting pot), averaged over the
+// class's combos, when the solver reports them (TexasSolver built with
+// tools/local-solver/texassolver-evs.patch). tools/preflop/calibrate.cjs reads them.
+function classEvs(tree){
+ if(!tree.evs)return null;const oop=String(tree.player),ip=oop==='0'?'1':'0';
+ const mean=m=>{const sum={},n={};for(const [combo,ev]of Object.entries(m||{})){const k=C.handClass(C.cards(combo));sum[k]=(sum[k]||0)+ev;n[k]=(n[k]||0)+1;}return Object.fromEntries(Object.keys(sum).map(k=>[k,Math.round(sum[k]/n[k]*100)/100]));};
+ return{ip:mean(tree.evs[ip]),oop:mean(tree.evs[oop])};
+}
+
 async function solve(){
  const packs=loadCharts(args.charts),ids=args.spots.split(','),flops=args.flops==='all'?F.all():F.subset(Number(args.flops));
  for(const id of ids){
@@ -94,12 +103,13 @@ async function solve(){
   console.log(spot.label+': pot '+G.bb(spot.pot)+' bb, stack '+G.bb(spot.stack)+' bb, '+flops.length+' flops');
   for(const f of flops){
    // Solved flops are skipped, unless --redo-above asks to re-solve those that
-   // stopped above that exploitability (% of pot), for example with more iterations.
-   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)){const redo=Number(args['redo-above']);if(!(redo>0))continue;let e=null;try{e=JSON.parse(fs.readFileSync(file,'utf8')).exploitability;}catch{}if(!(e>redo))continue;}
+   // stopped above that exploitability (% of pot), for example with more iterations,
+   // or --need-evs 1 asks for those saved without per-class EVs.
+   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)){const redo=Number(args['redo-above']);let old=null;try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!(redo>0&&old&&old.exploitability>redo)&&!(args['need-evs']==='1'&&old&&!old.evs))continue;}
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:'out.json'}),work);
-    const result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(JSON.parse(fs.readFileSync(dump,'utf8')))};
+    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
    }catch(error){console.log(id+' '+f.key+' failed: '+error.message);}
@@ -122,5 +132,5 @@ function bundle(){
 if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(e.message);process.exit(1);});
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct]');}
+else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1]');}
 module.exports={SPOTS,TREE,prepare,spec,nodes};

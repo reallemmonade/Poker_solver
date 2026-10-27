@@ -11,10 +11,13 @@ const P=require('../../studio/preflop.js');
 // PLO raises are always pot-sized. PLO equities run closer, so realization is sharper (hands
 // behind realize much less), position counts for more and the last raiser gets no extra edge;
 // this matches published 6-max opening ranges and leaves room to flat in position.
-function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0}){
+// A calibration file (tools/preflop/calibrate.cjs) replaces the NLH realization settings and
+// playability with values fitted to TexasSolver flop solves.
+function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0,calibration=null}){
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;rake=mtt?0:rake;
  if(game==='plo')return{seats,stack,ante,rake,rakeCap,limp:!!limp,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
- return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{}};
+ const cal=calibration?JSON.parse(fs.readFileSync(calibration,'utf8')):null;
+ return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{},...cal?{realization:cal.realization,initiative:cal.initiative,sharpness:cal.sharpness,playTable:cal.play,calibrated:cal.source}:{}};
 }
 
 // Rows are rounded to 4 decimals; the largest entry absorbs the rounding error.
@@ -43,7 +46,7 @@ function solve(spec,{iterations=2000,every=500,log=()=>{}}={}){
   `${n}-handed, ${o.stack}bb, blinds ${o.sb}/${o.bb}, ${mtt?'1bb big-blind ante, chip EV (no ICM)':o.rake>0?`no ante; ${o.rake}% rake capped at ${o.rakeCap}bb, no flop no drop (a flop pot is raked as if it grew ${o.rakeGrowth}x by the river)`:'no ante or rake'}.`,
   plo?`Pot-limit, four-card Omaha. Every raise is pot-sized; all-in once a pot raise reaches the stack. Hands are grouped into ${m.K} groups by suits, pairing, connectedness, suited ace and equity against a random hand; everything in a group plays the same strategy.`:`Sizes: open ${o.open}bb (SB ${o.sbOpen}bb), 3-bet ${o.threeBetIP}x in position or ${o.threeBetOOP}x from the blinds plus ${o.squeezePerCaller}x per caller, 4-bet ${o.fourBet}x${o.deep?', 5-bet '+o.fiveBet+'x':''}, then all-in; any raise to ${o.jamShare*100}% of the stack or more is all-in${o.extraJam?'; all-in is also offered at every raise':''}.`,
   `Trimmed tree: ${o.limp?`no open-limps except the small blind completing when folded to (the big blind then checks or raises to ${o.isoRaise}bb)`:'no open-limps'}, at most one player flats an open, other players fold to a 3-bet, a flatter continues against a squeeze only if the opener folds, facing a 4-bet a call that leaves under ${o.callSPR}x the pot behind is dropped, and every flop is heads-up.`,
-  `Postflop is not played out. All-in pots pay all-in equity; flop pots pay an equity-realization share (odds to the power ${o.sharpness}, in position x${(1+o.realization).toFixed(2)}, out of position x${(1-o.realization).toFixed(2)}, last raiser x${(1+o.initiative).toFixed(2)}, playability ${plo?'by hand shape, see tools/preflop/plo-model.cjs':JSON.stringify({...PLAY,...o.playability})}), blended into all-in equity as the stack-to-pot ratio falls from ${o.flopSPR} to ${o.allInSPR}.`,
+  `Postflop is not played out. All-in pots pay all-in equity; flop pots pay an equity-realization share (odds to the power ${o.sharpness}, in position x${(1+o.realization).toFixed(2)}, out of position x${(1-o.realization).toFixed(2)}, last raiser x${(1+o.initiative).toFixed(2)}, playability ${plo?'by hand shape, see tools/preflop/plo-model.cjs':o.playTable?'per hand class, calibrated to '+o.calibrated:JSON.stringify({...PLAY,...o.playability})}), blended into all-in equity as the stack-to-pot ratio falls from ${o.flopSPR} to ${o.allInSPR}.`,
   ...plo?['Approximate: grouped PLO hands and a realization model, not a full PLO solve.']:[],
   `CFR+ with linear averaging, ${best.t} iterations, NashConv ${gap.nashConv.toFixed(4)} bb/hand within this model.`,
   'Each node carries reach: how often the averaged strategies arrive there (0-1). Lines that almost never happen (reach under 0.0001) are solved against a token range only and are less reliable.',
@@ -103,8 +106,8 @@ module.exports={solve,game,checks,lineReach};
 // Command-line arguments, checked so that a typo or a bad value stops with a message instead
 // of looping, crashing later or quietly solving some other game.
 function parseArgs(argv){
- const args={seats:9,stack:200,format:'cash',game:'nlh',iterations:2000,every:500,rake:0,rakeCap:3,limp:0,out:null},text=['out','format','game'];
- const fail=m=>{throw Error(m+'\nUsage: node tools/preflop/export.cjs [--seats 2-9] [--stack bb] [--format cash|mtt] [--game nlh|plo] [--iterations n] [--every n] [--rake pct --rakeCap bb] [--limp 1] [--out file.json]');};
+ const args={seats:9,stack:200,format:'cash',game:'nlh',iterations:2000,every:500,rake:0,rakeCap:3,limp:0,calibration:null,out:null},text=['out','format','game','calibration'];
+ const fail=m=>{throw Error(m+'\nUsage: node tools/preflop/export.cjs [--seats 2-9] [--stack bb] [--format cash|mtt] [--game nlh|plo] [--iterations n] [--every n] [--rake pct --rakeCap bb] [--limp 1] [--calibration file.json] [--out file.json]');};
  for(let i=0;i<argv.length;i+=2){
   const k=argv[i].replace(/^--/,''),v=argv[i+1];
   if(!/^--/.test(argv[i])||!(k in args))fail(`Unknown option ${argv[i]}.`);
@@ -117,6 +120,7 @@ function parseArgs(argv){
  if(!['nlh','plo'].includes(args.game))fail('--game must be nlh or plo.');
  if(!(args.rake>=0&&args.rake<=20)||!(args.rakeCap>=0))fail('--rake must be a percentage from 0 to 20 and --rakeCap at least 0 bb.');
  if(args.rake>0&&args.format!=='cash')fail('Rake applies to cash charts only.');
+ if(args.calibration&&(args.game!=='nlh'||!fs.existsSync(args.calibration)))fail('--calibration needs an existing calibration file, and applies to NLH charts only.');
  for(const k of ['iterations','every'])if(!Number.isInteger(args[k])||args[k]<1)fail(`--${k} must be a whole number of at least 1.`);
  return args;
 }
