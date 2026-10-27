@@ -1,5 +1,5 @@
 'use strict';
-// Solve a trimmed preflop game and write it as a Range Lab chart pack.
+// Solve a trimmed preflop game and write it as a Citrus Poker chart pack.
 //   node tools/preflop/export.cjs --seats 9 --stack 200 --format cash [--game plo] --iterations 2000 --out pack.json
 // format "mtt" adds a 1bb big-blind ante and marks the pack as chip-EV, so it
 // matches tournament tables whatever their payouts.
@@ -52,8 +52,8 @@ function solve(spec,{iterations=2000,every=500,log=()=>{}}={}){
   'Each node carries reach: how often the averaged strategies arrive there (0-1). Lines that almost never happen (reach under 0.0001) are solved against a token range only and are less reliable.',
  ].join(' ');
  const config={variant:plo?'PLO4':'NLH',seats:n,stacks:Array(n).fill(o.stack),sb:o.sb,bb:o.bb,mode:mtt?'icm':'cash',button:0,...mtt?{ante:o.ante,anteMode:'bigblind',payouts:[1]}:{},...o.rake>0?{rakePct:o.rake,rakeCap:o.rakeCap,noFlopNoDrop:true}:{}};
- const pack={format:'range-lab-preflop-reference-v1',name:`${plo?'PLO':'NLH'} ${mtt?'MTT':'cash'} ${n}-handed ${o.stack}bb${o.rake>0?` rake ${o.rake}% cap ${o.rakeCap}bb`:''} (Range Lab CFR+ model${plo?', approximate':''})`,...mtt?{chipEV:true}:{},...plo?{handGroups:m.handGroups}:{},
-  source:{name:'Range Lab preflop CFR+ model',url:'https://github.com/reallemmonade/poker_solver/tree/main/tools/preflop',solver:'Range Lab preflop CFR+ (tools/preflop) with an equity-realization postflop model',settings,createdAt:new Date().toISOString()},
+ const pack={format:'range-lab-preflop-reference-v1',name:`${plo?'PLO':'NLH'} ${mtt?'MTT':'cash'} ${n}-handed ${o.stack}bb${o.rake>0?` rake ${o.rake}% cap ${o.rakeCap}bb`:''} (Citrus Poker CFR+ model${plo?', approximate':''})`,...mtt?{chipEV:true}:{},...plo?{handGroups:m.handGroups}:{},
+  source:{name:'Citrus Poker preflop CFR+ model',url:'https://github.com/reallemmonade/poker_solver/tree/main/tools/preflop',solver:'Citrus Poker preflop CFR+ (tools/preflop) with an equity-realization postflop model',settings,createdAt:new Date().toISOString()},
   config,nodes};
  P.validate(pack);
  return{pack,nashConv:gap.nashConv,checks:checks(solver)};

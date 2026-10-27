@@ -1,6 +1,40 @@
 'use strict';
 // One home for each activity. Existing control nodes are moved, preserving their
 // handlers and IDs, and all calculation and storage code keeps its original API.
+// Looks from the Off My Plate app: each pairs a neutral family (ground, panel, ink, muted, rule; light and dark)
+// with an accent and the glow colours behind the top of the page. Text colours are moved, keeping their hue,
+// until they reach 4.5:1 on the ground and the panel, so every look stays readable. "Classic" is the original green.
+const citrusLooks=(()=>{
+ const NEUTRALS={slate:{light:['#f3f5fa','#ffffff','#111733','#4f5775','#dde1ee'],dark:['#0a0f1e','#121a30','#e6e9f5','#a3abc8','#232d4a']},lavender:{light:['#f6f4fc','#ffffff','#1d1838','#544c74','#e5e0f3'],dark:['#100d1c','#1a162c','#eeeafb','#b5aed2','#2d2746']},plum:{light:['#fbf6f4','#ffffff','#2a1830','#62506a','#eee2e2'],dark:['#150f24','#211836','#f6eef5','#c7b6cd','#352a4e']},paper:{light:['#faf8f4','#ffffff','#1f1c17','#5a5449','#ebe6dc'],dark:['#14120f','#1e1b17','#f3efe7','#b8b0a2','#302b25']}};
+ const list=[{id:'marigold',label:'Marigold',accent:'#a64b00',accentDark:'#ffb547',neutrals:'paper',glow:['#ffc94d','#ffa37a','#ff8fa3']},{id:'lavender-aurora',label:'Lavender Aurora',accent:'#a28ff2',neutrals:'lavender',glow:['#c4b5fd','#93c5fd','#fda4af']},{id:'ember-aurora',label:'Ember Aurora',accent:'#c2410c',accentDark:'#ff8a57',neutrals:'plum',glow:['#ffab66','#93b9ff','#ff7b72']},{id:'aurora',label:'Aurora',accent:'#1c9a86',neutrals:'slate',glow:['#a7f3d0','#bae6fd','#fed7aa']},{id:'nightshift',label:'Night Shift',accent:'#2f54eb',accentDark:'#7d95ff',neutrals:'slate',glow:['#2f54eb','#7d95ff']},{id:'rosewater',label:'Rosewater',accent:'#3a5bd9',accentDark:'#8ea6ff',neutrals:'lavender',glow:['#ff9fb2','#7fa3ff','#ffd0d8']},{id:'classic',label:'Classic green'}];
+ // Status colours carried over from the original theme, re-checked against each look's surfaces.
+ const STATUS={light:{gold:'#83560f',blue:'#225d84',red:'#a8361f'},dark:{gold:'#e5c38c',blue:'#92c7df',red:'#f09b88'}};
+ const rgb=h=>{const n=parseInt(h.slice(1),16);return[n>>16&255,n>>8&255,n&255]},hex=c=>'#'+c.map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(16).padStart(2,'0')).join('');
+ const lum=h=>{const c=rgb(h).map(v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)});return .2126*c[0]+.7152*c[1]+.0722*c[2]},contrast=(a,b)=>{const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
+ const mix=(a,b,t)=>{const A=rgb(a),B=rgb(b);return hex(A.map((v,i)=>v+(B[i]-v)*t))};
+ // Moves a colour toward white or black (whichever the backgrounds need) until it reaches 4.5:1 on all of them.
+ const reach=(h,bgs,up)=>{let c=h;for(let i=1;i<=40&&bgs.some(bg=>contrast(c,bg)<4.5);i++)c=mix(h,up?'#ffffff':'#000000',i/40);return c};
+ const onColor=bg=>contrast('#ffffff',bg)>=contrast('#17132a',bg)?'#ffffff':'#17132a';
+ function tokens(look,light){
+  const [ground,panel,ink,muted,rule]=NEUTRALS[look.neutrals][light?'light':'dark'],surfaces=[ground,panel],up=!light;
+  // The accent is also text on its own tint (active tabs) and on notices, so it is checked there too.
+  const raw=light?look.accent:look.accentDark||look.accent,surface=light?mix(ground,panel,.6):mix(ground,panel,.45),notice=mix(panel,STATUS[light?'light':'dark'].gold,light?.12:.14),softOf=a=>mix(panel,a,light?.13:.2);
+  let accent=raw;for(let i=0;i<3;i++)accent=reach(accent,[...surfaces,surface,notice,softOf(accent)],up);const on=onColor(accent),fill=contrast(on,accent)>=4.5?accent:reach(accent,[on],on!=='#ffffff'),st=STATUS[light?'light':'dark'];
+  const glow=look.glow.map(g=>light?g+'73':mix(g,ground,.45)+'59');
+  return{'--bg':ground,'--panel':panel,'--panel2':mix(panel,rule,.6),'--line':light?mix(rule,ink,.12):mix(rule,ink,.08),'--ink':ink,'--muted':muted,'--green':accent,'--gold':reach(st.gold,surfaces,up),'--blue':reach(st.blue,surfaces,up),'--red':reach(st.red,surfaces,up),
+   '--accent-fill':fill,'--accent-on':on,'--accent-soft':softOf(accent),'--accent-edge':mix(panel,accent,.5),'--surface':surface,'--field':light?'#ffffff':mix(ground,panel,.3),'--track':light?rule:mix(rule,ground,.2),
+   '--notice':notice,'--notice-good':mix(panel,accent,light?.1:.14),'--glow1':glow[0],'--glow2':glow[1]||glow[0],'--glow3':glow[2]||glow[1]||glow[0]};
+ }
+ const names=Object.keys(tokens(list[0],true));
+ function apply(id,light){const root=document.documentElement,look=list.find(l=>l.id===id)||list[0];
+  for(const n of names)root.style.removeProperty(n);
+  if(look.id==='classic'){delete root.dataset.look;return}
+  root.dataset.look=look.id;const t=tokens(look,light);for(const n of names)root.style.setProperty(n,t[n]);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>m.setAttribute('content',t['--bg']));}
+ return{list,apply,tokens,contrast,fallback:'marigold'};
+})();
+// The spade slice: a spade cut open like a lemon. Also drawn by friends.html and the favicon in index.html.
+const CITRUS_MARK='<svg class="ui-mark" viewBox="0 -2 100 97" aria-hidden="true"><defs><clipPath id="citrusClip"><path d="M50 7C33 27 9 40 9 60C9 75 22 83 35 80C41 79 45 75 47 70C46 80 42 88 35 93L65 93C58 88 54 80 53 70C55 75 59 79 65 80C78 83 91 75 91 60C91 40 67 27 50 7Z"/></clipPath></defs><g clip-path="url(#citrusClip)"><path d="M50 7C33 27 9 40 9 60C9 75 22 83 35 80C41 79 45 75 47 70C46 80 42 88 35 93L65 93C58 88 54 80 53 70C55 75 59 79 65 80C78 83 91 75 91 60C91 40 67 27 50 7Z" fill="#ffd43b"/><path d="M50 56L114.7 82.8M50 56L76.8 120.7M50 56L23.2 120.7M50 56L-14.7 82.8M50 56L-14.7 29.2M50 56L23.2 -8.7M50 56L76.8 -8.7M50 56L114.7 29.2" stroke="#fff6c8" stroke-width="2.6"/><circle cx="50" cy="56" r="3.4" fill="#fff6c8"/><path d="M50 7C33 27 9 40 9 60C9 75 22 83 35 80C41 79 45 75 47 70C46 80 42 88 35 93L65 93C58 88 54 80 53 70C55 75 59 79 65 80C78 83 91 75 91 60C91 40 67 27 50 7Z" fill="none" stroke="#fff6c8" stroke-width="15"/><path d="M50 7C33 27 9 40 9 60C9 75 22 83 35 80C41 79 45 75 47 70C46 80 42 88 35 93L65 93C58 88 54 80 53 70C55 75 59 79 65 80C78 83 91 75 91 60C91 40 67 27 50 7Z" fill="none" stroke="#e9a90b" stroke-width="9"/></g><path d="M50 8C52 1 60-1 67 1C64 8 57 11 50 8Z" fill="#3f8f45"/></svg>';
 const studioInterface={area:'play',route:'play',ready:false,playControl:false,feedbackKey:null,feedbackSupported:null,lastFocus:null};
 function initInterface(){
  const ui=studioInterface,shell=document.querySelector('.shell'),layout=document.querySelector('.layout'),workspace=document.querySelector('.workspace'),setup=$('tableSetup');
@@ -11,7 +45,7 @@ function initInterface(){
  const view=(id)=>{const node=create('section','view');node.id=id;workspace.append(node);document.querySelector('.tabs').append(create('button','',''));const tab=document.querySelector('.tabs').lastElementChild;tab.dataset.tab=id;tab.textContent=id;return node;};
  shell.classList.add('ui-shell');layout.classList.add('ui-layout');document.body.classList.add('ui-app');
  document.querySelector('.hero').remove();$('mobileSetupToggle').hidden=true;
- document.querySelector('.top').innerHTML='<a class="brand ui-brand" href="#play" aria-label="Range Lab home">♠ <span>RANGE LAB</span></a><nav class="ui-primary" aria-label="Main activities">'+['play','practice','study','library'].map(area=>button(area[0].toUpperCase()+area.slice(1),'data-area="'+area+'" aria-pressed="'+(area==='play')+'"')).join('')+'</nav>'+button('Settings','id="uiSettingsButton" aria-haspopup="dialog"');
+ document.querySelector('.top').innerHTML='<a class="brand ui-brand" href="#play" aria-label="Citrus Poker home">'+CITRUS_MARK+'<span>CITRUS</span> POKER</a><nav class="ui-primary" aria-label="Main activities">'+['play','practice','study','library'].map(area=>button(area[0].toUpperCase()+area.slice(1),'data-area="'+area+'" aria-pressed="'+(area==='play')+'"')).join('')+'</nav>'+button('Settings','id="uiSettingsButton" aria-haspopup="dialog"');
  document.querySelector('.ui-brand').onclick=event=>{event.preventDefault();navigate('play');};
  const context=create('section','ui-context','<div><strong id="uiGameSummary"></strong><div class="small muted" id="uiGameContext"></div></div>'+button('Edit game','id="uiEditGame" aria-haspopup="dialog"'));
  context.id='uiContext';layout.before(context);
@@ -41,8 +75,9 @@ function initInterface(){
  const tools=details('Advanced solver tools');tools.classList.add('setup','ui-model-tools');tools.append(create('p','help','Reusable models are optional. Current-spot analysis has its own solve and reuses identical saved results.'),modelTree,training,$('newModel'),$('progress').parentElement);settingsDialog.querySelector('.ui-dialog-content').append(tools);
  const cardDisplay=details('Card display & theme');cardDisplay.append(create('label','toggle','<input type="checkbox" id="uiFourColor">Four-colour deck (♦ blue, ♣ green)'));settingsDialog.querySelector('.ui-dialog-content').append(cardDisplay);
  try{$('uiFourColor').checked=localStorage.getItem('range-lab-four-color')==='1'}catch{}document.body.classList.toggle('four-color',$('uiFourColor').checked);$('uiFourColor').onchange=()=>{document.body.classList.toggle('four-color',$('uiFourColor').checked);try{localStorage.setItem('range-lab-four-color',$('uiFourColor').checked?'1':'0')}catch{}};
- // Theme follows the device's light/dark preference unless the player picks one.
- cardDisplay.append(create('div','field gap','<label for="uiTheme">Theme</label><select class="input" id="uiTheme"><option value="auto">Match this device</option><option value="dark">Dark</option><option value="light">Light</option></select>'));const lightQuery=matchMedia('(prefers-color-scheme:light)'),applyTheme=()=>document.documentElement.classList.toggle('light',$('uiTheme').value==='light'||$('uiTheme').value==='auto'&&lightQuery.matches);try{$('uiTheme').value=localStorage.getItem('range-lab-theme')||'auto'}catch{}applyTheme();lightQuery.addEventListener?.('change',applyTheme);$('uiTheme').onchange=()=>{applyTheme();try{localStorage.setItem('range-lab-theme',$('uiTheme').value)}catch{}};
+ // Theme follows the device's light/dark preference unless the player picks one. The look supplies the colours
+ // (the Off My Plate looks, or the original green); the felt keeps its own colours whatever the look.
+ cardDisplay.append(create('div','field gap','<label for="uiLook">Look</label><select class="input" id="uiLook">'+citrusLooks.list.map(l=>'<option value="'+l.id+'">'+l.label+'</option>').join('')+'</select>'),create('div','field gap','<label for="uiTheme">Light or dark</label><select class="input" id="uiTheme"><option value="auto">Match this device</option><option value="dark">Dark</option><option value="light">Light</option></select>'));const lightQuery=matchMedia('(prefers-color-scheme:light)'),applyTheme=()=>{const light=$('uiTheme').value==='light'||$('uiTheme').value==='auto'&&lightQuery.matches;document.documentElement.classList.toggle('light',light);citrusLooks.apply($('uiLook').value,light)};try{$('uiTheme').value=localStorage.getItem('range-lab-theme')||'auto';const look=localStorage.getItem('citrus-look');if(citrusLooks.list.some(l=>l.id===look))$('uiLook').value=look;else $('uiLook').value=citrusLooks.fallback}catch{$('uiLook').value=citrusLooks.fallback}applyTheme();lightQuery.addEventListener?.('change',applyTheme);$('uiTheme').onchange=()=>{applyTheme();try{localStorage.setItem('range-lab-theme',$('uiTheme').value)}catch{}};$('uiLook').onchange=()=>{applyTheme();try{localStorage.setItem('citrus-look',$('uiLook').value)}catch{}};
  const bottomNote=setup.querySelector(':scope > .notice');if(bottomNote)training.append(bottomNote);
  if($('modelMismatch'))setup.prepend($('modelMismatch'));
  // Put one persistent game summary above the table, and the analysis beside it.

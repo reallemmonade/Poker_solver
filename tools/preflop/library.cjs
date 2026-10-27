@@ -41,7 +41,7 @@ function compact(pack){
 }
 function finish(){
  const packs=specs.filter(s=>fs.existsSync(file(s))).map(s=>compact(JSON.parse(fs.readFileSync(file(s),'utf8'))));
- const bundle={format:'range-lab-preflop-bundle-v1',name:'Range Lab preflop library'+(raked?` (rake ${args.rake}% cap ${args.rakeCap}bb)`:''),createdAt:new Date().toISOString(),packs};
+ const bundle={format:'range-lab-preflop-bundle-v1',name:'Citrus Poker preflop library'+(raked?` (rake ${args.rake}% cap ${args.rakeCap}bb)`:''),createdAt:new Date().toISOString(),packs};
  const out=path.join(args.out,'preflop-library.json');fs.writeFileSync(out,JSON.stringify(bundle));
  // The app also imports the gzipped copy, which is far smaller to move around.
  fs.writeFileSync(out+'.gz',require('zlib').gzipSync(fs.readFileSync(out),{level:9}));

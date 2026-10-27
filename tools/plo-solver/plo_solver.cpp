@@ -1,4 +1,4 @@
-// Heads-up pot-limit Omaha (4 cards, high only) postflop solver for Range Lab.
+// Heads-up pot-limit Omaha (4 cards, high only) postflop solver for Citrus Poker.
 // Discounted CFR (alpha 1.5, beta 0, gamma 2) in vector form over explicit weighted
 // combos, from the flop, turn or river. Turn and river cards are enumerated exactly;
 // suit isomorphism (exact, not an approximation) is used when the board and both
