@@ -1,5 +1,5 @@
 .felt{height:clamp(500px,48vw,610px);min-height:500px;margin:30px 8px 34px;border:9px solid #50483b;border-radius:44%;background:radial-gradient(ellipse at 50% 40%,#245b4d,#123a30);box-shadow:0 0 0 2px #81735a,inset 0 0 0 2px #98ac8138,inset 0 0 80px #001a1599;isolation:isolate}
-.felt:before{content:"RANGE LAB";position:absolute;left:50%;top:32%;transform:translateX(-50%);font-size:10px;letter-spacing:.28em;color:#c1d0bd30;pointer-events:none}
+.felt:before{content:"CITRUS POKER";position:absolute;left:50%;top:32%;transform:translateX(-50%);font-size:10px;letter-spacing:.28em;color:#c1d0bd30;pointer-events:none}
 .seat-node{position:absolute;transform:translate(-50%,-50%);width:clamp(70px,12%,110px);z-index:5;text-align:center}
 .seat-node .player{position:relative;transform:none;min-width:0;max-width:none;width:100%;padding:7px 4px;background:linear-gradient(#182b29,#0d1d1d);border:1px solid #5b7970;box-shadow:0 5px 12px #0004;font-size:11px;z-index:2}
 .seat-node .player.active{outline:2px solid #a1e6b5;box-shadow:0 0 20px #9cdbaf35}

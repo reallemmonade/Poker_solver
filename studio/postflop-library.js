@@ -25,7 +25,7 @@
  function row(node,index){const A=node.actions.length,t=node.bytes||(node.bytes=b64.dec(node.table));let s=0;const r=[];for(let a=0;a<A;a++){r.push(t[index*A+a]);s+=t[index*A+a];}return s?r.map(x=>x/s):null;}
 
  function validate(input){
-  need(input&&input.format===FORMAT&&Array.isArray(input.spots)&&input.spots.length>0,'Use a Range Lab postflop library file.');
+  need(input&&input.format===FORMAT&&Array.isArray(input.spots)&&input.spots.length>0,'Use a Citrus Poker postflop library file.');
   for(const spot of input.spots){
    need(typeof spot.id==='string'&&typeof spot.label==='string'&&spot.chart&&typeof spot.chart.name==='string'&&typeof spot.chart.key==='string','Each library spot needs its preflop chart line.');
    need(Number.isFinite(spot.pot)&&spot.pot>0&&Number.isFinite(spot.stack)&&spot.stack>0&&spot.flops&&typeof spot.flops==='object','Each library spot needs its pot, stack and flops.');

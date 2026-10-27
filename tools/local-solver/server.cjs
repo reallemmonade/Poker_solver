@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Local bridge between the Range Lab web app and the solvers on this computer:
+// Local bridge between the Citrus Poker web app and the solvers on this computer:
 // TexasSolver's console solver for NLH, tools/plo-solver for pot-limit Omaha.
 // Listens on 127.0.0.1 only. The app posts a solve spec (studio/local-solver.js);
 // the bridge validates it, writes the solver input itself, runs one solve at
@@ -75,7 +75,7 @@ const server=http.createServer((req,res)=>{
 });
 server.requestTimeout=0;server.headersTimeout=60000;
 server.listen(args.port,'127.0.0.1',()=>{
- console.log('Range Lab local solver listening on http://127.0.0.1:'+args.port+' with '+args.threads+' threads.');
+ console.log('Citrus Poker local solver listening on http://127.0.0.1:'+args.port+' with '+args.threads+' threads.');
  if(!fs.existsSync(args.solver))console.log('Warning: TexasSolver (NLH) was not found at '+args.solver+'. Run tools/local-solver/install-mac.sh first.');
  if(!fs.existsSync(args['plo-solver']))console.log('Warning: the PLO solver was not found at '+args['plo-solver']+'. Run tools/local-solver/install-mac.sh first.');
 });

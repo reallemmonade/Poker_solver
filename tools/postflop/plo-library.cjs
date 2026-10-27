@@ -26,7 +26,7 @@ const SPOTS={
 // The app's PLO tree (studio/local-solver.js): one bet size per street, pot raises.
 const TREE=L.PLO_TREE;
 
-const args={cmd:process.argv[2]||'help',charts:'preflop-library.json.gz',spots:'plo-btn-bb',flops:'40',combos:'500',out:'plo-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','plo-solver','plo_solver'),memory:String(Math.round(os.totalmem()/1048576*.7)),timeout:'7200',name:'Range Lab PLO postflop library'};
+const args={cmd:process.argv[2]||'help',charts:'preflop-library.json.gz',spots:'plo-btn-bb',flops:'40',combos:'500',out:'plo-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','plo-solver','plo_solver'),memory:String(Math.round(os.totalmem()/1048576*.7)),timeout:'7200',name:'Citrus Poker PLO postflop library'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}
@@ -105,7 +105,7 @@ function bundle(){
   const spot=JSON.parse(fs.readFileSync(meta,'utf8'));spot.flops={};
   for(const f of fs.readdirSync(dir).filter(x=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(x))){const r=JSON.parse(fs.readFileSync(path.join(dir,f),'utf8'));spot.flops[r.key]={weight:r.weight,iterations:r.iterations,exploitability:r.exploitability,combos:r.combos,weights:r.weights,nodes:r.nodes};}
   if(Object.keys(spot.flops).length)spots.push(spot);}
- const lib=Lib.validate({format:Lib.FORMAT,name:args.name,createdAt:new Date().toISOString(),source:{solver:'Range Lab PLO solver (tools/plo-solver, DCFR) via tools/postflop/plo-library.cjs',ranges:'Range Lab PLO preflop charts'},spots});
+ const lib=Lib.validate({format:Lib.FORMAT,name:args.name,createdAt:new Date().toISOString(),source:{solver:'Citrus Poker PLO solver (tools/plo-solver, DCFR) via tools/postflop/plo-library.cjs',ranges:'Citrus Poker PLO preflop charts'},spots});
  const file=path.join(args.out,'plo-postflop-library.json');fs.writeFileSync(file,JSON.stringify(lib));fs.writeFileSync(file+'.gz',zlib.gzipSync(fs.readFileSync(file),{level:9}));
  console.log(spots.map(s=>s.id+': '+Object.keys(s.flops).length+' flops').join('\n')+'\nWrote '+file+' and '+file+'.gz');
 }
