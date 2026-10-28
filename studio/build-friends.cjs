@@ -1,8 +1,8 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),studio=__dirname,out=path.join(studio,'render-site'),api=(process.env.MULTIPLAYER_API_ORIGIN||'').replace(/\/$/,'');
 fs.mkdirSync(out,{recursive:true});
-fs.copyFileSync(path.join(studio,'friends.html'),path.join(out,'friends.html'));
-fs.writeFileSync(path.join(out,'friends.js'),fs.readFileSync(path.join(studio,'friends.js'),'utf8').replace('__MULTIPLAYER_API_ORIGIN__',api));
+fs.writeFileSync(path.join(out,'friends.html'),fs.readFileSync(path.join(studio,'friends.html'),'utf8').replace('</style>',()=>fs.readFileSync(path.join(studio,'action-bar.css'),'utf8')+'\n</style>'));
+fs.writeFileSync(path.join(out,'friends.js'),"'use strict';\n"+fs.readFileSync(path.join(studio,'action-bar.js'),'utf8')+'\n'+fs.readFileSync(path.join(studio,'friends.js'),'utf8').replace('__MULTIPLAYER_API_ORIGIN__',api));
 const main=path.join(out,'index.html');
 if(!fs.existsSync(main))throw Error('Build the main web app before adding the friends page.');
 let html=fs.readFileSync(main,'utf8');
