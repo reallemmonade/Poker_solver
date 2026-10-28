@@ -13,6 +13,7 @@
 #     spots, then check.cjs and verify-import.
 # Every step resumes: solved flops, fits and charts already written are kept.
 #   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
+# EXTRA_FLOPS: flops per spot for the other 6-max 100bb lines in step 4 (default 50, which gives 56).
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
 # 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
 # TURN=1 also keeps the turn's first decisions for the 6-max and heads-up 100bb spots (bigger solver
@@ -21,7 +22,7 @@
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -34,6 +35,8 @@ SINGLE=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp
 THREE=btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hj-btn-3bet,co-btn-3bet,hu-3bet
 SRP=$SINGLE,$THREE
 LIMP=sb-bb-limp,hu-limp
+# The other heads-up 6-max lines, in the 100bb flop library only (no calibration), at EXTRA_FLOPS.
+EXTRA=hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj,hj-co-3bet,co-sb-3bet,utg-hj-3bet,utg-co-3bet,hj-sb-3bet,utg-btn-3bet
 at(){ # spots depth: ids at that depth (100bb ids carry no suffix)
   local out=() id; for id in ${1//,/ }; do
     if [ "$2" = 100 ]; then out+=($id); elif [ "$2" = 20 ] && [[ $id == *3bet ]]; then :; else out+=($id-$2bb); fi
@@ -82,9 +85,11 @@ F=$W/flop-v6; mkdir -p $F
 other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
 solve $V6 $F $SRP 100 150 --turn $TURN
 solve $V6 $F $LIMP 100 400 --turn $TURN
+solve $V6 $F $EXTRA $EXTRA_FLOPS 150
 solve $V6 $F $(other $SRP) $DEPTH_FLOPS 150
 solve $V6 $F $(other $LIMP) $DEPTH_FLOPS 400
 solve $V6 $F $SRP 100 400 --redo-above 1.2 --turn $TURN
+solve $V6 $F $EXTRA $EXTRA_FLOPS 400 --redo-above 1.2
 solve $V6 $F $(other $SRP) $DEPTH_FLOPS 400 --redo-above 1.2
 # 4- and 9-handed 100bb: single-raised pots against the BB and the BTN, blind against blind, two
 # 3-bet pots and the SB limp.
