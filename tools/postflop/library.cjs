@@ -153,7 +153,7 @@ async function solve(){
  }
  const one=async({id,spot,f,file})=>{
    // Another run writing to the same folder may have solved it meanwhile.
-   if(fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json'))))return;
+   if(fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json.gz'))))return;
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
