@@ -81,11 +81,23 @@ async function addPreflopPack(input){return(await addPreflopPacks([input]))[0];}
 // A bundle file holds many packs; they are validated first and saved together.
 async function addPreflopPacks(inputs){const packs=inputs.map(PokerPreflop.validate);for(const pack of packs){const old=preflopLibrary.packs.findIndex(p=>p.name===pack.name&&p.family===pack.family);if(old>=0)preflopLibrary.packs[old]=pack;else preflopLibrary.packs.unshift(pack);}preflopLibrary.preferred=packs.length===1?packs[0]:null;await persistPreflop();spotUI.last=null;renderPreflopLibrary();renderPlay();renderRanges();return packs;}
 function restorePreflop(meta){try{const rows=meta.find(x=>x.id==='preflopReferences-v1')?.value||[];for(const row of rows)try{preflopLibrary.packs.push(PokerPreflop.validate(row,true))}catch{}const selected=meta.find(x=>x.id==='preflopPreferred-v1')?.value;preflopLibrary.preferred=preflopLibrary.packs.find(p=>p.name===selected?.name&&p.family===selected?.family)||null;preflopLibrary.ready=true;renderPreflopLibrary();}catch{}try{for(const row of meta.find(x=>x.id==='postflopLibraries-v1')?.value||[])postflopLibrary.libraries.push(PokerPostflopLibrary.validate(row));renderPostflopLibrary();}catch{}}
+// The bundled libraries unpack to about 260 MB, which crashes a phone or tablet tab, so those devices skip them.
+function smallMemoryDevice(){const n=navigator;return /iPhone|iPad|iPod|Android/i.test(n.userAgent)||(n.platform==='MacIntel'&&n.maxTouchPoints>1)||(n.deviceMemory>0&&n.deviceMemory<8);}
+// Removes bundled libraries an earlier version stored on a small device, before they are restored (the 256-pack chart bundle, or anything the bundle record lists).
+function dropBundledFromSmallDevice(meta){
+ if(!smallMemoryDevice())return;const row=id=>meta.find(x=>x?.id===id),record=row('bundledLibraries-v1')?.value,pre=row('preflopReferences-v1'),post=row('postflopLibraries-v1'),bundled=/\(Range Lab CFR\+ model(, approximate)?\)$/;
+ const listed=new Set((record?.preflop||[]).map(p=>p.name+'\n'+p.family)),looksBundled=(pre?.value||[]).filter(p=>bundled.test(p?.name)).length>=100;
+ if(!record&&!looksBundled)return;const writes=[];
+ if(pre?.value){const keep=pre.value.filter(p=>!listed.has(p?.name+'\n'+p?.family)&&!(looksBundled&&bundled.test(p?.name)));if(keep.length<pre.value.length){pre.value=keep;writes.push(pre);}}
+ if(post?.value){const names=new Set(record?.postflop||['Range Lab postflop library','Range Lab PLO postflop library']),keep=post.value.filter(l=>!names.has(l?.name));if(keep.length<post.value.length){post.value=keep;writes.push(post);}}
+ if(record)writes.push({id:'bundledLibraries-v1',value:null});for(const w of writes)dbPut('meta',w).catch(()=>{});
+}
 // The site serves the current chart and flop libraries (studio/libraries,
 // listed in manifest.json). Each device loads them once per manifest version,
 // replacing the previous bundled version and leaving the user's own imports.
 async function loadBundledLibraries(meta){
  if(!/^https?:$/.test(location.protocol)||typeof DecompressionStream!=='function')return;
+ if(smallMemoryDevice()){const el=$('preflopImportStatus');if(el)el.textContent='The built-in solver charts are too large for a phone or tablet; import a single chart pack here instead.';return;}
  const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
  if(!manifest?.version||!Array.isArray(manifest.files)||!manifest.files.length)return;
  const loaded=meta.find(x=>x.id==='bundledLibraries-v1')?.value||null;if(loaded?.version===manifest.version)return;
