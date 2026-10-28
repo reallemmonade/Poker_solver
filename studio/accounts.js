@@ -17,7 +17,10 @@ const citrusAccount=(()=>{
  async function api(method,path,data,token=account?.token){
   if(!API)throw Object.assign(Error('Accounts need the hosted site.'),{status:0});
   let res;try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined});}catch{throw Object.assign(Error('No connection. Your work stays saved on this device.'),{status:0});}
-  const body=await res.json().catch(()=>({}));if(!res.ok)throw Object.assign(Error(body.error||'Something went wrong.'),{status:res.status});return body;
+  // Anything but a JSON answer means the request reached the wrong server (for example the static site) or a proxy page.
+  const text=await res.text().catch(()=>'');let body=null;try{body=JSON.parse(text)}catch{}
+  if(!body||typeof body!=='object'){const host=new URL(API).host;throw Object.assign(Error(res.status>=500||res.status===0?'The account server ('+host+') is not answering. It may be waking up; try again in a minute.':'The account server ('+host+') sent back a page instead of an answer (HTTP '+res.status+'). Its address may be set wrong.'),{status:res.status>=500?res.status:502});}
+  if(!res.ok)throw Object.assign(Error(body.error||'Something went wrong.'),{status:res.status});return body;
  }
  // Local queue of records changed since the last upload: "store id" → change time.
  const queue=()=>account?read(key('citrus-sync-queue-v1'),{}):{},saveQueue=q=>account&&write(key('citrus-sync-queue-v1'),q);
@@ -69,6 +72,7 @@ const citrusAccount=(()=>{
  }
  async function signIn(kind,payload){
   const res=await api('POST','/api/auth/'+kind,payload,null);
+  if(!res?.token||!res?.user?.id)throw Object.assign(Error('The account server ('+new URL(API).host+') gave an unexpected answer. Try again in a minute.'),{status:502});
   if(read(OWNER,null)===null)write(OWNER,res.user.id);
   account={token:res.token,user:res.user};write(ACCOUNT,account);location.reload();
  }
