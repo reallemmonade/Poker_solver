@@ -1,7 +1,8 @@
 #!/bin/bash
 # Preflop realization calibration at every depth, then the NLH flop library on the result.
-#  1. Pass 1: the 15 NLH flop spots at 20, 50, 100 and 200bb (the 3-bet pots are all-in at 20bb),
-#     36 flops each with per-class EVs, on the v4 charts; one realization fit per depth.
+#  1. Pass 1: the 17 NLH flop spots at 20, 50, 100 and 200bb (the 3-bet pots are all-in at 20bb),
+#     24 flops each (72 for 3-bet pots) with per-class EVs, on the v4 charts; one realization fit
+#     per depth, with 3-bet pots fitted on their own (--split 1).
 #  2. Pass 2: the same spots on 6-max and heads-up cash charts rebuilt with the pass-1 fits; fit
 #     again on both passes.
 #  3. preflop-library-v6-calibrated.json.gz: the NLH charts at 20, 50, 100, 150 and 200bb (2-9
@@ -27,7 +28,11 @@ cd "$R" || exit 1
 [ -f "$V4" ] && [ -x "$TSE" ] || { echo "Needs $V4 and $TSE"; exit 1; }
 say(){ echo "$(date -u '+%F %T') $*"; }
 
-SRP=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hu-srp,hu-3bet
+SINGLE=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp
+# 3-bet pots get their own realization fit (calibrate.cjs --split 1) and more flops: they solve
+# several times faster, and a per-class fit on 24 flops a spot is mostly noise.
+THREE=btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hj-btn-3bet,co-btn-3bet,hu-3bet
+SRP=$SINGLE,$THREE
 LIMP=sb-bb-limp,hu-limp
 at(){ # spots depth: ids at that depth (100bb ids carry no suffix)
   local out=() id; for id in ${1//,/ }; do
@@ -39,11 +44,12 @@ solve(){ # charts out spots flops iterations [more args]
   node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:6}" || say "FAILED solve into $2"
 }
 evs(){ # charts out
-  solve $1 $2 $(all $SRP) 24 150
+  solve $1 $2 $(all $SINGLE) 24 150
+  solve $1 $2 $(all $THREE) 72 150
   solve $1 $2 $(all $LIMP) 24 400
 }
 fit(){ # work out
-  [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --out $2 || { say "FAILED calibrate $2"; exit 1; }
+  [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --split 1 --out $2 || { say "FAILED calibrate $2"; exit 1; }
 }
 charts(){ # calibration dir [library.cjs args]: built charts plus every other v4 chart, bundled
   node tools/preflop/library.cjs --out $2 --games nlh --limp 1 --calibration $1 --base $V4 --jobs $CHART_JOBS "${@:3}" | grep -E "Problems|FAILED|Bundled|Kept|charts," ; [ -f $2/preflop-library.json.gz ] || { say "FAILED charts $2"; exit 1; }
@@ -65,6 +71,8 @@ charts $W/set2.json $W/charts-v6 --depths 20,50,100,150,200
 node studio/build.cjs --web > /dev/null 2>&1
 node studio/verify-import.cjs $V6 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
 node tools/calibration/refcheck.cjs $V4 $V6
+# Gate: v6 replaces v4 in the app only if its 6-max 100bb responses to an open look like solver output.
+node tools/preflop/balance-check.cjs $V6 && say "BALANCE CHECK PASSED" || say "BALANCE CHECK FAILED: do not ship v6 charts"
 say "CALIBRATION DONE"
 
 # The NLH flop libraries on the v6 ranges, as the v4 one was built: 150 iterations, then flops

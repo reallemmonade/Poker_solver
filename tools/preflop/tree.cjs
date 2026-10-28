@@ -14,6 +14,9 @@ function defaults(raw={}){
   // Flop realization (solve.cjs matrices): position edge, extra edge for the last raiser, and
   // sharpness, which makes hands that are behind realize less than their raw equity.
   realization:.12,initiative:.06,sharpness:1.2,
+  // reraised: {realization, initiative, sharpness, playTable} for flop pots after a 3-bet or more,
+  // which play shallower than single-raised pots; null uses the settings above for every pot.
+  reraised:null,
   // Flop pots pay all-in equity below allInSPR (stack behind / pot), the realization share above
   // flopSPR, and a blend in between: with that little behind the money goes in on most flops.
   allInSPR:.5,flopSPR:1.5,
@@ -124,7 +127,7 @@ function build(raw){
   // commit: weight of all-in equity in a flop pot's payoff (1 when effectively all-in).
   const commit=s.allIn?1:Math.min(1,Math.max(0,(o.flopSPR-spr)/(o.flopSPR-o.allInSPR)));
   const rake=Math.min(o.rakeCap,o.rake/100*pot*(1+(1-Math.min(1,commit))*(o.rakeGrowth-1)));
-  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,...commit>0&&commit<1?{commit}:{},...rake>0?{net:pot-rake}:{}};
+  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,raises:s.level,...commit>0&&commit<1?{commit}:{},...rake>0?{net:pot-rake}:{}};
  }
 }
 function sum(a){return a.reduce((x,y)=>x+y,0);}
