@@ -2,7 +2,14 @@
   "name": "citrus-poker",
   "private": true,
   "description": "Citrus Poker study app and room/account service",
-  "engines": { "node": ">=18" },
-  "scripts": { "start": "node server.cjs" },
-  "dependencies": { "pg": "^8.13.0" }
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "pg": "^8.13.0"
+  }
 }

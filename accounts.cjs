@@ -2,7 +2,7 @@
 // Player accounts and synced personal data. Each account's records (hands, assessments, saved spots, drill
 // progress, settings) are rows keyed by store and id; the newest write by its client timestamp wins, and every
 // accepted write gets a fresh sequence number so devices pull only what changed since their last sync.
-// DATABASE_URL picks Postgres (Neon or Render); without it the service keeps accounts in memory for local use.
+// TURSO_DATABASE_URL picks Turso (libSQL), DATABASE_URL picks Postgres; without either the service keeps accounts in memory for local use.
 const crypto=require('node:crypto');
 const STORES=new Set(['hands','grades','solves','meta','prefs']),ROW_MAX=262144,BATCH_MAX=200,PAGE_BYTES=3*1048576,PAGE_ROWS=300,SESSION_DAYS=180;
 const QUOTA=(Number(process.env.ACCOUNT_QUOTA_MB)>0?Number(process.env.ACCOUNT_QUOTA_MB):50)*1048576;
@@ -57,7 +57,31 @@ ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data
  };
 }
 
-function chooseStore(){const url=process.env.DATABASE_URL;if(url)try{return postgresStore(url)}catch(e){console.error('Accounts are off: the Postgres driver did not load ('+e.message+'). Run npm install.');return null;}if(process.env.RENDER&&!process.env.ACCOUNTS_IN_MEMORY)return null;return memoryStore();}
+// Turso (libSQL/SQLite): TURSO_DATABASE_URL is libsql://<db>-<org>.turso.io (or file:local.db for testing) with TURSO_AUTH_TOKEN.
+// SQLite has no sequences, so each accepted write takes the table's highest sequence plus one inside the batch transaction.
+function libsqlStore(url,authToken){
+ const {createClient}=require('@libsql/client'),db=createClient({url,authToken:authToken||undefined});
+ const q=(sql,args=[])=>db.execute({sql,args}),row=r=>r.rows[0]||null;
+ return{kind:'turso',
+  async init(){await db.batch([`CREATE TABLE IF NOT EXISTS citrus_users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,pass TEXT NOT NULL,created_at INTEGER NOT NULL)`,
+   `CREATE TABLE IF NOT EXISTS citrus_sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES citrus_users(id) ON DELETE CASCADE,created_at INTEGER NOT NULL,seen_at INTEGER NOT NULL)`,
+   `CREATE TABLE IF NOT EXISTS citrus_records(user_id TEXT NOT NULL REFERENCES citrus_users(id) ON DELETE CASCADE,store TEXT NOT NULL,id TEXT NOT NULL,t INTEGER NOT NULL,seq INTEGER NOT NULL,size INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(user_id,store,id))`,
+   `CREATE INDEX IF NOT EXISTS citrus_records_user_seq ON citrus_records(user_id,seq)`,`CREATE INDEX IF NOT EXISTS citrus_records_seq ON citrus_records(seq)`,`CREATE INDEX IF NOT EXISTS citrus_sessions_user ON citrus_sessions(user_id)`],'write');},
+  async createUser(u){const r=await q('INSERT INTO citrus_users(id,username,name,pass,created_at) VALUES(?,?,?,?,?) ON CONFLICT(username) DO NOTHING',[u.id,u.username,u.name,u.pass,Date.now()]);return r.rowsAffected===1;},
+  async userByName(username){return row(await q('SELECT id,username,name,pass FROM citrus_users WHERE username=?',[username]));},
+  async createSession(hash,userId){const now=Date.now();await q('INSERT INTO citrus_sessions(token_hash,user_id,created_at,seen_at) VALUES(?,?,?,?)',[hash,userId,now,now]);},
+  async sessionUser(hash){const now=Date.now(),u=row(await q('SELECT u.id,u.username,u.name,s.seen_at FROM citrus_sessions s JOIN citrus_users u ON u.id=s.user_id WHERE s.token_hash=? AND s.seen_at>?',[hash,now-SESSION_DAYS*864e5]));if(!u)return null;if(now-Number(u.seen_at)>36e5)await q('UPDATE citrus_sessions SET seen_at=? WHERE token_hash=?',[now,hash]);return{id:u.id,username:u.username,name:u.name};},
+  async deleteSession(hash){await q('DELETE FROM citrus_sessions WHERE token_hash=?',[hash]);},
+  async usage(userId){const r=row(await q('SELECT coalesce(sum(size),0) AS bytes,count(*) AS count FROM citrus_records WHERE user_id=?',[userId]));return{bytes:Number(r.bytes),count:Number(r.count)};},
+  async sizes(userId,list){const r=await q('SELECT store,id,size FROM citrus_records WHERE user_id=? AND (store,id) IN (VALUES '+list.map(()=>'(?,?)').join(',')+')',[userId,...list.flatMap(x=>[x.store,x.id])]),m=new Map(r.rows.map(x=>[x.store+'\u0000'+x.id,Number(x.size)]));return list.map(x=>m.get(x.store+'\u0000'+x.id)||0);},
+  async push(userId,list){const results=await db.batch(list.map(x=>({sql:`INSERT INTO citrus_records(user_id,store,id,t,size,data,seq) VALUES(?,?,?,?,?,?,(SELECT coalesce(max(seq),0)+1 FROM citrus_records))
+ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=excluded.seq WHERE citrus_records.t<excluded.t`,args:[userId,x.store,x.id,x.t,x.size,x.data]})),'write');return results.reduce((n,r)=>n+r.rowsAffected,0);},
+  async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=? AND seq>? ORDER BY seq LIMIT ?',[userId,since,limit])).rows.map(r=>({store:r.store,id:r.id,t:Number(r.t),seq:Number(r.seq),size:Number(r.size),data:r.data}));},
+  async deleteUser(userId){await db.batch([{sql:'DELETE FROM citrus_records WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_sessions WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_users WHERE id=?',args:[userId]}],'write');}
+ };
+}
+
+function chooseStore(){const turso=process.env.TURSO_DATABASE_URL;if(turso)try{return libsqlStore(turso,process.env.TURSO_AUTH_TOKEN)}catch(e){console.error('Accounts are off: the Turso driver did not load ('+e.message+'). Run npm install.');return null;}const url=process.env.DATABASE_URL;if(url)try{return postgresStore(url)}catch(e){console.error('Accounts are off: the Postgres driver did not load ('+e.message+'). Run npm install.');return null;}if(process.env.RENDER&&!process.env.ACCOUNTS_IN_MEMORY)return null;return memoryStore();}
 
 function createAccounts({json,err,body,limit,store=chooseStore()}){
  let ready=store?store.init().then(()=>true,e=>{console.error('Account database could not start:',e.message);ready=null;return false;}):null;
@@ -108,4 +132,4 @@ function createAccounts({json,err,body,limit,store=chooseStore()}){
   return json(res,404,{error:'Not found.'});
  };
 }
-module.exports={createAccounts,memoryStore,postgresStore};
+module.exports={createAccounts,memoryStore,postgresStore,libsqlStore};

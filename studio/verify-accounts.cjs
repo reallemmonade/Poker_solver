@@ -44,6 +44,6 @@ async function main(){
  ok((await call('POST','/api/account/delete',{token:mac,data:{password:'nope nope'}})).status===401,'deleting needs the password');
  ok((await call('POST','/api/account/delete',{token:mac,data:{password}})).status===200&&(await call('GET','/api/auth/me',{token:mac})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password}})).status===401,'deleting the account removes it');
  await call('POST','/api/account/delete',{token:other,data:{password}});
- server.close();console.log(JSON.stringify({ok:true,checks,store:process.env.DATABASE_URL?'postgres':'memory'}));process.exit(0);
+ server.close();console.log(JSON.stringify({ok:true,checks,store:process.env.TURSO_DATABASE_URL?'turso':process.env.DATABASE_URL?'postgres':'memory'}));process.exit(0);
 }
 main().catch(e=>{console.error(e);process.exit(1);});
