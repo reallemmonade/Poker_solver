@@ -111,7 +111,7 @@ async function importStudyData(data){
  const incoming=await validateStudyImport(data),existing=await readStudyStores(),plan=mergeStudyRows(existing,incoming),db=await openDB();if(plan.count)transferMessage('Saving '+fmt(plan.count,0)+' record'+(plan.count===1?'':'s')+'…');
  await new Promise((resolve,reject)=>{const tx=db.transaction(studyStores,'readwrite');tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||Error('Import was rolled back.'));tx.onerror=()=>{};try{for(const name of studyStores)for(const row of plan.updates[name])tx.objectStore(name).put(row);}catch(error){tx.abort();reject(error);}});
  for(const name of studyStores)for(const row of plan.updates[name])citrusAccount.changed(name,row.id);spotUI.cache.clear();spotUI.last=null;const stores=await readStudyStores();state.models=stores.models;state.histories=newestRows(stores.hands,validHandRow).rows;state.grades=newestRows(stores.grades.map(r=>{try{return scrubSavedGrade(r)}catch{return null}}),validGradeRow).rows;renderLibrary();renderSavedHands();renderProgress();invalidatePreparedBackup();
- if(plan.updates.meta.some(row=>row.id==='preflopReferences-v1')){preflopLibrary.packs=[];restorePreflop(stores.meta);spotUI.last=null;renderPlay();renderRanges();}
+ if(plan.updates.meta.some(row=>row.id==='preflopReferences-v1')){preflopLibrary.packs=preflopLibrary.packs.filter(p=>memoryOnly.has(p));restorePreflop(stores.meta);spotUI.last=null;renderPlay();renderRanges();}
  await refreshTransferCounts();plan.references=Array.isArray(data?.references)?data.references.length:0;
  return plan;
 }

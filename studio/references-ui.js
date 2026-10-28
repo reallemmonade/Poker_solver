@@ -85,38 +85,42 @@ async function addPreflopPacks(inputs){const packs=inputs.map(PokerPreflop.valid
 function restorePreflop(meta){try{const rows=meta.find(x=>x.id==='preflopReferences-v1')?.value||[];for(const row of rows)try{preflopLibrary.packs.push(PokerPreflop.validate(row,true))}catch{}const selected=meta.find(x=>x.id==='preflopPreferred-v1')?.value;preflopLibrary.preferred=preflopLibrary.packs.find(p=>p.name===selected?.name&&p.family===selected?.family)||null;preflopLibrary.ready=true;renderPreflopLibrary();}catch{}try{for(const row of meta.find(x=>x.id==='postflopLibraries-v1')?.value||[])postflopLibrary.libraries.push(PokerPostflopLibrary.validate(row));renderPostflopLibrary();}catch{}}
 // The bundled libraries unpack to about 260 MB, which crashes a phone or tablet tab, so those devices skip them.
 function smallMemoryDevice(){const n=navigator;return /iPhone|iPad|iPod|Android/i.test(n.userAgent)||(n.platform==='MacIntel'&&n.maxTouchPoints>1)||(n.deviceMemory>0&&n.deviceMemory<8);}
-// Removes bundled libraries an earlier version stored on a small device, before they are restored (the 256-pack chart bundle, or anything the bundle record lists).
-function dropBundledFromSmallDevice(meta){
- if(!smallMemoryDevice())return;const row=id=>meta.find(x=>x?.id===id),record=row('bundledLibraries-v1')?.value,pre=row('preflopReferences-v1'),post=row('postflopLibraries-v1'),bundled=/\(Range Lab CFR\+ model(, approximate)?\)$/;
- const listed=new Set((record?.preflop||[]).map(p=>p.name+'\n'+p.family)),looksBundled=(pre?.value||[]).filter(p=>bundled.test(p?.name)).length>=100;
+// Removes bundled libraries an earlier version stored, before they are restored: anything the bundle record lists (they are now fetched
+// on each launch and kept in memory) and, on a small device, the whole 256-pack chart bundle.
+function dropStoredBundle(meta){
+ const row=id=>meta.find(x=>x?.id===id),record=row('bundledLibraries-v1')?.value,pre=row('preflopReferences-v1'),post=row('postflopLibraries-v1'),bundled=/\(Range Lab CFR\+ model(, approximate)?\)$/;
+ const listed=new Set((record?.preflop||[]).map(p=>p.name)),looksBundled=smallMemoryDevice()&&(pre?.value||[]).filter(p=>bundled.test(p?.name)).length>=100;
  if(!record&&!looksBundled)return;const writes=[];
- if(pre?.value){const keep=pre.value.filter(p=>!listed.has(p?.name+'\n'+p?.family)&&!(looksBundled&&bundled.test(p?.name)));if(keep.length<pre.value.length){pre.value=keep;writes.push(pre);}}
+ if(pre?.value){const keep=pre.value.filter(p=>!listed.has(p?.name)&&!(looksBundled&&bundled.test(p?.name)));if(keep.length<pre.value.length){pre.value=keep;writes.push(pre);}}
  if(post?.value){const names=new Set(record?.postflop||['Range Lab postflop library','Range Lab PLO postflop library']),keep=post.value.filter(l=>!names.has(l?.name));if(keep.length<post.value.length){post.value=keep;writes.push(post);}}
  if(record)writes.push({id:'bundledLibraries-v1',value:null});for(const w of writes)dbPut('meta',w).catch(()=>{});
 }
 // The site serves the current chart and flop libraries (studio/libraries: one file per chart
 // pack and per flop spot, listed in manifest.json; tools/split-libraries.cjs writes them).
-// Desktops load them all once per manifest version, replacing the previous bundled version
-// and leaving the user's own imports. Phones and tablets download single files instead.
-const fetchLibraryFile=async file=>{const r=await fetch('libraries/'+file.split('/').map(encodeURIComponent).join('/'),{cache:'no-cache'});if(!r.ok)throw Error('Missing '+file);return JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text());};
-let bundleManifest=null;
-async function loadBundledLibraries(meta){
+// Desktops fetch them all on each launch, nearest the current game first, and keep them in memory only:
+// the browser cache revalidates unchanged files, and nothing large is written to or read back from the database.
+// Phones and tablets download single files instead.
+const fetchLibraryFile=async file=>{const url='libraries/'+file.split('/').map(encodeURIComponent).join('/'),r=await fetch(url,{cache:'no-cache'}).catch(()=>fetch(url,{cache:'force-cache'}));if(!r.ok)throw Error('Missing '+file);return JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text());};
+let bundleManifest=null,bundleLoading=false;
+// True while the built-in charts are still arriving, so a missing chart is not yet a real answer.
+function chartsLoading(){return bundleLoading||phoneFetches.size>0;}
+async function loadBundledLibraries(){
  if(!/^https?:$/.test(location.protocol)||typeof DecompressionStream!=='function')return;
- const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
- if(!manifest?.version||!Array.isArray(manifest.packs)||!Array.isArray(manifest.flops))return;
- const note=text=>{const el=$('preflopImportStatus');if(el)el.textContent=text;};
- if(smallMemoryDevice()){bundleManifest=manifest;renderBundleDownloads();renderPlay();return;}
- const loaded=meta.find(x=>x.id==='bundledLibraries-v1')?.value||null;if(loaded?.version===manifest.version)return;
- note('Loading the built-in solver charts…');
- const packs=[],libs=new Map();for(let i=0;i<manifest.packs.length;i+=8)packs.push(...await Promise.all(manifest.packs.slice(i,i+8).map(p=>fetchLibraryFile(p.file))));
- for(const f of manifest.flops){const part=await fetchLibraryFile(f.file),lib=libs.get(part.name);if(lib)lib.spots.push(...part.spots);else libs.set(part.name,part);}
- for(const p of loaded?.preflop||[]){const i=preflopLibrary.packs.findIndex(x=>x.name===p.name&&x.family===p.family);if(i>=0)preflopLibrary.packs.splice(i,1);}
- postflopLibrary.libraries=postflopLibrary.libraries.filter(l=>!(loaded?.postflop||[]).includes(l.name));
- const record={version:manifest.version,preflop:[],postflop:[]},preferred=preflopLibrary.preferred;
- if(packs.length)record.preflop.push(...(await addPreflopPacks(packs)).map(p=>({name:p.name,family:p.family})));
- for(const input of libs.values()){const lib=await addPostflopLibrary(input);record.postflop.push(lib.name);}
- preflopLibrary.preferred=preferred&&preflopLibrary.packs.includes(preferred)?preferred:null;await persistPreflop();
- await dbPut('meta',{id:'bundledLibraries-v1',value:record});note('Built-in solver charts loaded: '+record.preflop.length+' preflop charts'+(record.postflop.length?' and '+record.postflop.length+' flop libraries':'')+' ('+manifest.version+').');spotUI.last=null;renderPlay();renderRanges();
+ bundleLoading=true;
+ try{
+  const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!manifest?.version||!Array.isArray(manifest.packs)||!Array.isArray(manifest.flops))return;
+  if(smallMemoryDevice()){bundleManifest=manifest;renderBundleDownloads();return;}
+  const c=state.config||{},stack=Math.max(...(c.stacks||[100])),mode=c.mode==='cash'?'cash':'icm',score=p=>(p.variant===c.variant?0:1e6)+(p.mode===mode?0:1e5)+(p.seats===c.seats?0:1e4)+Math.abs(Math.log(p.stack/stack));
+  const order=manifest.packs.slice().sort((a,b)=>score(a)-score(b)),has=p=>preflopLibrary.packs.some(x=>x.name===p.name&&x.family===p.family);
+  for(let i=0;i<order.length;i+=8){
+   for(const input of await Promise.all(order.slice(i,i+8).map(p=>fetchLibraryFile(p.file).catch(()=>null))))try{const pack=PokerPreflop.validate(input);if(!has(pack)){memoryOnly.add(pack);preflopLibrary.packs.push(pack);}}catch{}
+   if(!i){spotUI.last=null;renderPlay();}await new Promise(r=>setTimeout(r));
+  }
+  const libs=new Map();for(const part of await Promise.all(manifest.flops.map(f=>fetchLibraryFile(f.file).catch(()=>null))))if(part){const lib=libs.get(part.name);if(lib)lib.spots.push(...part.spots);else libs.set(part.name,part);}
+  for(const input of libs.values())try{if(postflopLibrary.libraries.some(l=>l.name===input.name))continue;const lib=PokerPostflopLibrary.validate(input);memoryOnly.add(lib);postflopLibrary.libraries.push(lib);}catch{}
+  renderPreflopLibrary();renderPostflopLibrary();renderRanges();
+ }finally{bundleLoading=false;spotUI.last=null;renderPlay();}
 }
 // Phones and tablets fetch what the current hand needs instead: the chart for this game and, at the flop,
 // the flop spot of this hand's preflop line (about 1 MB). Both stay in memory only, so nothing is written

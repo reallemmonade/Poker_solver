@@ -35,7 +35,7 @@ const citrusAccount=(()=>{
    const batch=keys.slice(0,BATCH_ROWS),rows=await idb(STUDY,'readonly',tx=>{const out=[];for(const k of batch){const i=k.indexOf(' '),store=k.slice(0,i),id=k.slice(i+1),r=tx.objectStore(store).get(id);r.onsuccess=()=>out.push({k,store,id,row:r.result});}return out;});
    const send=[...prefs.splice(0)],sent=[];let bytes=0;
    for(const x of rows){if(!x.row){sent.push(x.k);continue;}const size=bytesOf(x.row);if(size>ROW_MAX||!/^[a-zA-Z0-9._:-]{1,200}$/.test(x.id)){sent.push(x.k);continue;}if(send.length&&bytes+size>BATCH_BYTES)break;bytes+=size;send.push({store:x.store,id:x.id,t:q[x.k],data:x.row});sent.push(x.k);}
-   if(send.length)await api('POST','/api/sync',{rows:send});
+   if(send.length){const since=read(key('citrus-sync-cursor-v1'),0),res=await api('POST','/api/sync',{rows:send,since});if(res.cursor>since&&read(key('citrus-sync-cursor-v1'),0)===since)write(key('citrus-sync-cursor-v1'),res.cursor);}
    const after=queue();for(const k of sent)if(after[k]===q[k])delete after[k];saveQueue(after);
    const seen=read(key('citrus-prefs-seen-v1'),{});for(const r of send)if(r.store==='prefs')seen[r.id]=r.data;write(key('citrus-prefs-seen-v1'),seen);
    if(!sent.length)return;

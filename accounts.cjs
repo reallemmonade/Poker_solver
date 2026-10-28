@@ -28,6 +28,7 @@ function memoryStore(){
   async usage(userId){let bytes=0,count=0;for(const r of rows(userId).values()){bytes+=r.size;count++;}return{bytes,count};},
   async sizes(userId,list){const m=rows(userId);return list.map(r=>m.get(r.store+'\u0000'+r.id)?.size||0);},
   async push(userId,list){const m=rows(userId);let accepted=0;for(const r of list){const key=r.store+'\u0000'+r.id,old=m.get(key);if(old&&old.t>=r.t)continue;m.set(key,{...r,seq:++seq});accepted++;}return accepted;},
+  async head(userId,since){let count=0,max=since;for(const r of rows(userId).values())if(r.seq>since){count++;max=Math.max(max,r.seq);}return{count,max};},
   async pull(userId,since,limit){return[...rows(userId).values()].filter(r=>r.seq>since).sort((a,b)=>a.seq-b.seq).slice(0,limit);},
   async deleteUser(userId){users.delete(userId);records.delete(userId);for(const [k,s]of sessions)if(s.userId===userId)sessions.delete(k);}
  };
@@ -52,6 +53,7 @@ CREATE INDEX IF NOT EXISTS citrus_records_user_seq ON citrus_records(user_id,seq
   async sizes(userId,list){const r=await q('SELECT store,id,size FROM citrus_records WHERE user_id=$1 AND (store,id) IN (SELECT * FROM unnest($2::text[],$3::text[]))',[userId,list.map(x=>x.store),list.map(x=>x.id)]),m=new Map(r.rows.map(x=>[x.store+'\u0000'+x.id,x.size]));return list.map(x=>m.get(x.store+'\u0000'+x.id)||0);},
   async push(userId,list){const r=await q(`INSERT INTO citrus_records(user_id,store,id,t,size,data) SELECT $1,* FROM unnest($2::text[],$3::text[],$4::bigint[],$5::int[],$6::text[])
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=nextval('citrus_record_seq') WHERE citrus_records.t<excluded.t`,[userId,list.map(x=>x.store),list.map(x=>x.id),list.map(x=>x.t),list.map(x=>x.size),list.map(x=>x.data)]);return r.rowCount;},
+  async head(userId,since){const r=(await q('SELECT count(*)::int AS count,coalesce(max(seq),$2)::bigint AS max FROM citrus_records WHERE user_id=$1 AND seq>$2',[userId,since])).rows[0];return{count:r.count,max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=$1 AND seq>$2 ORDER BY seq LIMIT $3',[userId,since,limit])).rows.map(r=>({...r,t:Number(r.t),seq:Number(r.seq)}));},
   async deleteUser(userId){await q('DELETE FROM citrus_users WHERE id=$1',[userId]);}
  };
@@ -76,6 +78,7 @@ function libsqlStore(url,authToken){
   async sizes(userId,list){const r=await q('SELECT store,id,size FROM citrus_records WHERE user_id=? AND (store,id) IN (VALUES '+list.map(()=>'(?,?)').join(',')+')',[userId,...list.flatMap(x=>[x.store,x.id])]),m=new Map(r.rows.map(x=>[x.store+'\u0000'+x.id,Number(x.size)]));return list.map(x=>m.get(x.store+'\u0000'+x.id)||0);},
   async push(userId,list){const results=await db.batch(list.map(x=>({sql:`INSERT INTO citrus_records(user_id,store,id,t,size,data,seq) VALUES(?,?,?,?,?,?,(SELECT coalesce(max(seq),0)+1 FROM citrus_records))
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=excluded.seq WHERE citrus_records.t<excluded.t`,args:[userId,x.store,x.id,x.t,x.size,x.data]})),'write');return results.reduce((n,r)=>n+r.rowsAffected,0);},
+  async head(userId,since){const r=row(await q('SELECT count(*) AS count,coalesce(max(seq),?) AS max FROM citrus_records WHERE user_id=? AND seq>?',[since,userId,since]));return{count:Number(r.count),max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=? AND seq>? ORDER BY seq LIMIT ?',[userId,since,limit])).rows.map(r=>({store:r.store,id:r.id,t:Number(r.t),seq:Number(r.seq),size:Number(r.size),data:r.data}));},
   async deleteUser(userId){await db.batch([{sql:'DELETE FROM citrus_records WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_sessions WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_users WHERE id=?',args:[userId]}],'write');}
  };
@@ -117,7 +120,9 @@ function createAccounts({json,err,body,limit,store=chooseStore()}){
   if(kind==='sync'&&req.method==='POST'&&!verb){
    limit(req,'sync',600,10*60*1000);const {user}=await signedIn(req),s=await db(),data=await body(req,4*1048576),rows=validRows(data.rows);
    if(rows.length){const usage=await s.usage(user.id),old=await s.sizes(user.id,rows),after=usage.bytes+rows.reduce((sum,r,i)=>sum+r.size-old[i],0);if(after>QUOTA&&after>usage.bytes)throw err(507,'Your account is full ('+Math.round(QUOTA/1048576)+' MB). New work stays saved on this device.');}
-   return json(res,200,{accepted:rows.length?await s.push(user.id,rows):0});
+   const since=Number.isSafeInteger(data.since)&&data.since>=0?data.since:null,accepted=rows.length?await s.push(user.id,rows):0;
+   // When everything newer than the device's cursor is this upload, the device can skip past it instead of pulling its own rows back.
+   const head=since===null?null:await s.head(user.id,since);return json(res,200,{accepted,...head&&head.count===accepted?{cursor:head.max}:{}});
   }
   if(kind==='sync'&&req.method==='GET'&&!verb){
    limit(req,'sync',600,10*60*1000);const {user}=await signedIn(req),s=await db(),since=Math.max(0,Math.floor(Number(url.searchParams.get('since'))||0)),list=await s.pull(user.id,since,PAGE_ROWS+1);
