@@ -26,6 +26,7 @@
 !/tools/preflop/library.cjs
 !/tools/preflop/calibrate.cjs
 !/tools/preflop/check-pushfold.cjs
+!/tools/preflop/balance-check.cjs
 !/tools/preflop/equity-table.json
 !/tools/preflop/plo-equity.cpp
 !/tools/preflop/plo-model.cjs
