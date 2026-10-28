@@ -9,6 +9,8 @@
 //   node tools/postflop/library.cjs list
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
+// --turn 1 also saves the turn's first decisions (<flop>.turn.json) on the main lines: check-check,
+// bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.json.gz per spot.
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
 const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),L=require('../../studio/local-solver.js'),Lib=require('../../studio/postflop-library.js'),F=require('./flops.cjs'),C=G.Core;
 
@@ -58,7 +60,7 @@ for(const [id,label,steps]of [
 // donk bets: the tree a 100bb flop fits in about 5 GB and solves in minutes.
 const TREE={flop:{bet:[33],raise:[66]},turn:{bet:[66],raise:[]},river:{bet:[75],raise:[]},allinThreshold:.67};
 
-const args={cmd:process.argv[2]||'help',charts:path.join(__dirname,'charts-100bb.json.gz'),spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',jobs:'1',name:'Citrus Poker postflop library'};
+const args={cmd:process.argv[2]||'help',charts:path.join(__dirname,'charts-100bb.json.gz'),spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',jobs:'1',turn:'0',name:'Citrus Poker postflop library'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}
@@ -97,14 +99,32 @@ function run(input,dir){
 
 // Flop decision nodes of a TexasSolver dump, as library nodes. Labels keep
 // whole chips ("BET 182"); the root's player number is the out-of-position one.
+const label=a=>a.replace(/^(\w+) ([\d.]+)$/,(m,k,x)=>k+' '+(+(+x).toFixed(2)));
+function libraryNode(node,p,oopPlayer){
+ const actions=node.actions.map(label),rows=[];
+ for(const [combo,row]of Object.entries(node.strategy.strategy))rows.push([Lib.comboIndex(C.cards(combo)),row]);
+ return{path:p,player:node.player===oopPlayer?'oop':'ip',actions,table:Lib.encode(rows,actions.length)};
+}
 function nodes(tree){
- const out=[],oopPlayer=tree.player,label=a=>a.replace(/^(\w+) ([\d.]+)$/,(m,k,x)=>k+' '+(+(+x).toFixed(2)));
+ const out=[],oopPlayer=tree.player;
  (function visit(node,p){
-  if(!node||node.node_type!=='action_node')return;const actions=node.actions.map(label),rows=[];
-  for(const [combo,row]of Object.entries(node.strategy.strategy))rows.push([Lib.comboIndex(C.cards(combo)),row]);
-  out.push({path:p,player:node.player===oopPlayer?'oop':'ip',actions,table:Lib.encode(rows,actions.length)});
-  node.actions.forEach((a,i)=>{const child=node.childrens&&node.childrens[a];if(child)visit(child,(p?p+'/':'')+actions[i]);});
+  if(!node||node.node_type!=='action_node')return;const n=libraryNode(node,p,oopPlayer);out.push(n);
+  node.actions.forEach((a,i)=>{const child=node.childrens&&node.childrens[a];if(child)visit(child,(p?p+'/':'')+n.actions[i]);});
  })(tree,'');
+ return out;
+}
+// Turn decisions from a dump with set_dump_rounds 2: on the flop lines that end check-check, bet-call
+// or check-bet-call, every turn card's first decision and the replies to it (two actions deep).
+// Paths read "<flop line>|<turn card>/<turn actions>", as in "CHECK/CHECK|Qh/BET 363".
+function turnNodes(tree){
+ const out=[],oopPlayer=tree.player,main=/^(CHECK\/CHECK|BET [\d.]+\/CALL|CHECK\/BET [\d.]+\/CALL)$/;
+ (function visit(node,p,turn,depth){
+  if(!node)return;
+  if(node.node_type==='chance_node'){if(!turn&&main.test(p))for(const [card,child]of Object.entries(node.dealcards||{}))visit(child,p+'|'+card,true,0);return;}
+  if(node.node_type!=='action_node')return;const actions=node.actions.map(label);
+  if(turn&&node.strategy)out.push(libraryNode(node,p,oopPlayer));if(turn&&depth>=2)return;
+  node.actions.forEach((a,i)=>{const child=node.childrens&&node.childrens[a];if(child)visit(child,(p&&!p.endsWith('|')?p+'/':p)+actions[i],turn,turn?depth+1:0);});
+ })(tree,'',false,0);
  return out;
 }
 
@@ -127,15 +147,16 @@ async function solve(){
    // Solved flops are skipped, unless --redo-above asks to re-solve those that
    // stopped above that exploitability (% of pot), for example with more iterations,
    // or --need-evs 1 asks for those saved without per-class EVs.
-   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)){const redo=Number(args['redo-above']);let old=null;try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!(redo>0&&old&&old.exploitability>redo)&&!(args['need-evs']==='1'&&old&&!old.evs))continue;}
+   const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)&&!(args.turn==='1'&&!fs.existsSync(path.join(dir,f.key+'.turn.json')))){const redo=Number(args['redo-above']);let old=null;try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!(redo>0&&old&&old.exploitability>redo)&&!(args['need-evs']==='1'&&old&&!old.evs))continue;}
    tasks.push({id,spot,f,file});
   }
  }
  const one=async({id,spot,f,file})=>{
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
-    const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:'out.json'}),work);
+    const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
     const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
+    if(args.turn==='1'){const t=path.join(dir,f.key+'.turn.json');fs.writeFileSync(t+'.tmp',JSON.stringify({key:f.key,nodes:turnNodes(tree)}));fs.renameSync(t+'.tmp',t);}
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
    }catch(error){console.log(id+' '+f.key+' failed: '+error.message);}
@@ -157,8 +178,20 @@ function bundle(){
  console.log(spots.map(s=>s.id+': '+Object.keys(s.flops).length+' flops').join('\n')+'\nWrote '+file+' and '+file+'.gz');
 }
 
+// One turn file per spot (turn-<id>.json.gz in --out), loaded by the app only when a hand of that
+// spot reaches the turn: the spot's chart line and ranges, and each flop's turn decisions.
+function bundleTurn(){
+ for(const id of fs.readdirSync(args.out)){const dir=path.join(args.out,id),meta=path.join(dir,'spot.json');if(!fs.existsSync(meta))continue;
+  const files=fs.readdirSync(dir).filter(x=>/^([2-9TJQKA][cdhs]){3}\.turn\.json$/.test(x));if(!files.length)continue;
+  const spot=JSON.parse(fs.readFileSync(meta,'utf8'));spot.flops={};
+  for(const f of files){const r=JSON.parse(fs.readFileSync(path.join(dir,f),'utf8'));spot.flops[r.key]={nodes:r.nodes};}
+  const file=path.join(args.out,'turn-'+id+'.json.gz');fs.writeFileSync(file,zlib.gzipSync(JSON.stringify({format:'range-lab-turn-library-v1',name:args.name+' (turn)',createdAt:new Date().toISOString(),spot}),{level:9}));
+  console.log(id+': '+files.length+' flops, '+(fs.statSync(file).size/1e6).toFixed(1)+' MB -> '+file);}
+}
+
 if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(e.message);process.exit(1);});
 else if(args.cmd==='bundle')bundle();
+else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s]');}
-module.exports={SPOTS,TREE,prepare,spec,nodes};
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1]');}
+module.exports={SPOTS,TREE,prepare,spec,nodes,turnNodes};
