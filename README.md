@@ -1,6 +1,6 @@
 # Citrus Poker
 
-This repository contains the browser app and the source needed to build it. Render serves the study app as a static site and runs a small Node service for private multiplayer rooms. Solver work and training data stay in the browser, signed-in players' personal data syncs through the same service to Postgres, and multiplayer room state lives in memory on the room service while the table is active.
+This repository contains the browser app and the source needed to build it. Render serves the study app as a static site and runs a small Node service for private multiplayer rooms. Solver work and training data stay in the browser, signed-in players' personal data syncs through the same service to Turso (or Postgres), and multiplayer room state lives in memory on the room service while the table is active.
 
 ## Deploy on Render
 
@@ -16,7 +16,7 @@ The round button beside **Settings** signs in or creates an account (username an
 
 The first account to sign in on a device takes over that device's existing data (the original `range-lab-poker-studio` database) and uploads it, so nothing saved before accounts is lost. Another person signing in on the same device gets their own empty database, and a signed-out visitor on a claimed device gets a separate guest space. Signing back in brings the account's data back. The newest change to each record wins when two devices edit the same one. **Account → Delete account** removes the server copy; the device keeps its own.
 
-To switch accounts on, create a free Postgres database (for example at [neon.tech](https://neon.tech); Render's free Postgres is deleted after 30 days) and set its connection string as `DATABASE_URL` on the `range-lab-live-rooms` service. The service creates its tables on start. Without `DATABASE_URL` on Render, the account button reports that sync is not switched on and data stays on each device. Locally, `node server.cjs` keeps accounts in memory; `node studio/verify-accounts.cjs` checks the account API (set `DATABASE_URL` to run it against Postgres). Passwords are stored as scrypt hashes and sessions as SHA-256 hashes of random tokens. There is no email, so a forgotten password cannot be reset; the device copy remains.
+To switch accounts on, create a free [Turso](https://turso.tech) database in the region nearest the Render service (`aws-us-west-2` for Render's default Oregon region) and set `TURSO_DATABASE_URL` (`libsql://…turso.io`) and `TURSO_AUTH_TOKEN` on the `range-lab-live-rooms` service. A Postgres connection string in `DATABASE_URL` (Neon, Render) works too. The service creates its tables on start. Without a database on Render, the account button reports that sync is not switched on and data stays on each device. Locally, `node server.cjs` keeps accounts in memory; `node studio/verify-accounts.cjs` checks the account API (set `TURSO_DATABASE_URL=file:test.db` or `DATABASE_URL` to run it against SQLite/Turso or Postgres). Passwords are stored as scrypt hashes and sessions as SHA-256 hashes of random tokens. There is no email, so a forgotten password cannot be reset; the device copy remains.
 
 ## Find your way around
 
