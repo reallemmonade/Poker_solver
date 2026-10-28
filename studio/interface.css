@@ -109,7 +109,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .leak-rates{display:flex;align-items:center;gap:12px;flex-shrink:0}.leak-rates span{display:flex;flex-direction:column;align-items:flex-end;font-weight:700;font-variant-numeric:tabular-nums}.leak-rates span small{font-weight:400}
 .leak-rates .leak-dots{display:flex;flex-direction:row;gap:3px}.leak-dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}.leak-dots i.on{background:var(--green)}
 .leak-spot{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-#leakTable{height:440px;min-height:440px;margin:18px 0 14px}
+#leakCard{max-width:960px;margin:0 auto}#leakTable{height:440px;min-height:440px;margin:18px 0 14px}
 #leakActions{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
 #leakActions .btn.leak-good{outline:2px solid var(--green)}#leakActions .btn.leak-bad{outline:2px solid var(--red)}
 .leak-verdict{font-size:22px;font-weight:800;margin:0 0 6px}.leak-verdict.leak-good{color:var(--green)}.leak-verdict.leak-bad{color:var(--red)}

@@ -11,19 +11,20 @@
   const CHART_COST=.5;
   // Older decisions fade: one with 300 newer graded decisions counts half.
   const HALF_LIFE=300;
-  // Spot types whose reference is not trusted yet. 3-bet-vs-call facing an open stays out until
-  // the v6 preflop charts pass the balance check; delete the entry then.
+  // Spot types whose reference is not trusted yet. 3-bet-vs-call facing an open is listed but held out of
+  // drills until the v6 preflop charts pass the balance check; delete the entry then.
   const UNTRUSTED=new Set(['0|vsopen']);
   const trusted=d=>!UNTRUSTED.has(d.street+'|'+d.topic);
-  const depthClass=x=>x<=20?20:x<=50?50:x<=100?100:200;
+  // Classes split halfway (geometrically) between 20, 50, 100 and 200bb, so a 100bb game that drifts to 104bb stays one leak.
+  const depthClass=x=>x<=30?20:x<=70?50:x<=140?100:200;
   const keyOf=d=>[d.variant||'NLH',d.mode||'cash',d.seats,d.pos,d.street,d.topic,depthClass(d.depth)].join('|');
   const tableLabel=n=>n===2?'HU':n+'-max';
   function label(l){return[l.pos,TOPICS[l.topic]||l.topic,l.street?STREETS[l.street]:'',tableLabel(l.seats),Math.round(l.depth)+'bb'].filter(Boolean).join(' · ');}
   // decisions newest first.
   function leaks(decisions){
     const groups=new Map();
-    decisions.forEach((d,i)=>{if(!trusted(d))return;const key=keyOf(d),w=Math.pow(.5,i/HALF_LIFE);let g=groups.get(key);
-      if(!g){g={key,variant:d.variant||'NLH',mode:d.mode||'cash',seats:d.seats,pos:d.pos,street:d.street,topic:d.topic,depths:[],n:0,m:0,cost:0,decisions:0,mistakes:0,lastMistakeAt:0,missed:new Set()};groups.set(key,g);}
+    decisions.forEach((d,i)=>{const key=keyOf(d),w=Math.pow(.5,i/HALF_LIFE);let g=groups.get(key);
+      if(!g){g={key,held:!trusted(d),variant:d.variant||'NLH',mode:d.mode||'cash',seats:d.seats,pos:d.pos,street:d.street,topic:d.topic,depths:[],n:0,m:0,cost:0,decisions:0,mistakes:0,lastMistakeAt:0,missed:new Set()};groups.set(key,g);}
       g.n+=w;g.decisions++;g.depths.push(d.depth);
       if(d.mistake){g.m+=w;g.mistakes++;g.cost+=w*(Number.isFinite(d.cost)&&d.cost>0?d.cost:CHART_COST);g.lastMistakeAt=Math.max(g.lastMistakeAt,d.at||0);if(d.cls)g.missed.add(d.cls);}});
     return[...groups.values()].filter(g=>g.mistakes>0).map(g=>{const s=g.depths.slice().sort((a,b)=>a-b);g.depth=s[s.length>>1];delete g.depths;g.hit=1-g.m/g.n;g.score=g.cost;g.label=label(g);return g;}).sort((a,b)=>b.score-a.score||b.mistakes-a.mistakes);
@@ -31,8 +32,9 @@
   const newCard=now=>({box:0,streak:0,due:now,boxAt:0,results:[]});
   // Adds a card for every leak, and sends a promoted leak back to the start when table play shows it again.
   function sync(deck,list,now=Date.now()){deck.cards||={};for(const l of list){const c=deck.cards[l.key]||=newCard(now);if(c.box>0&&l.lastMistakeAt>c.boxAt){c.box=0;c.streak=0;c.due=now;}}return deck;}
+  // Only answers to a due card count toward promotion, so extra drilling in one sitting cannot skip boxes.
   function answer(card,correct,now=Date.now()){card.results=(card.results||[]).concat(correct?1:0).slice(-20);card.last=now;
-    if(correct){card.streak=(card.streak||0)+1;if(card.streak>=STREAK){card.box=Math.min(FIXED,card.box+1);card.streak=0;card.boxAt=now;card.due=now+BOX_DAYS[card.box]*DAY;}}
+    if(correct){if(card.due>now)return card;card.streak=(card.streak||0)+1;if(card.streak>=STREAK){card.box=Math.min(FIXED,card.box+1);card.streak=0;card.boxAt=now;card.due=now+BOX_DAYS[card.box]*DAY;}}
     else{card.box=0;card.streak=0;card.due=now;}return card;}
   const isDue=(card,now)=>!card||card.due<=now;
   // Next leak to drill: the costliest due ones, interleaved so the same spot type rarely comes twice in a row.
