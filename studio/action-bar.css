@@ -1,5 +1,6 @@
 /* Table action bar (action-bar.js): GGPoker-style layout drawn in the current look's colours. */
 #playActions.ab-bar,#actions.ab-bar{display:flex;flex-direction:column;gap:8px;container-type:inline-size}
+.ab-bar button{min-width:0}
 .ab-sizing{display:grid;grid-template-columns:auto 86px minmax(80px,1fr);align-items:center;gap:8px 10px}
 .ab-presets{display:grid;grid-template-columns:repeat(4,minmax(52px,1fr));gap:6px}
 .ab-preset{min-height:38px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel2,#1b2d31);color:var(--muted);font:inherit;font-size:13px;font-weight:750;cursor:pointer;touch-action:manipulation}

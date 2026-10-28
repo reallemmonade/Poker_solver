@@ -5,8 +5,8 @@ const ActionBar=(()=>{
   const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num=x=>String(+(+x).toFixed(2)),bbText=x=>num(x)+' BB';
   let turnState={key:null,amount:null},pre={key:null,choice:null,toCall:0};
-  // Rounds to a sensible step for the range, then clamps to the legal range (the all-in total is always reachable).
-  function snap(x,r){const span=r.max-r.min,step=span>=40?.5:span>=8?.1:.01;let v=Math.round(x/step)*step;v=+v.toFixed(2);return Math.max(r.min,Math.min(r.max,v));}
+  // Rounds to a step that grows with the size (0.01, 0.1, then 0.5 bb), then clamps to the legal range (the all-in total is always reachable).
+  function snap(x,r){const step=x>=25?.5:x>=5?.1:.01;let v=Math.round(x/step)*step;v=+v.toFixed(2);return Math.max(r.min,Math.min(r.max,v));}
   function presets(r){
     // Preflop before anyone raises, sizes are big-blind multiples; otherwise fractions of the pot after calling.
     if(r.preflop&&r.currentBet<=r.bb)return[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>({label,target:snap(m*r.bb,r)}));
