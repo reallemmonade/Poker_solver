@@ -41,7 +41,7 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
    ok(node.actions.length!==r.actions.length||direct.every((p,i)=>Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+' '+what+': same row as the stored node');
    ok(Math.abs(r.reference[r.best]-direct[best])<1e-9||node.actions.length!==r.actions.length,spot.id+' '+key+' '+what+': best action');
    for(const a of r.actions)ok((()=>{try{h.clone().act(a);return true;}catch{return false;}})(),spot.id+' '+key+' '+what+': legal action '+a.label);
-   if(what==='root'){const changed={...spot,rangeOop:{...spot.rangeOop,AA:(spot.rangeOop.AA||0)>.5?0:1}};ok(!Lib.query([{spots:[changed]}],range,h),spot.id+' '+key+': a re-solved chart with other ranges gets no answer');}
+   if(what==='root'){const changed={...spot,rangeOop:{...spot.rangeOop,AA:(spot.rangeOop.AA||0)>.5?0:1}};ok(!Lib.query([{spots:[changed]}],range,h),spot.id+' '+key+': a re-solved chart with other ranges gets no answer');ok(Lib.query([{spots:[changed]},library],range,h),spot.id+' '+key+': a stale library imported first does not hide this one');}
   }
  }
  // Unsolved flops get the nearest solved flop of the same texture: move the

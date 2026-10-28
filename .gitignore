@@ -11,6 +11,7 @@
 !/tools/local-solver/README.md
 !/tools/local-solver/server.cjs
 !/tools/local-solver/install-mac.sh
+!/tools/local-solver/install-linux.sh
 !/tools/local-solver/start.command
 !/tools/local-solver/check-bridge.cjs
 !/tools/local-solver/texassolver-evs.patch
@@ -28,6 +29,10 @@
 !/tools/preflop/plo-equity.cpp
 !/tools/preflop/plo-model.cjs
 !/tools/preflop/plo-model.json
+!/tools/calibration/
+!/tools/calibration/smart-calibration.sh
+!/tools/calibration/server-run.sh
+!/tools/calibration/refcheck.cjs
 !/tools/postflop/
 !/tools/postflop/README.md
 !/tools/postflop/library.cjs

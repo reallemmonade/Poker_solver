@@ -8,11 +8,14 @@
 // PLO needs plo-model.json (see plo-model.cjs).
 // Each chart is solved in its own process; finished charts are kept, so a rerun
 // only solves what is missing.
+// --calibration file (tools/preflop/calibrate.cjs, one fit or a set by depth) applies to the NLH
+// charts. --seats 2,6 and --formats cash limit the charts built; --base bundle.json.gz carries
+// every other chart of that bundle over unchanged (matched by name up to " (").
 const fs=require('fs'),path=require('path'),os=require('os'),{execFile}=require('child_process'),P=require('../../studio/preflop.js');
 
-const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,every:500,games:'nlh,plo',rake:0,rakeCap:3,limp:0,depths:''};
-for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['out','games','depths'].includes(k)?v:Number(v);}
-const raked=args.rake>0,SEATS=[2,3,4,5,6,7,8,9],DEPTHS=args.depths?args.depths.split(',').map(Number):raked?[50,100,150,200]:[10,20,50,100,150,200,500,1000],FORMATS=raked?['cash']:['cash','mtt'],tag=raked?`-rake${args.rake}-cap${args.rakeCap}`:'';
+const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,every:500,games:'nlh,plo',rake:0,rakeCap:3,limp:0,depths:'',seats:'',formats:'',calibration:'',base:''};
+for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['out','games','depths','seats','formats','calibration','base'].includes(k)?v:Number(v);}
+const raked=args.rake>0,SEATS=args.seats?args.seats.split(',').map(Number):[2,3,4,5,6,7,8,9],DEPTHS=args.depths?args.depths.split(',').map(Number):raked?[50,100,150,200]:[10,20,50,100,150,200,500,1000],FORMATS=args.formats?args.formats.split(','):raked?['cash']:['cash','mtt'],tag=raked?`-rake${args.rake}-cap${args.rakeCap}`:'';
 fs.mkdirSync(args.out,{recursive:true});
 
 const specs=[];for(const game of args.games.split(','))for(const seats of SEATS.slice().reverse())for(const format of FORMATS)for(const stack of DEPTHS)specs.push({game,seats,stack,format});
@@ -24,7 +27,7 @@ let running=0;const report=[];
 function next(){
  if(!queue.length){if(!running)finish();return;}
  const s=queue.shift();running++;const t=Date.now();
- execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,...raked?['--rake',String(args.rake),'--rakeCap',String(args.rakeCap)]:[],...args.limp?['--limp','1']:[],'--iterations',String(args.iterations),'--every',String(Math.min(args.every,args.iterations)),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
+ execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,...raked?['--rake',String(args.rake),'--rakeCap',String(args.rakeCap)]:[],...args.limp?['--limp','1']:[],...args.calibration&&s.game==='nlh'?['--calibration',args.calibration]:[],'--iterations',String(args.iterations),'--every',String(Math.min(args.every,args.iterations)),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
   running--;const line=stdout.trim().split('\n').slice(-2).join(' | ');
   console.log(`${path.basename(file(s))} ${((Date.now()-t)/60000).toFixed(1)} min ${error?'FAILED '+error.message:line}`);
   next();
@@ -41,6 +44,8 @@ function compact(pack){
 }
 function finish(){
  const packs=specs.filter(s=>fs.existsSync(file(s))).map(s=>compact(JSON.parse(fs.readFileSync(file(s),'utf8'))));
+ if(args.base){const raw=fs.readFileSync(args.base),base=JSON.parse(/\.gz$/.test(args.base)?require('zlib').gunzipSync(raw):raw),key=p=>p.name.split(' (')[0],built=new Set(packs.map(key));
+  const kept=base.packs.filter(p=>!built.has(key(p)));kept.forEach(p=>P.validate(p));packs.push(...kept);console.log(`Kept ${kept.length} charts from ${args.base}.`);}
  const bundle={format:'range-lab-preflop-bundle-v1',name:'Citrus Poker preflop library'+(raked?` (rake ${args.rake}% cap ${args.rakeCap}bb)`:''),createdAt:new Date().toISOString(),packs};
  const out=path.join(args.out,'preflop-library.json');fs.writeFileSync(out,JSON.stringify(bundle));
  // The app also imports the gzipped copy, which is far smaller to move around.
