@@ -105,7 +105,7 @@ async function loadBundledLibraries(meta){
  const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
  if(!manifest?.version||!Array.isArray(manifest.packs)||!Array.isArray(manifest.flops))return;
  const note=text=>{const el=$('preflopImportStatus');if(el)el.textContent=text;};
- if(smallMemoryDevice()){bundleManifest=manifest;renderBundleDownloads();return;}
+ if(smallMemoryDevice()){bundleManifest=manifest;renderBundleDownloads();renderPlay();return;}
  const loaded=meta.find(x=>x.id==='bundledLibraries-v1')?.value||null;if(loaded?.version===manifest.version)return;
  note('Loading the built-in solver charts…');
  const packs=[],libs=new Map();for(let i=0;i<manifest.packs.length;i+=8)packs.push(...await Promise.all(manifest.packs.slice(i,i+8).map(p=>fetchLibraryFile(p.file))));
@@ -128,7 +128,8 @@ async function ensurePhoneLibraries(hand){
  const before=postflopLibrary.libraries.length;postflopLibrary.libraries=postflopLibrary.libraries.filter(l=>!memoryOnly.has(l)||l.forHand===hand&&!hand.done);if(postflopLibrary.libraries.length<before)changed=true;
  if(hand.done)return changed;
  try{
-  const c=hand.config,mode=c.mode==='cash'?'cash':'icm',stack=G.bb(Math.max(...hand.initial));
+  // The chart nearest the effective stack between you and the deepest other live player, as PokerPreflop.nearest picks it.
+  const c=hand.config,mode=c.mode==='cash'?'cash':'icm',others=hand.living().filter(i=>i!==hand.actor).map(i=>hand.initial[i]),stack=G.bb(others.length?Math.min(hand.initial[hand.actor],Math.max(...others)):Math.max(...hand.initial));
   const fit=m.packs.filter(p=>p.variant===c.variant&&p.mode===mode&&p.seats===c.seats).sort((a,b)=>Math.abs(Math.log(a.stack/stack))-Math.abs(Math.log(b.stack/stack)))[0];
   if(fit&&!preflopLibrary.packs.some(p=>p.name===fit.name&&p.config.seats===fit.seats)){const pack=PokerPreflop.validate(await phoneFetch(fit.file));memoryOnly.add(pack);const old=preflopLibrary.packs.filter(p=>memoryOnly.has(p));if(old.length>=2)preflopLibrary.packs.splice(preflopLibrary.packs.indexOf(old[0]),1);preflopLibrary.packs.push(pack);changed=true;}
   if(hand.street===1&&hand.living().length===2){
