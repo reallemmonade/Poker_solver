@@ -39,3 +39,32 @@ html[data-look] .quiz-spot span{background:var(--surface);border-color:var(--lin
 html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var(--panel));color:var(--ink);border-left-color:var(--red)}
 .ui-mark{width:1.45em;height:1.45em;vertical-align:-.36em;margin-right:.4em}
 @media(max-width:1000px) and (pointer:coarse),(max-width:800px){html,body{scrollbar-width:none}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none}}
+/* Table screens (interface.js): history and session | table | analysis. Three columns on wide screens, table plus
+   analysis with history underneath in between, and on phones one screen at a time that you swipe between. */
+.ui-pane-dots{display:none}
+.ui-pane-game{display:none}
+.ui-history-pane{padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:var(--ui-radius);min-width:0;font-size:13px}
+.ui-history-pane h2{margin:16px 0 8px;font-size:15px}.ui-history-pane h2:first-of-type{margin-top:14px}
+.ui-history-pane #handLog{line-height:1.6;max-height:none}.ui-history-pane .ui-pane-hands .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.ui-history-pane .ui-pane-hands .btn{padding:6px 10px;font-size:12px}
+.ui-pane-game{flex-direction:column;gap:8px}.ui-pane-game .btn{padding:7px 11px;font-size:12px}
+.ui-history-pane>details{margin-top:16px}
+.ui-app[data-area=play] #uiGameContext{display:none}
+.ui-live-grid>.ui-history-pane{grid-column:2;grid-row:2}.ui-live-grid>.ui-table-pane{grid-column:1;grid-row:1/span 2}.ui-live-grid>.ui-analysis{grid-column:2;grid-row:1}
+@media(min-width:1280px){.ui-app .ui-live-grid{grid-template-columns:260px minmax(0,1fr) 340px}.ui-live-grid>.ui-history-pane{grid-column:1;grid-row:1}.ui-live-grid>.ui-table-pane{grid-column:2;grid-row:1}.ui-live-grid>.ui-analysis{grid-column:3;grid-row:1}}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){
+ .ui-app[data-area=play] #uiContext,.ui-app[data-area=play] .ui-subnav{display:none}
+ .ui-pane-game{display:flex}
+ .ui-pane-dots{display:flex;justify-content:center;gap:4px;margin:2px 0 6px}
+ .ui-pane-dots button{position:relative;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:999px;cursor:pointer;touch-action:manipulation}
+ .ui-pane-dots button.active{color:var(--ink);background:var(--accent-soft,var(--panel2))}
+ .ui-pane-dots button.news:after{content:"";position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--accent-fill,var(--gold))}
+ /* The screens fill the space between the header and the bottom navigation; each scrolls on its own, and the
+    felt takes whatever height the betting bar leaves. --pane-top is measured in interface.js. */
+ .ui-app .ui-live-grid{display:flex;flex-direction:row;align-items:stretch;gap:0;height:calc(100svh - var(--pane-top,110px) - 62px - env(safe-area-inset-bottom));overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;margin:0}
+ .ui-live-grid::-webkit-scrollbar{display:none}
+ .ui-live-grid>*{flex:0 0 100%;width:100%;height:100%;box-sizing:border-box;overflow-y:auto;overscroll-behavior-y:contain;scroll-snap-align:start;scroll-snap-stop:always}
+ .ui-live-grid>.ui-table-pane{display:flex;flex-direction:column}
+ .ui-app .ui-live-grid .ui-table-pane .felt{flex:1 1 auto;height:auto;min-height:300px;margin:12px 0 8px}
+ .ui-app .ui-live-grid #playActions:not(:empty),.ui-app .ui-live-grid #playActions:empty~.ui-session-line{position:static;box-shadow:none;padding:4px 0}
+}

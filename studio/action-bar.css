@@ -1,8 +1,10 @@
+/* The slider thumb is the Citrus chip from the logo (CITRUS_MARK in interface.js). */
 /* Table action bar (action-bar.js): GGPoker-style layout drawn in the current look's colours. */
 #playActions.ab-bar,#actions.ab-bar{display:flex;flex-direction:column;gap:8px;container-type:inline-size}
 .ab-bar button{min-width:0}
 .ab-sizing{display:grid;grid-template-columns:auto 86px minmax(80px,1fr);align-items:center;gap:8px 10px}
 .ab-presets{display:grid;grid-template-columns:repeat(4,minmax(52px,1fr));gap:6px}
+.ab-amount{grid-column:2}.ab-slider{grid-column:3}
 .ab-preset{min-height:38px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel2,#1b2d31);color:var(--muted);font:inherit;font-size:13px;font-weight:750;cursor:pointer;touch-action:manipulation}
 .ab-preset:hover{color:var(--ink)}
 .ab-preset.on{background:var(--accent-soft,#23453a);border-color:var(--accent-edge,#638b74);color:var(--ink)}
@@ -12,8 +14,8 @@
 .ab-slider::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--accent-fill,#2c503f) var(--fill),var(--track,#304449) var(--fill))}
 .ab-slider::-moz-range-track{height:6px;border-radius:3px;background:var(--track,#304449)}
 .ab-slider::-moz-range-progress{height:6px;border-radius:3px;background:var(--accent-fill,#2c503f)}
-.ab-slider::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;margin-top:-12px;border-radius:50%;border:2px solid #0006;background:radial-gradient(circle,var(--accent-fill,#2c503f) 0 42%,#fff 43% 48%,transparent 49%),repeating-conic-gradient(#f4f1e8 0 20deg,var(--accent-fill,#2c503f) 20deg 45deg);box-shadow:0 2px 5px #0007}
-.ab-slider::-moz-range-thumb{width:26px;height:26px;border-radius:50%;border:2px solid #0006;background:radial-gradient(circle,var(--accent-fill,#2c503f) 0 42%,#fff 43% 48%,transparent 49%),repeating-conic-gradient(#f4f1e8 0 20deg,var(--accent-fill,#2c503f) 20deg 45deg);box-shadow:0 2px 5px #0007}
+.ab-slider::-webkit-slider-thumb{-webkit-appearance:none;width:32px;height:32px;margin-top:-13px;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23e9a90b'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%280 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%2845 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%2890 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28135 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28180 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28225 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28270 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28315 50 50%29'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%23fff6c8'/%3E%3Ccircle cx='50' cy='50' r='33' fill='%23ffd43b'/%3E%3Cpath d='M50 50L83.3 63.8M50 50L63.8 83.3M50 50L36.2 83.3M50 50L16.7 63.8M50 50L16.7 36.2M50 50L36.2 16.7M50 50L63.8 16.7M50 50L83.3 36.2' stroke='%23fff6c8' stroke-width='2.6'/%3E%3Ccircle cx='50' cy='50' r='16' fill='%231b1c17'/%3E%3Cg transform='translate%2850 51.5%29 rotate%28-28%29 scale%28.4%29'%3E%3Cpath d='M-22 0C-22-13-11-19 0-19S22-13 22 0 11 19 0 19-22 13-22 0Z' fill='%23ffd43b' stroke='%23e9a90b' stroke-width='3'/%3E%3Cpath d='M-22 0L-28 -1M22 0L28 1' stroke='%23e9a90b' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M2 -19C6-28 15-30 22-27C18-20 10-18 2-19Z' fill='%233f8f45'/%3E%3C/g%3E%3C/svg%3E") center/100% no-repeat;box-shadow:0 2px 5px #0007}
+.ab-slider::-moz-range-thumb{width:30px;height:30px;border:0;border-radius:50%;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23e9a90b'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%280 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%2845 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%2890 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28135 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28180 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28225 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28270 50 50%29'/%3E%3Crect x='46' y='4.5' width='8' height='9' rx='2' fill='%23fff' transform='rotate%28315 50 50%29'/%3E%3Ccircle cx='50' cy='50' r='36' fill='%23fff6c8'/%3E%3Ccircle cx='50' cy='50' r='33' fill='%23ffd43b'/%3E%3Cpath d='M50 50L83.3 63.8M50 50L63.8 83.3M50 50L36.2 83.3M50 50L16.7 63.8M50 50L16.7 36.2M50 50L36.2 16.7M50 50L63.8 16.7M50 50L83.3 36.2' stroke='%23fff6c8' stroke-width='2.6'/%3E%3Ccircle cx='50' cy='50' r='16' fill='%231b1c17'/%3E%3Cg transform='translate%2850 51.5%29 rotate%28-28%29 scale%28.4%29'%3E%3Cpath d='M-22 0C-22-13-11-19 0-19S22-13 22 0 11 19 0 19-22 13-22 0Z' fill='%23ffd43b' stroke='%23e9a90b' stroke-width='3'/%3E%3Cpath d='M-22 0L-28 -1M22 0L28 1' stroke='%23e9a90b' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M2 -19C6-28 15-30 22-27C18-20 10-18 2-19Z' fill='%233f8f45'/%3E%3C/g%3E%3C/svg%3E") center/100% no-repeat;box-shadow:0 2px 5px #0007}
 .ab-slider:focus-visible{outline:2px solid var(--accent-edge,#638b74);outline-offset:2px;border-radius:6px}
 .ab-main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .ab-main.two{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -30,10 +32,12 @@
 .ab-check.on i::after{content:"";width:5px;height:9px;margin-top:-2px;border:solid var(--accent-on,#fff);border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
 @container (max-width:560px){
   #playActions.ab-bar,#actions.ab-bar{gap:6px}
-  .ab-sizing{grid-template-columns:minmax(0,1fr) 76px;gap:4px 6px}
-  .ab-presets{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+  .ab-sizing{grid-template-columns:minmax(0,1fr) 76px;gap:4px 8px}
+  .ab-presets{grid-column:1/-1;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
   .ab-preset,.ab-amount{min-height:34px}
-  .ab-slider{grid-column:1/-1;height:26px}
+  /* The slider and the amount box share one row on phones: slider left, box right. */
+  .ab-slider{grid-column:1;grid-row:-1;height:34px}
+  .ab-amount{grid-column:2;grid-row:-1}
   .ui-app #playActions .btn.ab-big,#actions .btn.ab-big,.btn.ab-big{min-height:52px;padding:4px;font-size:15px}
   .ab-big span{font-size:14px}
   .ab-check{font-size:13px;gap:7px;padding:6px}

@@ -40,7 +40,7 @@ function renderSessionStatus(){
  if(liveSession.passive&&!$('sessionElsewhere')){const line=$('sessionStatus').closest('.ui-session-line')||$('sessionStatus');line.insertAdjacentHTML('afterend','<div id="sessionElsewhere" class="result" role="status">This session is being played in another tab, so this tab is read-only to keep the two from overwriting each other. <button class="btn secondary" id="takeOverSession">Continue here</button></div>');$('takeOverSession').onclick=takeOverSession;}
  $('sessionElsewhere')?.classList.toggle('hide',!liveSession.passive);const h=state.hand;if(!h){$('deal').textContent='Deal hand';$('deal').disabled=playBusy()||tableView.playing;return;}
  $('sessionStatus').textContent=h.done&&tableView.playing?'':liveSession.message;// only news (busts, rebuys, eliminations); the result waits for the end-of-hand animation
- $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').disabled=playBusy()||tableView.playing||!h.done;
+ $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').hidden=!h.done;$('deal').disabled=playBusy()||tableView.playing||!h.done;
  $('restartSession').disabled=state.busy||liveSession.passive;renderCapacityActions();
 }
 function scheduleSessionNext(){
