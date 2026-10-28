@@ -21,7 +21,7 @@ const ActionBar=(()=>{
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
   //     onFold, onCheck, onCall, onBet(target)}
   function turn(box,o){
-    const r=o.raise;if(turnState.key!==o.key)turnState={key:o.key,amount:r?(presets(r).find(p=>p.target<r.allIn-1e-9)||presets(r)[0])?.target??r.min:null};
+    const r=o.raise;if(turnState.key!==o.key)turnState={key:o.key,amount:r?(presets(r).find(p=>p.target<r.allIn-1e-9)||presets(r)[0])?.target??(r.standard>0?snap(r.standard,r):r.min):null};
     if(r)turnState.amount=snap(turnState.amount??r.min,r);
     const sig=JSON.stringify(['turn',o.key,o.fold,o.check,o.toCall,o.callAllIn,r,o.note||'']);
     if(box.dataset.abSig!==sig){
