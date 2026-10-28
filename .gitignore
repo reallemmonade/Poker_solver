@@ -67,6 +67,11 @@
 !/studio/verify-import.cjs
 !/studio/multiway-exact.js
 !/studio/postflop-library.js
+!/studio/libraries/
+!/studio/libraries/manifest.json
+!/studio/libraries/preflop-library-v4.json.gz
+!/studio/libraries/postflop-library.json.gz
+!/studio/libraries/plo-postflop-library.json.gz
 !/studio/multiway-ui.js
 !/studio/opponents.js
 !/studio/policy.js
