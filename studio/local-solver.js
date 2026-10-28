@@ -225,8 +225,8 @@
 
  // Worker engine: one HTTP request, then complete. step() never blocks.
  class Engine{
-  constructor(data,ranges,opt,hand,fetcher){
-   this.data=data;this.hand=hand;this.ranges=ranges;this.url=(opt.localSolver||DEFAULT_URL).replace(/\/$/,'');this.spec=spec(data,ranges,opt);this.complete=false;this.waiting=false;this.started=Date.now();this.fetch=fetcher||(typeof fetch==='function'?fetch.bind(root):null);
+  constructor(data,ranges,opt,hand,fetcher,custom=false){
+   this.data=data;this.hand=hand;this.ranges=ranges;this.url=(opt.localSolver||DEFAULT_URL).replace(/\/$/,'');this.spec=custom?null:spec(data,ranges,opt);this.complete=false;this.waiting=false;this.started=Date.now();this.fetch=fetcher||(typeof fetch==='function'?fetch.bind(root):null);
   }
   step(){
    if(this.waiting||this.complete)return;this.waiting=true;
@@ -240,7 +240,7 @@
    let polling=false;
    this.poll=setInterval(()=>{this.fetch(this.url+'/status').then(r=>r.json()).then(s=>{this.status=s;}).catch(()=>{});
     if(!polling||this.complete)return;this.fetch(this.url+'/result').then(r=>r.status===202?null:reply(r)).then(body=>{if(body&&!this.complete)done(body);},error=>{if(error.http)failed(error);});},3000);
-   post('/solve-async').then(r=>{if(r.status===404)return post('/solve').then(reply).then(done);return reply(r).then(()=>{polling=true;});}).catch(failed);
+   post(this.asyncPath||'/solve-async').then(r=>{if(r.status===404){if(this.asyncPath)throw Object.assign(Error('The local solver on this computer is out of date. Update it (git pull) and restart it to solve multiway spots.'),{http:true});return post('/solve').then(reply).then(done);}return reply(r).then(()=>{polling=true;});}).catch(failed);
   }
   fail(message){this.error=message;this.complete=true;this.waiting=false;}
   cancel(){clearInterval(this.poll);if(this.waiting&&this.fetch)this.fetch(this.url+'/cancel',{method:'POST'}).catch(()=>{});}
@@ -255,6 +255,24 @@
   }
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,Engine,betPercent,raisePercent,PLO_TREE};
+ // Multiway spots (three or more players, flop on) run on the bridge in Node
+ // with the app's own exact and sampled engines, with budgets far beyond a
+ // browser tab's. Each seat's current range is sent as weighted combos.
+ class SpotEngine extends Engine{
+  constructor(data,ranges,opt,extra,fetcher){
+   const C=G.Core;super(data,ranges,{...opt},null,fetcher,true);
+   const text=seat=>{const d=ranges.distributions[seat];if(d.uniform)return'';const peak=Math.max(...d.rows.map(r=>r.prob));return d.rows.filter(r=>r.prob>0).map(r=>r.cards.map(C.cardName).join('')+':'+Math.max(1e-5,Math.round(r.prob/peak*1e5)/1e5)).join(' ');};
+   this.asyncPath='/spot-async';
+   this.spec={data,extra:extra||null,options:{rangeMode:'uniform',ranges:Array.from({length:data.config.seats},(_,s)=>text(s)),iterations:5e6,milliseconds:opt.bridgeMilliseconds||600000,maxInfos:1e7,maxJointDeals:5e7,exactMemoryMB:65536,samples:Math.max(2000,opt.samples||2000),tolerance:opt.tolerance,rootSizes:opt.rootSizes,abstraction:opt.abstraction}};
+  }
+  progress(){if(this.complete)clearInterval(this.poll);const s=this.status||{};return{phase:'local',done:Math.round((Date.now()-this.started)/1000),total:Math.round((this.spec.options.milliseconds||0)/1000),iterations:s.iterations||0,exploitability:s.exploitability??null};}
+  result(){
+   if(this.error)return{supported:false,message:'Local solver: '+this.error};
+   const r=this.body;if(r?.solve){r.solve.rangeAssumptions=this.ranges.descriptions;r.solve.solvedOn='This computer (local solver)';}
+   return r?.supported===false?{...r,message:'Solved on this computer: '+r.message}:r;
+  }
+ }
+
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

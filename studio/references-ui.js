@@ -45,6 +45,23 @@ async function addPreflopPack(input){return(await addPreflopPacks([input]))[0];}
 // A bundle file holds many packs; they are validated first and saved together.
 async function addPreflopPacks(inputs){const packs=inputs.map(PokerPreflop.validate);for(const pack of packs){const old=preflopLibrary.packs.findIndex(p=>p.name===pack.name&&p.family===pack.family);if(old>=0)preflopLibrary.packs[old]=pack;else preflopLibrary.packs.unshift(pack);}preflopLibrary.preferred=packs.length===1?packs[0]:null;await persistPreflop();spotUI.last=null;renderPreflopLibrary();renderPlay();renderRanges();return packs;}
 function restorePreflop(meta){try{const rows=meta.find(x=>x.id==='preflopReferences-v1')?.value||[];for(const row of rows)try{preflopLibrary.packs.push(PokerPreflop.validate(row,true))}catch{}const selected=meta.find(x=>x.id==='preflopPreferred-v1')?.value;preflopLibrary.preferred=preflopLibrary.packs.find(p=>p.name===selected?.name&&p.family===selected?.family)||null;preflopLibrary.ready=true;renderPreflopLibrary();}catch{}try{for(const row of meta.find(x=>x.id==='postflopLibraries-v1')?.value||[])postflopLibrary.libraries.push(PokerPostflopLibrary.validate(row));renderPostflopLibrary();}catch{}}
+// The site serves the current chart and flop libraries (studio/libraries,
+// listed in manifest.json). Each device loads them once per manifest version,
+// replacing the previous bundled version and leaving the user's own imports.
+async function loadBundledLibraries(meta){
+ if(!/^https?:$/.test(location.protocol)||typeof DecompressionStream!=='function')return;
+ const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
+ if(!manifest?.version||!Array.isArray(manifest.files)||!manifest.files.length)return;
+ const loaded=meta.find(x=>x.id==='bundledLibraries-v1')?.value||null;if(loaded?.version===manifest.version)return;
+ const note=text=>{const el=$('preflopImportStatus');if(el)el.textContent=text;};note('Loading the built-in solver charts…');
+ const inputs=[];for(const file of manifest.files){const r=await fetch('libraries/'+encodeURIComponent(file),{cache:'no-cache'});if(!r.ok)throw Error('Missing '+file);inputs.push(JSON.parse(/\.gz$/.test(file)?await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text():await r.text()));}
+ for(const p of loaded?.preflop||[]){const i=preflopLibrary.packs.findIndex(x=>x.name===p.name&&x.family===p.family);if(i>=0)preflopLibrary.packs.splice(i,1);}
+ postflopLibrary.libraries=postflopLibrary.libraries.filter(l=>!(loaded?.postflop||[]).includes(l.name));
+ const record={version:manifest.version,preflop:[],postflop:[]},preferred=preflopLibrary.preferred;
+ for(const input of inputs){if(input?.format===PokerPostflopLibrary.FORMAT){const lib=await addPostflopLibrary(input);record.postflop.push(lib.name);}else{const packs=await addPreflopPacks(input?.format==='range-lab-preflop-bundle-v1'?input.packs:[input]);record.preflop.push(...packs.map(p=>({name:p.name,family:p.family})));}}
+ preflopLibrary.preferred=preferred&&preflopLibrary.packs.includes(preferred)?preferred:null;await persistPreflop();
+ await dbPut('meta',{id:'bundledLibraries-v1',value:record});note('Built-in solver charts loaded: '+record.preflop.length+' preflop charts'+(record.postflop.length?' and '+record.postflop.length+' flop libraries':'')+' ('+manifest.version+').');spotUI.last=null;renderPlay();renderRanges();
+}
 function referenceQuizQuestion(filters){
  const candidates=[];for(const pack of preflopLibrary.packs)for(const node of pack.nodes){const config=pack.config,labels=G.positions(config.seats),hero=node.seat;if(!['any','NLH'].includes(filters.quizVariant)||!['any',config.mode].includes(filters.quizFormat)||filters.quizSeats!=='any'&&+filters.quizSeats!==config.seats||!quizPositionMatches(labels[hero],filters.quizPosition)||!quizStackMatches(quizEffective(config,hero),filters.quizStack)||filters.quizStart!=='full'&&!['any','0'].includes(filters.quizStreet)||filters.quizStart==='full'&&node.history.some(e=>e.seat===hero))continue;const h=new G.Hand(config);for(const e of node.history)h.act({kind:e.kind,target:e.to===undefined?undefined:G.units(e.to)});if(quizTopicMatches(h,filters.quizStart==='full'?'any':filters.quizTopic))candidates.push({pack,hand:h,hero});}
  if(!candidates.length)return null;const {pack,hand,hero}=candidates[Math.floor(Math.random()*candidates.length)],model=new T.Model(pack.config,state.abstraction);return{hand,hero,answered:false,model,snapshot:model.snapshot(),sourceName:pack.name,referencePack:pack,filters};
