@@ -10,7 +10,7 @@ for(const dir of ['packs','flops']){fs.rmSync(path.join(out,dir),{recursive:true
 const write=(file,value)=>{const data=zlib.gzipSync(JSON.stringify(value),{level:9});fs.writeFileSync(path.join(out,file),data);return data.length;},slug=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 const manifest={version,packs:[],flops:[]};
 for(const input of inputs){const lib=read(input);
- if(lib.format==='range-lab-postflop-library-v1'){const {spots,...head}=lib;for(const spot of spots){const file='flops/'+slug(lib.name)+'--'+slug(spot.id)+'.json.gz';manifest.flops.push({file,library:lib.name,id:spot.id,label:spot.label||spot.id,bytes:write(file,{...head,spots:[spot]})});}continue;}
+ if(lib.format==='range-lab-postflop-library-v1'){const {spots,...head}=lib;for(const spot of spots){const file='flops/'+slug(lib.name)+'--'+slug(spot.id)+'.json.gz';manifest.flops.push({file,library:lib.name,id:spot.id,label:spot.label||spot.id,chart:spot.chart,bytes:write(file,{...head,spots:[spot]})});}continue;}
  for(const pack of lib.format==='range-lab-preflop-bundle-v1'?lib.packs:[lib]){const c=pack.config,file='packs/'+slug(pack.name)+'.json.gz';manifest.packs.push({file,name:pack.name,variant:c.variant,mode:c.mode,seats:c.seats,stack:Math.max(...c.stacks),bytes:write(file,pack)});}}
 for(const f of fs.readdirSync(out))if(/\.json\.gz$/.test(f))fs.rmSync(path.join(out,f));
 fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest)+'\n');

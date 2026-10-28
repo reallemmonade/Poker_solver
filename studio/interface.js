@@ -108,7 +108,7 @@ function initInterface(){
  const compatibility=create('div','hide');compatibility.hidden=true;compatibility.append($('tableTitle'),$('samples'));tablePane.append(compatibility);
  play.querySelector('.table-legend')?.remove();playTop.remove();
  analysisPane.append(create('div','ui-analysis-title','<h2>This decision</h2>'),create('div','ui-analysis-controls'));
- const controls=analysisPane.querySelector('.ui-analysis-controls');controls.append($('autoAnalyze').closest('label'),$('analyze'),$('spotStop'));$('autoAnalyze').closest('label').lastChild.textContent=' Auto-analyze';
+ const controls=analysisPane.querySelector('.ui-analysis-controls');controls.append($('autoAnalyze').closest('label'),$('analyze'),$('spotStop'));const confirm=create('div','spot-confirm hide');confirm.id='spotConfirm';controls.after(confirm);$('autoAnalyze').closest('label').lastChild.textContent=' Auto-analyze';
  const grading=details('Decision recording'),gradeLabel=$('gradeEvery').closest('label');gradeLabel.lastChild.textContent=' Record an assessment when I act (runs in the background; play continues)';grading.append(gradeLabel);settingsDialog.querySelector('.ui-dialog-content').prepend(grading);
  const alert=create('div','ui-analysis-alert');alert.id='uiAnalysisAlert';analysisPane.append(alert,frequencies);
  const resultDetails=details('Action values');resultDetails.id='uiResultDetails';resultDetails.append($('playFeedback'));analysisPane.append(resultDetails,spotSettings);
