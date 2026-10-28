@@ -9,7 +9,9 @@ const ActionBar=(()=>{
   function snap(x,r){const step=x>=25?.5:x>=5?.1:.01;let v=Math.round(x/step)*step;v=+v.toFixed(2);return Math.max(r.min,Math.min(r.max,v));}
   function presets(r){
     // The sizes the solver has an answer for at this decision, when the caller knows them; the slider covers the rest.
-    if(Array.isArray(r.solved))return [...new Set(r.solved.map(t=>Math.max(r.min,Math.min(r.max,+(+t).toFixed(2)))))].sort((a,b)=>a-b).map(t=>({label:t>=r.allIn-1e-9?'All-in':r.preflop?(r.currentBet<=r.bb?num(t/r.bb)+'x':num(t)+' BB'):Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
+    // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
+    // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
+    if(Array.isArray(r.solved))return [...new Set(r.solved.map(t=>Math.max(r.min,Math.min(r.max,+(+t).toFixed(2)))))].sort((a,b)=>a-b).map(t=>({label:t>=r.allIn-1e-9?'All-in':r.preflop?num(t/(r.currentBet<=r.bb?r.bb:r.currentBet))+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
     // Preflop before anyone raises, sizes are big-blind multiples; otherwise fractions of the pot after calling.
     if(r.preflop&&r.currentBet<=r.bb)return[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>({label,target:snap(m*r.bb,r)}));
     return[.25,.4,.66,.88].map(p=>({label:Math.round(p*100)+'%',target:snap(r.currentBet+p*(r.pot+r.toCall),r)}));
