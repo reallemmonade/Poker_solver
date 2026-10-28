@@ -9,6 +9,7 @@
 //   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--plo-solver path/to/plo_solver] [--port 8787] [--threads N] [--memory MB]
 const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process'),{Worker}=require('worker_threads');
 const L=require('../../studio/local-solver.js');
+const {createQueue}=require('./queue.cjs');
 
 const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory'].includes(k)?Number(v):v;}
@@ -19,6 +20,7 @@ const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.on
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
 let job=null,finished=null;
+const queue=createQueue({port:args.port,threads:args.threads,busy:()=>!!job});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
@@ -79,7 +81,9 @@ function solveSpot(spec){
 const server=http.createServer((req,res)=>{
  if(req.headers.origin&&!originOK(req.headers.origin))return send(req,res,403,{error:'This page is not allowed to use the local solver. Add its origin to RANGE_LAB_ORIGINS.'});
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
- if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,busy:!!job,spot:true,version:1});
+ if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:!!job,spot:true,linkedUser:queue.user,version:1});
+ // The app on this computer links the bridge to the signed-in account, so solves queued from other devices run here.
+ if(req.method==='POST'&&req.url==='/link'){let body='';req.on('data',d=>{body+=d;if(body.length>4000)req.destroy();});req.on('end',()=>{try{queue.link(JSON.parse(body));send(req,res,200,{ok:true});}catch(error){send(req,res,400,{error:error.message});}});return;}
  if(req.method==='GET'&&req.url==='/status')return send(req,res,200,job?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
  if(req.method==='POST'&&req.url==='/cancel'){if(!job)return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
  // A background solve's outcome, collected once: 202 while it runs.
