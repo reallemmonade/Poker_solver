@@ -34,6 +34,21 @@ const SPOTS={
  // 3-bet pots where the 3-bettor has position, for calibrating in-position 3-bets (BTN vs HJ, BTN vs CO).
  'hj-btn-3bet':{label:'6-max 100bb · HJ opens, BTN 3-bets, HJ calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','fold','raise','fold','fold','call'])},
  'co-btn-3bet':{label:'6-max 100bb · CO opens, BTN 3-bets, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','raise','fold','fold','call'])},
+ // The remaining heads-up 6-max lines, so the 100bb library answers every common flop.
+ 'hj-bb':{label:'6-max 100bb · HJ opens, BB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','fold','fold','fold','call'])},
+ 'btn-sb':{label:'6-max 100bb · BTN opens, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','raise','call','fold'])},
+ 'co-sb':{label:'6-max 100bb · CO opens, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','fold','call','fold'])},
+ 'hj-sb':{label:'6-max 100bb · HJ opens, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','fold','fold','call','fold'])},
+ 'utg-sb':{label:'6-max 100bb · UTG opens, SB calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','fold','fold','fold','call','fold'])},
+ 'utg-co':{label:'6-max 100bb · UTG opens, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','fold','call','fold','fold','fold'])},
+ 'hj-co':{label:'6-max 100bb · HJ opens, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','call','fold','fold','fold'])},
+ 'utg-hj':{label:'6-max 100bb · UTG opens, HJ calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','call','fold','fold','fold','fold'])},
+ 'hj-co-3bet':{label:'6-max 100bb · HJ opens, CO 3-bets, HJ calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','raise','fold','fold','fold','call'])},
+ 'co-sb-3bet':{label:'6-max 100bb · CO opens, SB 3-bets, CO calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','raise','fold','raise','fold','call'])},
+ 'utg-hj-3bet':{label:'6-max 100bb · UTG opens, HJ 3-bets, UTG calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','raise','fold','fold','fold','fold','call'])},
+ 'utg-co-3bet':{label:'6-max 100bb · UTG opens, CO 3-bets, UTG calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','fold','raise','fold','fold','fold','call'])},
+ 'hj-sb-3bet':{label:'6-max 100bb · HJ opens, SB 3-bets, HJ calls',chart:'NLH cash 6-handed 100bb',...line(6,['fold','raise','fold','fold','raise','fold','call'])},
+ 'utg-btn-3bet':{label:'6-max 100bb · UTG opens, BTN 3-bets, UTG calls',chart:'NLH cash 6-handed 100bb',...line(6,['raise','fold','fold','raise','fold','fold','call'])},
  // Limped pots exist only in charts built with --limp 1 (the SB completes, the BB checks).
  'sb-bb-limp':{label:'6-max 100bb · SB limps, BB checks',chart:'NLH cash 6-handed 100bb',...line(6,['fold','fold','fold','fold','call','check'])},
  'hu-limp':{label:'Heads-up 100bb · button limps, BB checks',chart:'NLH cash 2-handed 100bb',...line(2,['call','check'])},
