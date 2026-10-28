@@ -5,7 +5,7 @@ Heads-up postflop spots that are too large for the in-browser exact solver can b
 - **No-limit Hold'em** goes to [TexasSolver](https://github.com/bupticybee/TexasSolver).
 - **Pot-limit Omaha** (4 cards, high only) goes to this project's own solver, `tools/plo-solver/plo_solver`.
 
-In the app, set **Analysis settings → Big heads-up postflop spots** to **TexasSolver on this computer**. That one setting turns on both solvers through the same bridge. The app remembers the setting and says under it whether the bridge is running. While it is not running, big spots get the sampled estimate instead of an error; it is checked again when you come back to the app.
+In the app, set **Analysis inputs & accuracy → Solver on your Mac** to **On**. That one setting turns on both solvers through the same bridge. The app remembers the setting and says under it whether the bridge is running. While it is not running, the app offers no solve for flops and turns; it is checked again when you come back to the app.
 
 ## Setup (Mac)
 

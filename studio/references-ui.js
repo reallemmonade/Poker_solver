@@ -63,7 +63,7 @@ async function carriedPostflopRanges(hand){
 }
 const postflopRow=l=>({...l,spots:l.spots.map(s=>({...s,flops:Object.fromEntries(Object.entries(s.flops).map(([k,f])=>[k,{...f,nodes:f.nodes.map(({bytes,...n})=>n)}]))}))});
 // merge: add the input's spots to a stored library of the same name instead of replacing it (single-spot downloads).
-async function addPostflopLibrary(input,merge=false){const old=postflopLibrary.libraries.findIndex(l=>l.name===input?.name);if(merge&&old>=0){const ids=new Set((input.spots||[]).map(s=>s.id));input={...input,spots:[...postflopRow(postflopLibrary.libraries[old]).spots.filter(s=>!ids.has(s.id)),...input.spots]};}const lib=PokerPostflopLibrary.validate(input);if(old>=0)postflopLibrary.libraries[old]=lib;else postflopLibrary.libraries.push(lib);await dbPut('meta',{id:'postflopLibraries-v1',value:postflopLibrary.libraries.map(postflopRow)});spotUI.last=null;renderPostflopLibrary();return lib;}
+async function addPostflopLibrary(input,merge=false){const old=postflopLibrary.libraries.findIndex(l=>l.name===input?.name&&!memoryOnly.has(l));if(merge&&old>=0){const ids=new Set((input.spots||[]).map(s=>s.id));input={...input,spots:[...postflopRow(postflopLibrary.libraries[old]).spots.filter(s=>!ids.has(s.id)),...input.spots]};}const lib=PokerPostflopLibrary.validate(input);if(old>=0)postflopLibrary.libraries[old]=lib;else postflopLibrary.libraries.push(lib);await dbPut('meta',{id:'postflopLibraries-v1',value:postflopLibrary.libraries.filter(l=>!memoryOnly.has(l)).map(postflopRow)});spotUI.last=null;renderPostflopLibrary();return lib;}
 function renderPostflopLibrary(){const el=$('postflopCoverage');if(!el)return;const spots=postflopLibrary.libraries.flatMap(l=>l.spots),select=$('postflopSpot');$('postflopReports').classList.toggle('hide',!spots.length);if(select){const old=select.value;select.innerHTML=spots.map((s,i)=>'<option value="'+i+'">'+esc(s.label)+'</option>').join('');if([...select.options].some(o=>o.value===old))select.value=old;select.onchange=$('postflopNode').onchange=renderPostflopReport;renderPostflopReport();}el.textContent=spots.length?'Precomputed flops: '+spots.map(s=>s.label+' ('+Object.keys(s.flops).length+' flops)').join('; ')+'. They need the matching preflop chart loaded.':'No precomputed flop library loaded.';}
 function renderPostflopReport(){
  const spot=postflopLibrary.libraries.flatMap(l=>l.spots)[+$('postflopSpot').value],out=$('postflopReport');if(!spot||!out)return;const want=$('postflopNode').value,rows=[];
@@ -77,7 +77,7 @@ function displayPolicyReady(query){return !!(query?.displayEligible&&query?.refe
 function preflopFrequencyHTML(result){return '<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+(result.reference[i]===null?'Outside source tree':fmt(result.reference[i]*100,1)+'%')+'</strong></div>'+(result.reference[i]===null?'':'<div class="bar"><i style="width:'+result.reference[i]*100+'%"></i></div>')+'</div>').join('')+'</div>';}
 function preflopResultHTML(result,grade=null){return '<section class="spot-solution"><h3>Preflop source reference</h3>'+preflopFrequencyHTML(result)+(grade?'<p>Your choice '+(grade.referenceFrequency===null?'falls outside the source tree and is ungraded.':'has '+fmt(grade.referenceFrequency*100,1)+'% frequency in this source.')+'</p>':'')+'</section>';}
 function referenceChoiceGrade(result,pending){const a=T.matchAction(result.actions,pending.action),h=pending.hand;if(a<0)return null;const frequency=result.reference[a],row={id:id('g'),createdAt:new Date().toISOString(),source:pending.kind,variant:h.config.variant,mode:h.config.mode,street:0,position:G.positions(h.n,h.button)[h.actor],hand:h.holes[h.actor].map(C.cardName).join(''),action:result.actions[a].label,loss:null,lossSE:null,estimatedLoss:null,estimatedLossSE:null,rated:false,referenceFrequency:frequency,referenceSource:result.referenceSource,evidenceVersion:5,evidenceReasons:['Reference frequency only; no source EV values.'],units:result.units,config:h.config,actions:h.actionLog,hero:h.actor,board:''};state.grades.unshift(row);if(pending.kind==='play')state.currentGrades.push(row);dbPut('grades',row).catch(()=>{});renderProgress();return row;}
-async function persistPreflop(){await dbPut('meta',{id:'preflopReferences-v1',value:preflopLibrary.packs.map(p=>PokerPreflop.serialize(p,true))});await dbPut('meta',{id:'preflopPreferred-v1',value:preflopLibrary.preferred?{name:preflopLibrary.preferred.name,family:preflopLibrary.preferred.family}:null});}
+async function persistPreflop(){await dbPut('meta',{id:'preflopReferences-v1',value:preflopLibrary.packs.filter(p=>!memoryOnly.has(p)).map(p=>PokerPreflop.serialize(p,true))});await dbPut('meta',{id:'preflopPreferred-v1',value:preflopLibrary.preferred?{name:preflopLibrary.preferred.name,family:preflopLibrary.preferred.family}:null});}
 function renderPreflopLibrary(){const select=$('preflopCollection');if(!select)return;const old=select.value;select.innerHTML=preflopLibrary.packs.map((p,i)=>'<option value="'+i+'">'+esc(p.name)+' · '+p.config.seats+' seats · '+p.nodes.length+' spots</option>').join('');if(preflopLibrary.preferred&&preflopLibrary.packs.includes(preflopLibrary.preferred))select.value=String(preflopLibrary.packs.indexOf(preflopLibrary.preferred));else if([...select.options].some(o=>o.value===old))select.value=old;for(const id of ['usePreflop','removePreflop','exportPreflop'])$(id).disabled=!preflopLibrary.packs.length;$('preflopCoverage').textContent=preflopLibrary.packs.length?preflopLibrary.packs.reduce((s,p)=>s+p.nodes.length,0)+' source decision nodes loaded. Only exact matching games and betting lines receive reference frequencies.':'No sourced preflop references loaded. Included self-play blueprints are used by practice opponents and do not supply solver advice.';}
 async function addPreflopPack(input){return(await addPreflopPacks([input]))[0];}
 // A bundle file holds many packs; they are validated first and saved together.
@@ -117,6 +117,28 @@ async function loadBundledLibraries(meta){
  for(const input of libs.values()){const lib=await addPostflopLibrary(input);record.postflop.push(lib.name);}
  preflopLibrary.preferred=preferred&&preflopLibrary.packs.includes(preferred)?preferred:null;await persistPreflop();
  await dbPut('meta',{id:'bundledLibraries-v1',value:record});note('Built-in solver charts loaded: '+record.preflop.length+' preflop charts'+(record.postflop.length?' and '+record.postflop.length+' flop libraries':'')+' ('+manifest.version+').');spotUI.last=null;renderPlay();renderRanges();
+}
+// Phones and tablets fetch what the current hand needs instead: the chart for this game and, at the flop,
+// the flop spot of this hand's preflop line (about 1 MB). Both stay in memory only, so nothing is written
+// to the device, and the flop spot is dropped once its hand is over. At most two charts are kept.
+const memoryOnly=new WeakSet(),phoneFetches=new Map();
+function phoneFetch(file){if(!phoneFetches.has(file))phoneFetches.set(file,fetchLibraryFile(file).finally(()=>phoneFetches.delete(file)));return phoneFetches.get(file);}
+async function ensurePhoneLibraries(hand){
+ const m=bundleManifest;if(!m||!hand)return false;let changed=false;
+ const before=postflopLibrary.libraries.length;postflopLibrary.libraries=postflopLibrary.libraries.filter(l=>!memoryOnly.has(l)||l.forHand===hand&&!hand.done);if(postflopLibrary.libraries.length<before)changed=true;
+ if(hand.done)return changed;
+ try{
+  const c=hand.config,mode=c.mode==='cash'?'cash':'icm',stack=G.bb(Math.max(...hand.initial));
+  const fit=m.packs.filter(p=>p.variant===c.variant&&p.mode===mode&&p.seats===c.seats).sort((a,b)=>Math.abs(Math.log(a.stack/stack))-Math.abs(Math.log(b.stack/stack)))[0];
+  if(fit&&!preflopLibrary.packs.some(p=>p.name===fit.name&&p.config.seats===fit.seats)){const pack=PokerPreflop.validate(await phoneFetch(fit.file));memoryOnly.add(pack);const old=preflopLibrary.packs.filter(p=>memoryOnly.has(p));if(old.length>=2)preflopLibrary.packs.splice(preflopLibrary.packs.indexOf(old[0]),1);preflopLibrary.packs.push(pack);changed=true;}
+  if(hand.street===1&&hand.living().length===2){
+   const range=PokerPreflop.postflopRanges(preflopLibrary.packs,c,hand.actionLog),same=(a,b)=>String(a).replace(/Citrus Poker/g,'Range Lab')===String(b).replace(/Citrus Poker/g,'Range Lab');
+   const have=new Set(postflopLibrary.libraries.flatMap(l=>l.spots.map(s=>l.name+'\n'+s.id)));
+   for(const f of range?m.flops.filter(f=>f.chart&&f.chart.key===range.key&&same(f.chart.name,range.name)&&!have.has(f.library+'\n'+f.id)):[]){const lib=PokerPostflopLibrary.validate(await phoneFetch(f.file));if(state.hand!==hand||hand.done)break;lib.forHand=hand;memoryOnly.add(lib);postflopLibrary.libraries.push(lib);changed=true;}
+  }
+ }catch{}
+ if(changed){spotUI.last=null;renderPostflopLibrary();}
+ return changed;
 }
 // Phone and tablet downloads: one chart pack or flop spot at a time, defaulting to the current game.
 function renderBundleDownloads(){
