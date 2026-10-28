@@ -13,7 +13,7 @@ function show(packs,chart,key,hands){
  return s;
 }
 const SPOTS=[
- ['6-max 100bb BTN vs HJ 2.5bb open','NLH cash 6-handed 100bb','3:fold:0/4:raise:250/5:fold:0',['A7s','KJs','KQo','76s']],
+ ['6-max 100bb BTN vs HJ 2.5bb open','NLH cash 6-handed 100bb','3:fold:0/4:raise:250/5:fold:0',['A7s','A5s','A4s','KJs','KQo','76s','77','88','99']],
  ['6-max 100bb SB first in','NLH cash 6-handed 100bb','3:fold:0/4:fold:0/5:fold:0/0:fold:0',['A7s','K7s','76s','Q5o']],
  ['9-max 100bb UTG first in','NLH cash 9-handed 100bb','',['A9s','KJo','76s','55']],
  ['6-max 50bb BTN first in','NLH cash 6-handed 50bb','3:fold:0/4:fold:0/5:fold:0',['A7s','K9o','76s','T8o']],
