@@ -33,7 +33,7 @@ const ActionBar=(()=>{
       box.querySelector('[data-ab="call"]').onclick=()=>o.check?o.onCheck():o.onCall();
       if(r){
         const amount=box.querySelector('.ab-amount'),slider=box.querySelector('.ab-slider'),list=presets(r);
-        const show=(v,typing)=>{turnState.amount=v;if(!typing)amount.value=num(v);slider.value=r.max>r.min?Math.round((v-r.min)/(r.max-r.min)*1000):1000;slider.style.setProperty('--fill',slider.value/10+'%');box.querySelector('[data-ab="bet"]').innerHTML=betLabel(r,v);box.querySelectorAll('[data-ab-preset]').forEach(b=>b.classList.toggle('on',Math.abs(list[+b.dataset.abPreset].target-v)<.005));};
+        const show=(v,typing)=>{turnState.amount=v;if(!typing)amount.value=num(v);slider.value=r.max>r.min?Math.round((v-r.min)/(r.max-r.min)*1000):1000;slider.style.setProperty('--fill',slider.value/10+'%');const bet=box.querySelector('[data-ab="bet"]'),label=betLabel(r,v);if(bet.innerHTML!==label)bet.innerHTML=label;box.querySelectorAll('[data-ab-preset]').forEach(b=>b.classList.toggle('on',Math.abs(list[+b.dataset.abPreset].target-v)<.005));};
         box.querySelectorAll('[data-ab-preset]').forEach(b=>b.onclick=()=>show(list[+b.dataset.abPreset].target));
         slider.oninput=()=>{const p=+slider.value;show(p>=1000?r.max:p<=0?r.min:snap(r.min+(r.max-r.min)*p/1000,r));};
         amount.onfocus=()=>amount.select();

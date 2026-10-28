@@ -79,6 +79,7 @@
 !/studio/manifest.webmanifest
 !/studio/make-icons.cjs
 !/studio/interface.js
+!/studio/looks.js
 !/studio/interface.css
 !/studio/verify-interface.cjs
 !/studio/verify-import.cjs
