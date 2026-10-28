@@ -3,6 +3,7 @@
 .seat-node{position:absolute;transform:translate(-50%,-50%);width:clamp(70px,12%,110px);z-index:5;text-align:center}
 .seat-node .player{position:relative;transform:none;min-width:0;max-width:none;width:100%;padding:7px 4px;background:linear-gradient(#182b29,#0d1d1d);border:1px solid #5b7970;box-shadow:0 5px 12px #0004;font-size:11px;z-index:2}
 .seat-node .player.active{outline:2px solid #a1e6b5;box-shadow:0 0 20px #9cdbaf35}
+.seat-node .player.active.you{outline:2px solid var(--accent-fill,var(--gold));outline-offset:2px;box-shadow:0 0 0 5px color-mix(in srgb,var(--accent-fill,var(--gold)) 22%,transparent),0 0 26px color-mix(in srgb,var(--accent-fill,var(--gold)) 45%,transparent);animation:hero-turn 1.6s ease-in-out infinite alternate}@keyframes hero-turn{to{box-shadow:0 0 0 7px color-mix(in srgb,var(--accent-fill,var(--gold)) 10%,transparent),0 0 34px color-mix(in srgb,var(--accent-fill,var(--gold)) 60%,transparent)}}
 .seat-node .player.you{border-color:var(--gold)}.seat-node .player.folded{opacity:.5}
 .seat-node .player.winner{border-color:#e5c38c;box-shadow:0 0 23px #e5c38c45}
 .seat-name{display:block;font-size:10px;letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.seat-name em{font-size:8px;color:var(--gold);font-style:normal;margin-left:3px}
