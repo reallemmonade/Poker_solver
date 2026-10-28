@@ -3,7 +3,7 @@
 const fs=require('node:fs'),path=require('node:path'),{chromium}=require('playwright');
 const base=__dirname,mark=fs.readFileSync(path.join(base,'interface.js'),'utf8').match(/const CITRUS_MARK='([^']*)'/)[1].replace(' class="ui-mark"','');
 // The chip's rim touches all four edges; the dark ground only shows in the corners, which iOS and Android round off anyway.
-const sizes=[['apple-touch-icon.png',180,'#1b1c17'],['icon-192.png',192,'#1b1c17'],['icon-512.png',512,'#1b1c17'],['favicon-32.png',32,'transparent']];
+const sizes=[['apple-touch-icon.png',180,'#1b1c17'],['icon-192.png',192,'#1b1c17'],['icon-512.png',512,'#1b1c17'],['favicon-32.png',32,'transparent'],['favicon-192.png',192,'transparent']];
 (async()=>{const browser=await chromium.launch();
  for(const [name,size,bg]of sizes){const page=await browser.newPage({viewport:{width:size,height:size},deviceScaleFactor:1});
   // Crop the 100-unit viewBox to the chip's r=46 circle so it spans the whole tile.
