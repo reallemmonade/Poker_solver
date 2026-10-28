@@ -90,6 +90,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .hdb-table th:first-child,.hdb-table td:first-child{text-align:left}
 /* Seat stats popup */
 .hud-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 12px}
+.ui-terms{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:8px 0;font-size:13px}.ui-terms dt{font-weight:700}.ui-terms dd{margin:0;color:var(--muted)}
 .hud-pop{position:fixed;z-index:70;min-width:168px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;pointer-events:none}
 .hud-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px}.hud-head span{color:var(--muted);font-size:11px}
 #table [data-seat]{cursor:pointer}
