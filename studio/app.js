@@ -95,7 +95,8 @@ function eventLabel(e,names=null){const who=seat=>names?names[seat]:'Seat '+(sea
 // Between your decisions the action bar stays empty and the analysis panel keeps one steady line, so bot turns neither compute a policy nor reflow the page.
 // Pre-actions apply to the hero's own seat while bots act; "Control every seat" turns them off.
 const actionBarIds=new WeakMap();let actionBarNext=0;
-function preActionKey(h){const live=state.hand;if(!actionBarIds.has(live))actionBarIds.set(live,++actionBarNext);return actionBarIds.get(live)+':'+h.street}
+// Keyed by the live hand's street, not the one still animating, so a box ticked during the animation survives it.
+function preActionKey(){const live=state.hand;if(!actionBarIds.has(live))actionBarIds.set(live,++actionBarNext);return actionBarIds.get(live)+':'+live.street}
 function preActionSeat(h){return !!state.hand&&!h.done&&!$('controlAll').checked&&state.hero!==undefined&&!h.folded[state.hero]&&h.stacks[state.hero]>0}
 // Draws the GGPoker-style bar for the seat to act. Returns true when a pre-selected action was played instead.
 // Bet and raise totals (bb) the solver has an answer for here: the analysis on screen, or else the preflop chart or flop library.

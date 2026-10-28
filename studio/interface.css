@@ -68,6 +68,8 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
  .ui-live-grid>.ui-table-pane{display:flex;flex-direction:column}
  .ui-live-grid>.ui-analysis,.ui-live-grid>.ui-history-pane{height:auto;max-height:100%;align-self:flex-start}
  .ui-app .ui-live-grid .ui-table-pane .felt{flex:1 1 auto;height:auto;min-height:300px;margin:12px 0 8px}
+ /* Short phones (iPhone SE): the felt gives up height so Fold, Call and Raise stay above the bottom navigation. */
+ @media(max-height:700px){.ui-app .ui-live-grid .ui-table-pane .felt{min-height:180px;margin:6px 0 4px}}
  .ui-app .ui-live-grid #playActions:not(:empty),.ui-app .ui-live-grid #playActions:empty~.ui-session-line{position:static;box-shadow:none;padding:4px 0}
 }
 /* Landscape phones hide the bottom navigation: the screens take the full height below the pane dots, and the felt fills its column. */
