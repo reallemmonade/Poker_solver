@@ -15,7 +15,7 @@
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
 # 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
 # TURN=1 also keeps the turn's first decisions for the 6-max and heads-up 100bb spots (bigger solver
-# dumps; library.cjs --turn 1) and packs them per spot into flop-v6/turn-<spot>.json.gz.
+# dumps; library.cjs --turn 1) and packs them per spot into flop-v6/turn-<spot>.ctl.
 # $CAL_WORK must hold preflop-library-v4.json.gz; ev1/ may already hold pass-1 flops.
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}

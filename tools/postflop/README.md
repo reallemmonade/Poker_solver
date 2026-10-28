@@ -66,6 +66,8 @@ Otherwise the app solves the spot as before: in the browser, or with TexasSolver
 
 **Flop reports** (under the import controls) average each flop's strategy over the acting player's range. For example, they show how often BB checks, or how often BTN c-bets after a check, on each solved flop.
 
+**Turn strategies:** `solve --turn 1` also keeps, next to each flop, the turn's first decisions on the check-check, bet-call and check-bet-call flop lines, two actions deep (`<flop>.turn.json.gz`; the solver dumps two streets, which needs no more solving). `bundle-turn --out postflop-work` packs them into one `turn-<spot>.ctl` per spot, with each flop compressed on its own. Import a `.ctl` file like a library: the app stores its flops apart and unpacks one only when a hand of that spot reaches its turn. Turn decisions on those lines then come from it, and live solves of the turn and river start from both players' ranges narrowed by their own flop and turn actions with the solved frequencies. A 6-max 100bb flop takes about 0.7 MB. `check-turn.cjs --turn turn-<spot>.ctl --charts <bundle>` checks a file the way `check.cjs` checks a library, and `studio/verify-import.cjs <charts> <library> <turn file>` imports one in the app.
+
 ## PLO
 
 `plo-library.cjs` does the same for pot-limit Omaha with this project's PLO solver (`tools/plo-solver`). It uses the app's PLO tree: one bet size per street and pot-sized raises. On a Mac, double-click `tools/postflop/run-plo-library.command`. It writes to `~/Desktop/Poker_Solver/plo-work`, and the bundle is `plo-postflop-library.json.gz`, imported like the NLH one.

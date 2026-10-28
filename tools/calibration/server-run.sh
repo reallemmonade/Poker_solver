@@ -45,7 +45,7 @@ status)
     tmux has-session -t cal 2>/dev/null && echo 'job: running' || echo 'job: not running'" ;;
 pull)
   dest="$LOCAL/server-results"; mkdir -p "$dest"
-  rsync -a --include 'preflop-library-v6-calibrated.json.gz' --include 'set1.json' --include 'set2.json' --include 'smart.log' --include 'flop-v6/' --include 'flop-v6/postflop-library.json.gz' --include 'flop-v6/turn-*.json.gz' --exclude '*' $host:$work/ "$dest/"
+  rsync -a --include 'preflop-library-v6-calibrated.json.gz' --include 'set1.json' --include 'set2.json' --include 'smart.log' --include 'flop-v6/' --include 'flop-v6/postflop-library.json.gz' --include 'flop-v6/turn-*.ctl' --exclude '*' $host:$work/ "$dest/"
   ls -la "$dest" ;;
 *) sed -n 2,10p "$0"; exit 1 ;;
 esac
