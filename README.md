@@ -1,6 +1,6 @@
 # Citrus Poker
 
-This repository contains the browser app and the source needed to build it. Render serves the study app as a static site and runs a small Node service for private multiplayer rooms. Solver work and training data stay in the browser; multiplayer room state lives in memory on the room service while the table is active.
+This repository contains the browser app and the source needed to build it. Render serves the study app as a static site and runs a small Node service for private multiplayer rooms. Solver work and training data stay in the browser, signed-in players' personal data syncs through the same service to Postgres, and multiplayer room state lives in memory on the room service while the table is active.
 
 ## Deploy on Render
 
@@ -8,7 +8,15 @@ Connect this GitHub repository to Render as a Blueprint. It keeps the existing `
 
 The Blueprint points the front end to `https://range-lab-live-rooms.onrender.com`. If Render assigns a different service URL, update `MULTIPLAYER_API_ORIGIN` on the static site and `ALLOWED_ORIGINS` on the room service, then redeploy both. Render free web services can sleep while idle; the first request may wait for the service to wake. Open tables use in-memory room state, so redeploys or service restarts close active tables. This is intended for casual friend games, not a persistent poker server.
 
-The study app runs in each visitor's browser. For friend games, Node runs on Render; neither you nor your friends need to install Node on your devices. Models, hand histories, and practice results are saved in that browser's IndexedDB. They do not sync to Render or to another computer. To move them, use the app's export and import controls.
+The study app runs in each visitor's browser. For friend games, Node runs on Render; neither you nor your friends need to install Node on your devices. Models, hand histories, and practice results are saved in that browser's IndexedDB. Signed-in players also sync their personal data to the account service (below).
+
+## Accounts and sync
+
+The round button beside **Settings** signs in or creates an account (username and password). Each account's hand histories, assessments, saved spots, drill progress and settings (look, felt, theme, bots, quiz filters, friend stats) sync through the `range-lab-live-rooms` service to a Postgres database, so the same account sees the same data on a phone and a laptop. The browser keeps its own copy, one IndexedDB database per account, so play and study work offline and upload when the connection returns. Model checkpoints, chart packs and other solver caches stay on the device because the app can rebuild them; records over 256 KB also stay local. Each account holds up to 50 MB on the server (`ACCOUNT_QUOTA_MB`).
+
+The first account to sign in on a device takes over that device's existing data (the original `range-lab-poker-studio` database) and uploads it, so nothing saved before accounts is lost. Another person signing in on the same device gets their own empty database, and a signed-out visitor on a claimed device gets a separate guest space. Signing back in brings the account's data back. The newest change to each record wins when two devices edit the same one. **Account → Delete account** removes the server copy; the device keeps its own.
+
+To switch accounts on, create a free Postgres database (for example at [neon.tech](https://neon.tech); Render's free Postgres is deleted after 30 days) and set its connection string as `DATABASE_URL` on the `range-lab-live-rooms` service. The service creates its tables on start. Without `DATABASE_URL` on Render, the account button reports that sync is not switched on and data stays on each device. Locally, `node server.cjs` keeps accounts in memory; `node studio/verify-accounts.cjs` checks the account API (set `DATABASE_URL` to run it against Postgres). Passwords are stored as scrypt hashes and sessions as SHA-256 hashes of random tokens. There is no email, so a forgotten password cannot be reset; the device copy remains.
 
 ## Find your way around
 

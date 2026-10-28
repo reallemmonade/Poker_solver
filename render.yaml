@@ -11,9 +11,11 @@ services:
     name: range-lab-live-rooms
     runtime: node
     plan: free
-    buildCommand: node --version
+    buildCommand: npm install --omit=dev
     startCommand: node server.cjs
     healthCheckPath: /api/health
     envVars:
+      - key: DATABASE_URL
+        sync: false
       - key: ALLOWED_ORIGINS
         value: https://range-lab-poker-studio.onrender.com

@@ -58,6 +58,7 @@ function initInterface(){
  shell.classList.add('ui-shell');layout.classList.add('ui-layout');document.body.classList.add('ui-app');
  document.querySelector('.hero').remove();$('mobileSetupToggle').hidden=true;
  document.querySelector('.top').innerHTML='<a class="brand ui-brand" href="#play" aria-label="Citrus Poker home">'+CITRUS_MARK+'<span>CITRUS</span> POKER</a><nav class="ui-primary" aria-label="Main activities">'+['play','practice','study','library'].map(area=>button(area[0].toUpperCase()+area.slice(1),'data-area="'+area+'" aria-pressed="'+(area==='play')+'"')).join('')+'</nav>'+button('Settings','id="uiSettingsButton" aria-haspopup="dialog"');
+ citrusAccount.mount(document.querySelector('.top'),$('uiSettingsButton'));
  document.querySelector('.ui-brand').onclick=event=>{event.preventDefault();navigate('play');};
  const context=create('section','ui-context','<div><strong id="uiGameSummary"></strong><div class="small muted" id="uiGameContext"></div></div>'+button('Edit game','id="uiEditGame" aria-haspopup="dialog"'));
  context.id='uiContext';layout.before(context);
@@ -143,7 +144,7 @@ function initInterface(){
  const savedPractice=view('uiSavedPractice');savedPractice.innerHTML='<div id="uiSavedEmpty"><p class="help">Pick a saved decision to practice. Each answer is graded against the saved analysis, without running the solver again.</p><div id="uiSavedPracticeStatus" class="status" role="status"></div><div id="uiSavedPracticeList"></div>'+button('Manage saved spots in Library','data-route="savedSpots"')+'</div>';
  savedPractice.append($('savedSpotDrill'));
  const mobile=create('nav','ui-mobile-nav', ['play','practice','study','library'].map(a=>button(a[0].toUpperCase()+a.slice(1),'data-area="'+a+'"')).join(''));mobile.setAttribute('aria-label','Main activities');shell.append(mobile);
- document.querySelector('.foot').innerHTML='Saved on this device · <button type="button" class="ui-text-button" id="uiFilesShortcut">Backups & Files</button> · <button type="button" class="ui-text-button" id="uiHelpShortcut">Help & coverage</button>';
+ document.querySelector('.foot').innerHTML=(citrusAccount.user?'Synced to your account':'Saved on this device')+' · <button type="button" class="ui-text-button" id="uiFilesShortcut">Backups & Files</button> · <button type="button" class="ui-text-button" id="uiHelpShortcut">Help & coverage</button>';
  function buttonNode(label,id){const node=create('button','btn secondary',label);node.id=id;node.type='button';return node;}
  function showDialog(d){ui.lastFocus=document.activeElement;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}}
  $('uiEditGame').onclick=()=>{gameError.hidden=true;ui.sizeConfirm=null;showDialog(gameDialog);refresh();};$('uiGameCancel').onclick=()=>{if(state.job==='spotSolve')$('spotStop').onclick();else if(!$('stop').disabled)$('stop').onclick();};$('uiSettingsButton').onclick=()=>showDialog(settingsDialog);$('uiHelpShortcut').onclick=()=>{showDialog(settingsDialog);method.open=true;};$('uiFilesShortcut').onclick=()=>navigate('transfer');
