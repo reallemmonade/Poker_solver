@@ -4,20 +4,21 @@
 #     36 flops each with per-class EVs, on the v4 charts; one realization fit per depth.
 #  2. Pass 2: the same spots on 6-max and heads-up cash charts rebuilt with the pass-1 fits; fit
 #     again on both passes.
-#  3. preflop-library-v6-calibrated.json.gz: the NLH charts at 20, 50, 100 and 200bb (2-9 handed,
-#     cash and MTT) rebuilt with their depth's fit; every other chart (10bb push/fold, 150, 500
-#     and 1000bb, PLO) kept from v4 unchanged.
+#  3. preflop-library-v6-calibrated.json.gz: the NLH charts at 20, 50, 100, 150 and 200bb (2-9
+#     handed, cash and MTT) rebuilt with the nearest depth's fit (150bb the 200bb one); every
+#     other chart (10bb push/fold, 500 and 1000bb, PLO) kept from v4 unchanged.
 #  4. NLH flop libraries on the v6 ranges at 20, 50, 100 and 200bb in one bundle (spot ids carry
-#     the depth, and each spot answers only its own depth's chart), then check.cjs, verify-import.
+#     the depth, and each spot answers only its own depth's chart), then the 4- and 9-handed 100bb
+#     spots, then check.cjs and verify-import.
 # Every step resumes: solved flops, fits and charts already written are kept.
 #   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
-# 100bb always gets 104.
+# 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
 # $CAL_WORK must hold preflop-library-v4.json.gz; ev1/ may already hold pass-1 flops.
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -57,7 +58,7 @@ evs $W/charts1/preflop-library.json.gz $W/ev2
 fit $W/ev1,$W/ev2 $W/set2.json
 
 say "V6: the 20-200bb NLH charts with the pass-2 fits"
-charts $W/set2.json $W/charts-v6 --depths 20,50,100,200
+charts $W/set2.json $W/charts-v6 --depths 20,50,100,150,200
 [ -f $V6 ] || cp $W/charts-v6/preflop-library.json.gz $V6
 node studio/build.cjs --web > /dev/null 2>&1
 node studio/verify-import.cjs $V6 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
@@ -75,6 +76,14 @@ solve $V6 $F $(other $SRP) $DEPTH_FLOPS 150
 solve $V6 $F $(other $LIMP) $DEPTH_FLOPS 400
 solve $V6 $F $SRP 100 400 --redo-above 1.2
 solve $V6 $F $(other $SRP) $DEPTH_FLOPS 400 --redo-above 1.2
+# 4- and 9-handed 100bb: single-raised pots against the BB and the BTN, blind against blind, two
+# 3-bet pots and the SB limp.
+say "FLOP LIBRARY on v6: 4- and 9-handed 100bb at $TABLE_FLOPS flops"
+T4=4max-co-bb,4max-btn-bb,4max-co-btn,4max-sb-bb,4max-btn-bb-3bet,4max-sb-bb-3bet
+T9=9max-utg-bb,9max-hj-bb,9max-co-bb,9max-btn-bb,9max-utg-btn,9max-co-btn,9max-sb-bb,9max-btn-bb-3bet,9max-sb-bb-3bet
+solve $V6 $F $T4,$T9 $TABLE_FLOPS 150
+solve $V6 $F 4max-sb-bb-limp,9max-sb-bb-limp $TABLE_FLOPS 400
+solve $V6 $F $T4,$T9 $TABLE_FLOPS 400 --redo-above 1.2
 node tools/postflop/library.cjs bundle --out $F | tail -1
 node tools/postflop/check.cjs --library $F/postflop-library.json.gz --charts $V6 2>&1 | grep -v "^    at" | tail -5
 node studio/verify-import.cjs $V6 $F/postflop-library.json.gz 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300

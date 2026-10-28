@@ -39,6 +39,21 @@ const SPOTS={
 // is all-in) fails in prepare.
 const DEPTHS=[20,50,200];
 for(const [id,s]of Object.entries(SPOTS))for(const d of DEPTHS)SPOTS[id+'-'+d+'bb']={...s,label:s.label.replace('100bb',d+'bb'),chart:s.chart.replace(/100bb$/,d+'bb')};
+// 4-handed (CO, BTN, SB, BB) and 9-handed (UTG, UTG+1, UTG+2, LJ, HJ, CO, BTN, SB, BB) at 100bb.
+const f=n=>Array(n).fill('fold');
+for(const [id,label,steps]of [
+ ['co-bb','CO opens, BB calls',['raise',...f(2),'call']],['btn-bb','BTN opens, BB calls',['fold','raise','fold','call']],
+ ['co-btn','CO opens, BTN calls',['raise','call',...f(2)]],['sb-bb','SB opens, BB calls',[...f(2),'raise','call']],
+ ['btn-bb-3bet','BTN opens, BB 3-bets, BTN calls',['fold','raise','fold','raise','call']],['sb-bb-3bet','SB opens, BB 3-bets, SB calls',[...f(2),'raise','raise','call']],
+ ['sb-bb-limp','SB limps, BB checks',[...f(2),'call','check']],
+])SPOTS['4max-'+id]={label:'4-handed 100bb · '+label,chart:'NLH cash 4-handed 100bb',...line(4,steps)};
+for(const [id,label,steps]of [
+ ['utg-bb','UTG opens, BB calls',['raise',...f(7),'call']],['hj-bb','HJ opens, BB calls',[...f(4),'raise',...f(3),'call']],
+ ['co-bb','CO opens, BB calls',[...f(5),'raise',...f(2),'call']],['btn-bb','BTN opens, BB calls',[...f(6),'raise','fold','call']],
+ ['utg-btn','UTG opens, BTN calls',['raise',...f(5),'call',...f(2)]],['co-btn','CO opens, BTN calls',[...f(5),'raise','call',...f(2)]],
+ ['sb-bb','SB opens, BB calls',[...f(7),'raise','call']],['btn-bb-3bet','BTN opens, BB 3-bets, BTN calls',[...f(6),'raise','fold','raise','call']],
+ ['sb-bb-3bet','SB opens, BB 3-bets, SB calls',[...f(7),'raise','raise','call']],['sb-bb-limp','SB limps, BB checks',[...f(7),'call','check']],
+])SPOTS['9max-'+id]={label:'9-handed 100bb · '+label,chart:'NLH cash 9-handed 100bb',...line(9,steps)};
 // One bet size per street, raises only on the flop (all-in after that), no
 // donk bets: the tree a 100bb flop fits in about 5 GB and solves in minutes.
 const TREE={flop:{bet:[33],raise:[66]},turn:{bet:[66],raise:[]},river:{bet:[75],raise:[]},allinThreshold:.67};
