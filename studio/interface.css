@@ -93,3 +93,19 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .hud-pop{position:fixed;z-index:70;min-width:168px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;pointer-events:none}
 .hud-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px}.hud-head span{color:var(--muted);font-size:11px}
 #table [data-seat]{cursor:pointer}
+/* Practice → Leaks */
+.leak-head{display:flex;justify-content:flex-end;margin:0 0 10px}.leak-head .btn{min-width:150px}
+.leak-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.leak-list li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--ui-radius,12px);background:var(--panel)}
+.leak-list li>div:first-child{display:flex;flex-direction:column;min-width:0}.leak-list b{font-size:14px}.leak-list small{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.leak-list .leak-off{opacity:.55}
+.leak-rates{display:flex;align-items:center;gap:12px;flex-shrink:0}.leak-rates span{display:flex;flex-direction:column;align-items:flex-end;font-weight:700;font-variant-numeric:tabular-nums}.leak-rates span small{font-weight:400}
+.leak-rates .leak-dots{display:flex;flex-direction:row;gap:3px}.leak-dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}.leak-dots i.on{background:var(--green)}
+.leak-spot{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+#leakTable{height:440px;min-height:440px;margin:18px 0 14px}
+#leakActions{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+#leakActions .btn.leak-good{outline:2px solid var(--green)}#leakActions .btn.leak-bad{outline:2px solid var(--red)}
+.leak-verdict{font-size:22px;font-weight:800;margin:0 0 6px}.leak-verdict.leak-good{color:var(--green)}.leak-verdict.leak-bad{color:var(--red)}
+#leakFeedback .policyRow.leak-chosen strong{text-decoration:underline}
+.leak-nav{gap:8px;margin-top:10px}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){#leakTable{height:390px;min-height:390px}.leak-head .btn{width:100%}.leak-rates{gap:8px}}

@@ -72,12 +72,13 @@ function validateBackupRow(store,row){
   return scrubSavedGrade({...row,config,mode:config.mode,variant:config.variant,units:config.mode==='cash'?'bb':'prize units',createdAt:new Date(row.createdAt).toISOString()});
  }
  if(store==='meta'){
-  const allowed=['lastModel','spotSizing','spotDealBudget','spotLocalSolver','autoAnalyze','gradeEvery','liveSession','preflopReferences-v1','preflopPreferred-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
+  const allowed=['lastModel','spotSizing','spotDealBudget','spotLocalSolver','autoAnalyze','gradeEvery','liveSession','preflopReferences-v1','preflopPreferred-v1','drillLeaks-v1'];if(!allowed.includes(row.id))throw Error('Unknown device setting: '+row.id);
   if(row.id==='lastModel'&&!validRecordId(row.value))throw Error('Invalid model selection.');
   if(['autoAnalyze','gradeEvery'].includes(row.id)&&typeof row.value!=='boolean')throw Error('Invalid automatic-analysis preference.');
   if(row.id==='spotLocalSolver'&&!['','http://127.0.0.1:8787'].includes(row.value))throw Error('Invalid local solver setting.');
   if(row.id==='spotDealBudget'&&![20000,50000,100000,200000,500000].includes(row.value))throw Error('Invalid deal limit.');
   if(row.id==='spotSizing')T.normalizeAbstraction(row.value);
+  if(row.id==='drillLeaks-v1'&&!PokerDrills.validDeck(row.value))throw Error('Invalid drill schedule.');
   if(row.id==='preflopReferences-v1'){if(!Array.isArray(row.value)||row.value.length>1000)throw Error('Invalid preflop reference collection.');for(const pack of row.value)PokerPreflop.validate(pack);}
   return{id:row.id,value:row.value};
  }
@@ -101,6 +102,7 @@ function mergeStudyRows(existing,incoming){
    if(old&&name==='solves'){if(old.key!==row.key)throw Error('A saved-analysis ID collision prevented import. No data was changed.');const q=spotQuality(row),p=spotQuality(old);use=q>0&&(q>p||q===p&&rowDate(row)>rowDate(old))&&JSON.stringify(row.result)!==JSON.stringify(old.result);}
    else if(old&&name==='models')use=row.snapshot.episodes>old.snapshot.episodes||row.snapshot.episodes===old.snapshot.episodes&&rowDate(row)>rowDate(old);
    else if(name==='meta'&&row.id==='preflopReferences-v1'){const values=Array.isArray(old?.value)?old.value:[],charts=new Map(),newer=(v,o)=>!o||(Date.parse(v.source?.createdAt)||0)>(Date.parse(o.source?.createdAt)||0);for(const v of values){const k=packKey(v);if(newer(v,charts.get(k)))charts.set(k,v);}let changed=charts.size!==values.length;for(const v of row.value){const k=packKey(v);if(newer(v,charts.get(k))){charts.set(k,v);changed=true;}}if(changed){updates[name].push({id:row.id,value:[...charts.values()]});count++;}else kept++;continue;}
+   else if(old&&name==='meta'&&row.id==='drillLeaks-v1')use=(Date.parse(row.value.updatedAt)||0)>(Date.parse(old.value?.updatedAt)||0);
    else if(old&&name!=='meta'&&name!=='solves'&&name!=='models')use=rowDate(row)>rowDate(old);
    if(use){updates[name].push(row);count++;}else kept++;
   }}return{updates,count,kept};

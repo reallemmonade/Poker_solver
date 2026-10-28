@@ -59,6 +59,9 @@
 !/studio/history.js
 !/studio/hand-stats.js
 !/studio/hand-db.js
+!/studio/drill-plan.js
+!/studio/leak-drills.js
+!/studio/verify-drills.cjs
 !/studio/index.html
 !/studio/apple-touch-icon.png
 !/studio/icon-192.png
