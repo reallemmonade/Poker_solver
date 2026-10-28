@@ -14,11 +14,13 @@
 #   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
 # 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
+# TURN=1 also keeps the turn's first decisions for the 6-max and heads-up 100bb spots (bigger solver
+# dumps; library.cjs --turn 1) and packs them per spot into flop-v6/turn-<spot>.json.gz.
 # $CAL_WORK must hold preflop-library-v4.json.gz; ev1/ may already hold pass-1 flops.
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -70,11 +72,11 @@ say "CALIBRATION DONE"
 say "FLOP LIBRARY on v6 (20-200bb at $DEPTH_FLOPS flops, 100bb at 100)"
 F=$W/flop-v6; mkdir -p $F
 other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
-solve $V6 $F $SRP 100 150
-solve $V6 $F $LIMP 100 400
+solve $V6 $F $SRP 100 150 --turn $TURN
+solve $V6 $F $LIMP 100 400 --turn $TURN
 solve $V6 $F $(other $SRP) $DEPTH_FLOPS 150
 solve $V6 $F $(other $LIMP) $DEPTH_FLOPS 400
-solve $V6 $F $SRP 100 400 --redo-above 1.2
+solve $V6 $F $SRP 100 400 --redo-above 1.2 --turn $TURN
 solve $V6 $F $(other $SRP) $DEPTH_FLOPS 400 --redo-above 1.2
 # 4- and 9-handed 100bb: single-raised pots against the BB and the BTN, blind against blind, two
 # 3-bet pots and the SB limp.
@@ -85,6 +87,7 @@ solve $V6 $F $T4,$T9 $TABLE_FLOPS 150
 solve $V6 $F 4max-sb-bb-limp,9max-sb-bb-limp $TABLE_FLOPS 400
 solve $V6 $F $T4,$T9 $TABLE_FLOPS 400 --redo-above 1.2
 node tools/postflop/library.cjs bundle --out $F | tail -1
+[ "$TURN" = 1 ] && node tools/postflop/library.cjs bundle-turn --out $F | tail -3
 node tools/postflop/check.cjs --library $F/postflop-library.json.gz --charts $V6 2>&1 | grep -v "^    at" | tail -5
 node studio/verify-import.cjs $V6 $F/postflop-library.json.gz 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
 say "ALL DONE"
