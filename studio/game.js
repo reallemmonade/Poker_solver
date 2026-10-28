@@ -74,6 +74,7 @@
       while(!this.done){const live=this.living();if(live.length===1){this.refund();this.settle(live[0]);return}const actors=this.actors();for(const p of [...this.pending])if(this.folded[p]||this.stacks[p]===0)this.pending.delete(p);
         if(actors.length===1){const p=actors[0],opponentMax=Math.max(0,...live.filter(i=>i!==p).map(i=>this.streetPaid[i]));if(this.streetPaid[p]<opponentMax){this.currentBet=opponentMax;this.pending=new Set([p]);this.actor=p;return}this.pending.clear()}
         if(actors.length===0)this.pending.clear();
+        if(!this.pending.size&&actors.length<=1&&live.length>1&&this.allInStreet===undefined)this.allInStreet=this.street;
         if(!this.pending.size){this.refund();if(this.street===3){this.settle();return}this.street++;this.burns.push(this.deck.pop());this.board.push(...Array.from({length:this.street===1?3:1},()=>this.plannedBoard.length?this.plannedBoard.shift():this.deck.pop()));this.streetPaid.fill(0);this.currentBet=0;this.lastFullRaise=units(this.config.bb);this.actedAt.fill(null);this.actedKind.fill(null);this.aggressions=0;this.pending=new Set(this.actors());this.actor=(this.button+1)%this.n;this.log.push({type:'street',street:this.street,board:this.board.slice()});continue}
         if(!this.pending.has(this.actor))this.actor=this.nextPending(this.actor-1);return;
       }
@@ -119,7 +120,20 @@
   function preBucket(hole,rules){if(hole.length===2)return Core.handClass(hole);const rs=hole.map(c=>c>>2).sort((a,b)=>b-a),ss=[0,1,2,3].map(s=>hole.filter(c=>(c&3)===s).length).sort((a,b)=>b-a),pairs=hole.length-new Set(rs).size,aces=rs.filter(r=>r===12).length,broad=rs.filter(r=>r>=8).length,connect=rs.slice(1).filter((r,i)=>rs[i]-r<=2).length,low=rules.low?'L'+Math.min(4,new Set(rs.filter(r=>r<=6||r===12)).size):'';return`O${hole.length}${aces}${pairs}${ss.filter(n=>n>=2).length}${Math.min(3,broad)}${Math.min(3,connect)}${low}`}
   function postBucket(hole,board,rules){const result=evaluate(hole,board,rules),rank=result.high,cat=Math.floor(rank/15**5),kicker=Math.floor((Math.floor(rank/15**4)%15)/4),suit=[0,1,2,3].map(s=>({h:hole.filter(c=>(c&3)===s).length,b:board.filter(c=>(c&3)===s).length})),draw=suit.some(x=>x.b+x.h===4&&(!rules.use||x.h>=2&&x.b>=2))?1:0;return`${cat}${kicker}${draw}${rules.low?'L'+(result.low===null?'n':Math.floor(result.low/9**4)):''}`}
   function information(hand,seat=hand.actor){const hole=hand.holes[seat],memory=[preBucket(hole,hand.rules)],publicMemory=[];for(const len of [3,4,5])if(hand.board.length>=len){const board=hand.board.slice(0,len);memory.push(postBucket(hole,board,hand.rules));publicMemory.push(texture(board));}const relative=i=>(i-hand.button+hand.n)%hand.n,actions=hand.actionLog.map(a=>`${a.street}${relative(a.seat)}${a.id}`).join('.'),family=Array.from({length:hand.n},(_,k)=>hand.initial[(hand.button+k)%hand.n]).join(',')+':'+hand.config.bb+':'+hand.config.ante+':'+hand.config.startStreet+':'+hand.deadPot;return `S3|${family}|${relative(seat)}|${memory.join('/')}|${publicMemory.join('/')}|${actions}`;}
+  // Share of the pot each listed seat wins over the remaining board cards: exact when the runouts are few
+  // enough, otherwise a seeded sample so the same spot always shows the same number.
+  function equity(holes,board,rules,seats,budget=200000){
+    const share=Array(holes.length).fill(0);if(seats.length<2){seats.forEach(p=>share[p]=1);return share}
+    const used=new Set([...board,...holes.flat()]),deck=[];for(let c=0;c<52;c++)if(!used.has(c))deck.push(c);
+    const need=5-board.length,choose=(n,k)=>{let r=1;for(let i=0;i<k;i++)r=r*(n-i)/(i+1);return Math.round(r)},cost=seats.length*(rules.use?choose(rules.hole,rules.use)*choose(5,5-rules.use):1);
+    const score=run=>{const b=run.length?board.concat(run):board,r=seats.map(p=>evaluate(holes[p],b,rules)),top=Math.max(...r.map(x=>x.high)),high=seats.filter((_,j)=>r[j].high===top),lows=r.map(x=>x.low).filter(x=>x!==null);
+      if(rules.low&&lows.length){const best=Math.min(...lows),low=seats.filter((_,j)=>r[j].low===best);high.forEach(p=>share[p]+=.5/high.length);low.forEach(p=>share[p]+=.5/low.length)}else high.forEach(p=>share[p]+=1/high.length)};
+    const total=choose(deck.length,need);let runs=0;
+    if(total*cost<=budget){for(const run of need?combinations(deck,need):[[]]){score(run);runs++}}
+    else{const random=rng(seats.flatMap(p=>holes[p]).concat(board).reduce((h,c)=>Math.imul(h^c+1,2654435761)>>>0,2166136261)),d=deck.slice();runs=Math.max(500,Math.floor(budget/cost));for(let k=0;k<runs;k++){for(let i=0;i<need;i++){const j=i+Math.floor(random()*(d.length-i));[d[i],d[j]]=[d[j],d[i]]}score(d.slice(0,need))}}
+    return share.map(x=>x/runs);
+  }
   function replay(config,events,options={}){const hand=new Hand(config,options);for(const e of events){assert(!hand.done,'History continues after the hand ended.');assert(hand.actor===e.seat&&hand.street===e.street,'Action history has an inconsistent actor or street.');hand.act({kind:e.kind,target:e.target,id:e.id})}return hand}
-  const api={Hand,normalize,variants,positions,modelActions,information,preBucket,postBucket,texture,rankHigh,evaluate,combinations,rng,pick,units,bb,STREET,Core,replay,U,terminalICM,familyId};
+  const api={Hand,normalize,variants,positions,modelActions,equity,information,preBucket,postBucket,texture,rankHigh,evaluate,combinations,rng,pick,units,bb,STREET,Core,replay,U,terminalICM,familyId};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerGame=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
