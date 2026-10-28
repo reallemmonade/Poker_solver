@@ -33,9 +33,12 @@ async function main(){
  // Paging: many records come back over several pages.
  for(let k=0;k<4;k++){const rows=Array.from({length:150},(_,i)=>({store:'grades',id:'g'+k+'-'+i,t:5000,data:{id:'g'+k+'-'+i,pad:'y'.repeat(200)}}));ok((await call('POST','/api/sync',{token:phone,data:{rows}})).body.accepted===150,'a full batch is accepted');}
  let since=0,total=0,pages=0;for(;;){const page=(await call('GET','/api/sync?since='+since,{token:mac})).body;total+=page.rows.length;pages++;since=page.cursor;if(!page.more)break;}ok(total===603&&pages===3,'pull pages through every record ('+total+' in '+pages+' pages)');
+ // An upload that is the only thing past the device's cursor moves the cursor past it, so the device does not pull its own rows back; otherwise it does not.
+ const own=(await call('POST','/api/sync',{token:mac,data:{since,rows:[{store:'hands',id:'h3',t:6000,data:{id:'h3'}}]}})).body;ok(own.accepted===1&&own.cursor>since&&(await call('GET','/api/sync?since='+own.cursor,{token:mac})).body.rows.length===0,'an upload returns a cursor past its own rows');
+ ok(!('cursor' in (await call('POST','/api/sync',{token:phone,data:{since,rows:[{store:'hands',id:'h4',t:6000,data:{id:'h4'}}]}})).body),'no cursor when another device wrote since');
  // Quota: the account holds 1 MB in this check; a batch that would go over it is refused, and nothing in it is stored.
  const big=k=>({store:'solves',id:'big'+k,t:1,data:'z'.repeat(250000)});ok((await call('POST','/api/sync',{token:phone,data:{rows:[big(1),big(2),big(3)]}})).body.accepted===3,'large records fit under the quota');
- const full=await call('POST','/api/sync',{token:phone,data:{rows:[big(4),big(5)]}});ok(full.status===507&&(await call('GET','/api/auth/me',{token:phone})).body.usage.count===606,'a batch over the quota is refused whole');
+ const full=await call('POST','/api/sync',{token:phone,data:{rows:[big(4),big(5)]}});ok(full.status===507&&(await call('GET','/api/auth/me',{token:phone})).body.usage.count===608,'a batch over the quota is refused whole');
  ok((await call('POST','/api/sync',{token:phone,data:{rows:[{...big(1),t:2,data:'small'}]}})).body.accepted===1,'shrinking a record still works when nearly full');
  // Other accounts never see this account's data.
  const other=(await call('POST','/api/auth/signup',{data:{username:'other'+name,password}})).body.token;ok((await call('GET','/api/sync?since=0',{token:other})).body.rows.length===0,'accounts are isolated');
