@@ -40,14 +40,15 @@
 
  // Live flop actions as solver labels. Each bet or raise (chips added, scaled to
  // the library's pot) takes the node's nearest size; all-in takes the largest.
- // A size more than 1.5x away from every solved size is no match.
- function walk(flop,steps,scale){
+ // A size more than 1.5x away from every solved size is no match. Solved bets below the
+ // table's minimum bet (small limped pots) count as the minimum bet.
+ function walk(flop,steps,scale,minBet=0){
   const nodes=new Map(flop.nodes.map(n=>[n.path,n]));let path='',node=nodes.get(''),substituted=false;
   for(const s of steps){
    if(!node)return null;let label=null;
    if(s.kind==='check'||s.kind==='call')label=node.actions.find(a=>a===s.kind.toUpperCase());
    else if(['bet','raise'].includes(s.kind)){
-    const options=node.actions.filter(a=>/^(BET|RAISE) /.test(a)).map(a=>({a,amount:parseFloat(a.split(' ')[1])*scale}));if(!options.length)return null;
+    const options=node.actions.filter(a=>/^(BET|RAISE) /.test(a)).map(a=>({a,amount:a.startsWith('BET ')?Math.max(minBet,parseFloat(a.split(' ')[1])*scale):parseFloat(a.split(' ')[1])*scale}));if(!options.length)return null;
     const jam=Math.max(...options.map(o=>o.amount)),best=s.allIn?options.find(o=>o.amount===jam):options.sort((p,q)=>Math.abs(Math.log(p.amount/s.amount))-Math.abs(Math.log(q.amount/s.amount)))[0];
     if(!best||!s.allIn&&Math.abs(Math.log(best.amount/s.amount))>Math.log(1.5))return null;if(Math.abs(best.amount-s.amount)>Math.max(2,.03*s.amount))substituted=true;label=best.a;}
    if(!label)return null;path+=(path?'/':'')+label;node=nodes.get(path);
@@ -75,14 +76,14 @@
   // hero's cards moved onto it, a strategy for them.
   let flop,key,found,r;
   let similar=null;
-  for(const cand of candidates){const f=spot.flops[cand.key],w=f&&walk(f,steps,scale);if(!w||w.node.player!==(hand.actor===ip?'ip':'oop'))continue;const cards=hero.map(cand.move),board=C.cards(cand.key);if(cards.some(x=>x==null||board.includes(x))||new Set(cards).size<cards.length)continue;
+  for(const cand of candidates){const f=spot.flops[cand.key],w=f&&walk(f,steps,scale,G.units(hand.config.bb));if(!w||w.node.player!==(hand.actor===ip?'ip':'oop'))continue;const cards=hero.map(cand.move),board=C.cards(cand.key);if(cards.some(x=>x==null||board.includes(x))||new Set(cards).size<cards.length)continue;
    let q=null,near=null;if(spot.game==='PLO4'){const at=ploIndex(f,w.node.player,cards,board,hand.rules);if(at){q=row(w.node,at.index);near=at.similar;}}else q=row(w.node,comboIndex(cards));
    if(q){flop=f;key=cand.key;found=w;r=q;similar=near;break;}}
   if(!r)return null;const standIn=key!==c.key;
   const legal=hand.legal(),actions=[],probs=[];
   found.node.actions.forEach((label,i)=>{const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};else if(kind==='CHECK')action={kind:'check',label:'Check'};else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
-   else{const k=hand.currentBet?'raise':'bet',target=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo,Math.max(k==='raise'?legal.minRaiseTo:1,hand.streetPaid[hand.actor]+Math.round(parseFloat(amount)*scale)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   else{const k=hand.currentBet?'raise':'bet',target=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(parseFloat(amount)*scale)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
    action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
