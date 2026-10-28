@@ -34,6 +34,7 @@
 !/tools/calibration/smart-calibration.sh
 !/tools/calibration/server-run.sh
 !/tools/calibration/refcheck.cjs
+!/tools/split-libraries.cjs
 !/tools/postflop/
 !/tools/postflop/README.md
 !/tools/postflop/library.cjs
@@ -70,9 +71,10 @@
 !/studio/postflop-library.js
 !/studio/libraries/
 !/studio/libraries/manifest.json
-!/studio/libraries/preflop-library-v4.json.gz
-!/studio/libraries/postflop-library.json.gz
-!/studio/libraries/plo-postflop-library.json.gz
+!/studio/libraries/packs/
+!/studio/libraries/packs/*.json.gz
+!/studio/libraries/flops/
+!/studio/libraries/flops/*.json.gz
 !/studio/multiway-ui.js
 !/studio/opponents.js
 !/studio/policy.js
