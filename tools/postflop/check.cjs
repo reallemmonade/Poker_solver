@@ -15,7 +15,7 @@ const library=Lib.validate(read(args.library)),charts=read(args.charts),rng=G.rn
 const ok=(cond,msg)=>{if(cond)pass++;else{fail++;console.log('FAIL '+msg);}};
 
 for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
- const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name===spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
+ const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name.replace(/Citrus Poker/g,'Range Lab')===spot.chart.name.replace(/Citrus Poker/g,'Range Lab'));if(!def||!raw){console.log('skip '+spot.id);continue;}
  const pack=P.validate(raw),packs=[pack];
  for(const [key,flop]of Object.entries(spot.flops).slice(0,5)){
   // A real board: the canonical flop under a random suit permutation.
@@ -34,7 +34,8 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
    if(what==='3bb open'&&!r){ok(Math.abs(Math.log(1.2))>Math.log(1.5),spot.id+' '+key+' 3bb open should still match');continue;}
    ok(r&&r.supported,spot.id+' '+key+' '+what+': library answer');if(!r)continue;
    const s=r.reference.reduce((a,b)=>a+b,0);ok(Math.abs(s-1)<1e-9,spot.id+' '+key+' '+what+': frequencies sum to 1');
-   if(what==='vs bet 40%')ok(!r.solve.library.sizesMatched,spot.id+' '+key+' '+what+': labelled as a nearest size');
+   // In small limped pots the 40% test bet and the solved bet both clamp to the minimum bet, an exact match.
+   if(what==='vs bet 40%'&&Math.round(pot*.4)>h.config.bb*100)ok(!r.solve.library.sizesMatched,spot.id+' '+key+' '+what+': labelled as a nearest size');
    // Same row as decoding the stored node directly with the canonical combo.
    const node=flop.nodes.find(n=>n.path===r.solve.library.line),direct=Lib.row(node,Lib.comboIndex(cards.map(c=>(c&~3)|Lib.canonical(board).map[c&3]))),best=direct.indexOf(Math.max(...direct));
    ok(node.actions.length!==r.actions.length||direct.every((p,i)=>Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+' '+what+': same row as the stored node');
@@ -59,7 +60,7 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
 // PLO spots (--charts must hold the PLO chart): a stored combo answers from its
 // own row; any other hand answers from the most similar stored combo, labelled.
 for(const spot of library.spots.filter(s=>s.game==='PLO4')){
- const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name===spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
+ const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name.replace(/Citrus Poker/g,'Range Lab')===spot.chart.name.replace(/Citrus Poker/g,'Range Lab'));if(!def||!raw){console.log('skip '+spot.id);continue;}
  const pack=P.validate(raw);
  for(const [key,flop]of Object.entries(spot.flops).slice(0,3)){
   const perm=[0,1,2,3].sort(()=>rng()-.5),board=C.cards(key).map(c=>(c&~3)|perm[c&3]),h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});

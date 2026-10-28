@@ -58,9 +58,12 @@
 
  // Answers the current flop decision from the library, or returns null. range is
  // PokerPreflop.postflopRanges(...) for this hand; hand is the live PokerGame.Hand.
+ // The app was renamed from Range Lab to Citrus Poker; charts and flop libraries built
+ // on either side of the rename still pair up (the range key must match too).
+ const sameName=(a,b)=>String(a).replace(/Citrus Poker/g,'Range Lab')===String(b).replace(/Citrus Poker/g,'Range Lab');
  function query(libraries,range,hand){
   if(!range||hand.done||hand.street!==1||range.live.length!==2)return null;
-  const spot=libraries.flatMap(l=>l.spots).find(s=>s.chart.name===range.name&&s.chart.key===range.key);if(!spot)return null;
+  const spot=libraries.flatMap(l=>l.spots).find(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key);if(!spot)return null;
   const c=canonical(hand.board),hero=hand.holes[hand.actor],candidates=spot.flops[c.key]?[{key:c.key,move:x=>(x&~3)|c.map[x&3]}]:standIns(spot,c.cards).slice(0,8).map(s=>({key:s.key,move:s.move&&(x=>s.move((x&~3)|c.map[x&3]))}));
   const live=hand.living(),firstAfterButton=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b)),flopActions=hand.actionLog.filter(a=>a.street===1);
   // The chart may have been re-solved since the library was built under the same
