@@ -4,16 +4,20 @@
 #     36 flops each with per-class EVs, on the v4 charts; one realization fit per depth.
 #  2. Pass 2: the same spots on 6-max and heads-up cash charts rebuilt with the pass-1 fits; fit
 #     again on both passes.
-#  3. preflop-library-v6-calibrated.json.gz: every NLH chart from 20 to 1000bb (2-9 handed, cash
-#     and MTT) rebuilt with the nearest depth's fit; 10bb push/fold and PLO charts kept from v4.
-#  4. The NLH flop library on the v6 ranges, then check.cjs, verify-import and the reference spots.
+#  3. preflop-library-v6-calibrated.json.gz: the NLH charts at 20, 50, 100 and 200bb (2-9 handed,
+#     cash and MTT) rebuilt with their depth's fit; every other chart (10bb push/fold, 150, 500
+#     and 1000bb, PLO) kept from v4 unchanged.
+#  4. NLH flop libraries on the v6 ranges at 20, 50, 100 and 200bb in one bundle (spot ids carry
+#     the depth, and each spot answers only its own depth's chart), then check.cjs, verify-import.
 # Every step resumes: solved flops, fits and charts already written are kept.
-#   CAL_WORK=~/cal JOBS=12 THREADS=4 bash tools/calibration/smart-calibration.sh
+#   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
+# DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
+# 100bb always gets 104.
 # $CAL_WORK must hold preflop-library-v4.json.gz; ev1/ may already hold pass-1 flops.
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -52,21 +56,25 @@ say "PASS 2: flop solves with EVs on the pass-1 charts"
 evs $W/charts1/preflop-library.json.gz $W/ev2
 fit $W/ev1,$W/ev2 $W/set2.json
 
-say "V6: every NLH chart with the pass-2 fits"
-charts $W/set2.json $W/charts-v6 --depths 20,50,100,150,200,500,1000
+say "V6: the 20-200bb NLH charts with the pass-2 fits"
+charts $W/set2.json $W/charts-v6 --depths 20,50,100,200
 [ -f $V6 ] || cp $W/charts-v6/preflop-library.json.gz $V6
 node studio/build.cjs --web > /dev/null 2>&1
 node studio/verify-import.cjs $V6 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
 node tools/calibration/refcheck.cjs $V4 $V6
 say "CALIBRATION DONE"
 
-# The NLH flop library on the v6 ranges, as the v4 one was built: 100 flops at 150 iterations,
-# then those above 1.2% of the pot again at 400; limped pots 50 flops at 400.
-say "FLOP LIBRARY on v6"
+# The NLH flop libraries on the v6 ranges, as the v4 one was built: 150 iterations, then flops
+# above 1.2% of the pot again at 400; limped pots at 400. 100bb first.
+say "FLOP LIBRARY on v6 (20-200bb at $DEPTH_FLOPS flops, 100bb at 100)"
 F=$W/flop-v6; mkdir -p $F
+other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
 solve $V6 $F $SRP 100 150
-solve $V6 $F $LIMP 50 400
+solve $V6 $F $LIMP 100 400
+solve $V6 $F $(other $SRP) $DEPTH_FLOPS 150
+solve $V6 $F $(other $LIMP) $DEPTH_FLOPS 400
 solve $V6 $F $SRP 100 400 --redo-above 1.2
+solve $V6 $F $(other $SRP) $DEPTH_FLOPS 400 --redo-above 1.2
 node tools/postflop/library.cjs bundle --out $F | tail -1
 node tools/postflop/check.cjs --library $F/postflop-library.json.gz --charts $V6 2>&1 | grep -v "^    at" | tail -5
 node studio/verify-import.cjs $V6 $F/postflop-library.json.gz 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300

@@ -63,16 +63,16 @@
  const sameName=(a,b)=>String(a).replace(/Citrus Poker/g,'Range Lab')===String(b).replace(/Citrus Poker/g,'Range Lab');
  function query(libraries,range,hand){
   if(!range||hand.done||hand.street!==1||range.live.length!==2)return null;
-  const spot=libraries.flatMap(l=>l.spots).find(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key);if(!spot)return null;
-  const c=canonical(hand.board),hero=hand.holes[hand.actor],candidates=spot.flops[c.key]?[{key:c.key,move:x=>(x&~3)|c.map[x&3]}]:standIns(spot,c.cards).slice(0,8).map(s=>({key:s.key,move:s.move&&(x=>s.move((x&~3)|c.map[x&3]))}));
   const live=hand.living(),firstAfterButton=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b)),flopActions=hand.actionLog.filter(a=>a.street===1);
-  // The chart may have been re-solved since the library was built under the same
-  // name; answer only while both ranges still match the solved ones.
-  if(!sameRanges(spot,range,ip,oop))return null;
-  // Library chips scale to this hand's pot (another open size or depth), as
-  // long as the stack-to-pot ratio stays within a factor of 1.5.
-  const potStart=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),stack=Math.min(...[ip,oop].map(i=>hand.stacks[i]+hand.streetPaid[i])),scale=potStart/spot.pot;
-  if(Math.abs(Math.log((stack/potStart)/(spot.stack/spot.pot)))>Math.log(1.5))return null;
+  // The chart may have been re-solved since a library was built under the same name;
+  // only spots whose ranges still match the solved ones answer, so an older library
+  // imported alongside does not hide a newer one. Library chips scale to this hand's pot
+  // (another open size or depth), as long as the stack-to-pot ratio stays within a
+  // factor of 1.5; the spot with the closest ratio is used.
+  const potStart=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),stack=Math.min(...[ip,oop].map(i=>hand.stacks[i]+hand.streetPaid[i])),off=s=>Math.abs(Math.log((stack/potStart)/(s.stack/s.pot)));
+  const spot=libraries.flatMap(l=>l.spots).filter(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key&&sameRanges(s,range,ip,oop)).sort((a,b)=>off(a)-off(b))[0];
+  if(!spot||off(spot)>Math.log(1.5))return null;const scale=potStart/spot.pot;
+  const c=canonical(hand.board),hero=hand.holes[hand.actor],candidates=spot.flops[c.key]?[{key:c.key,move:x=>(x&~3)|c.map[x&3]}]:standIns(spot,c.cards).slice(0,8).map(s=>({key:s.key,move:s.move&&(x=>s.move((x&~3)|c.map[x&3]))}));
   const steps=[],paid={[ip]:0,[oop]:0};let facing=0;
   for(const a of flopActions){if(['bet','raise'].includes(a.kind)){steps.push({kind:a.kind,amount:a.target-paid[a.seat],allIn:!!a.allIn});paid[a.seat]=a.target;facing=a.target;}else{steps.push({kind:a.kind});if(a.kind==='call')paid[a.seat]=facing;}}
   // A stand-in flop is used only where it holds this decision and, with the
