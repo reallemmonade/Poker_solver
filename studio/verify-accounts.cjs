@@ -2,17 +2,23 @@
 // Checks the account and sync API: sign up, sign in, push and pull records, newest-write-wins, quota and size limits,
 // sign out and account deletion. Runs on the in-memory store, or on Postgres when DATABASE_URL is set.
 const http=require('node:http'),assert=require('node:assert/strict');
-process.env.ALLOWED_ORIGINS='http://allowed.test';process.env.ACCOUNT_QUOTA_MB='1';
+process.env.ALLOWED_ORIGINS='http://allowed.test';process.env.ACCOUNT_QUOTA_MB='1';process.env.RESEND_API_KEY='test-key';process.env.EMAIL_FROM='Citrus Poker <codes@citrus.test>';
+// Reset emails are captured here instead of going to Resend.
+const sent=[],realFetch=fetch;globalThis.fetch=async(url,opts)=>{if(String(url).startsWith('https://api.resend.com/')){sent.push({auth:opts.headers.Authorization,...JSON.parse(opts.body)});return new Response('{}',{status:200});}return realFetch(url,opts);};
 const {handle}=require('../server.cjs');
 async function main(){
  const server=http.createServer(handle);await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
  const call=async(method,path,{token,data,origin}={})=>{const res=await fetch(base+path,{method,headers:{...data!==undefined?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{},...origin?{Origin:origin}:{}},body:data!==undefined?JSON.stringify(data):undefined});const text=await res.text();return{status:res.status,body:text?JSON.parse(text):null,headers:res.headers};};
  const name='Tester'+Date.now().toString(36).slice(-6),password='correct horse';let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
  const pre=await fetch(base+'/api/sync',{method:'OPTIONS',headers:{Origin:'http://allowed.test','Access-Control-Request-Headers':'authorization'}});ok(pre.status===204&&/Authorization/.test(pre.headers.get('access-control-allow-headers')),'preflight allows the Authorization header');
- ok((await call('POST','/api/auth/signup',{data:{username:'ab',password}})).status===400,'short usernames are refused');
- ok((await call('POST','/api/auth/signup',{data:{username:name,password:'short'}})).status===400,'short passwords are refused');
- const signup=await call('POST','/api/auth/signup',{data:{username:name,password}});ok(signup.status===201&&signup.body.token&&signup.body.user.username===name.toLowerCase()&&signup.body.user.name===name,'sign up returns a session');
- ok((await call('POST','/api/auth/signup',{data:{username:name.toUpperCase(),password}})).status===409,'usernames are unique regardless of case');
+ const email=name.toLowerCase()+'@mail.test';
+ ok((await call('POST','/api/auth/signup',{data:{username:'ab',email,password}})).status===400,'short usernames are refused');
+ ok((await call('POST','/api/auth/signup',{data:{username:name,password}})).status===400&&(await call('POST','/api/auth/signup',{data:{username:name,email:'not-an-email',password}})).status===400,'an email is required');
+ ok((await call('POST','/api/auth/signup',{data:{username:name,email,password:'short'}})).status===400,'short passwords are refused');
+ const signup=await call('POST','/api/auth/signup',{data:{username:name,email:email.toUpperCase(),password}});ok(signup.body?.user?.email===email,'the email is stored with the username');ok(signup.status===201&&signup.body.token&&signup.body.user.username===name.toLowerCase()&&signup.body.user.name===name,'sign up returns a session');
+ ok((await call('POST','/api/auth/signup',{data:{username:name.toUpperCase(),email:'x'+email,password}})).status===409,'usernames are unique regardless of case');
+ ok((await call('POST','/api/auth/signup',{data:{username:'x'+name,email,password}})).body.error==='That email already has an account.','one account per email');
+ ok((await call('POST','/api/auth/login',{data:{username:email,password}})).status===200,'sign in with the email works');
  ok((await call('POST','/api/auth/login',{data:{username:name,password:'wrong password'}})).status===401,'a wrong password is refused');
  ok((await call('POST','/api/auth/login',{data:{username:'nobody-'+name,password}})).status===401,'an unknown user is refused');
  const login=await call('POST','/api/auth/login',{data:{username:name.toLowerCase(),password}}),phone=signup.body.token,mac=login.body.token;ok(login.status===200&&mac&&mac!==phone,'sign in gives a second device its own session');
@@ -41,11 +47,22 @@ async function main(){
  const full=await call('POST','/api/sync',{token:phone,data:{rows:[big(4),big(5)]}});ok(full.status===507&&(await call('GET','/api/auth/me',{token:phone})).body.usage.count===608,'a batch over the quota is refused whole');
  ok((await call('POST','/api/sync',{token:phone,data:{rows:[{...big(1),t:2,data:'small'}]}})).body.accepted===1,'shrinking a record still works when nearly full');
  // Other accounts never see this account's data.
- const other=(await call('POST','/api/auth/signup',{data:{username:'other'+name,password}})).body.token;ok((await call('GET','/api/sync?since=0',{token:other})).body.rows.length===0,'accounts are isolated');
+ const other=(await call('POST','/api/auth/signup',{data:{username:'other'+name,email:'other'+email,password}})).body.token;ok((await call('GET','/api/sync?since=0',{token:other})).body.rows.length===0,'accounts are isolated');
  // Sign out ends only that session; deleting the account removes everything.
  ok((await call('POST','/api/auth/logout',{token:phone})).status===200&&(await call('GET','/api/auth/me',{token:phone})).status===401&&(await call('GET','/api/auth/me',{token:mac})).status===200,'sign out ends one device only');
- ok((await call('POST','/api/account/delete',{token:mac,data:{password:'nope nope'}})).status===401,'deleting needs the password');
- ok((await call('POST','/api/account/delete',{token:mac,data:{password}})).status===200&&(await call('GET','/api/auth/me',{token:mac})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password}})).status===401,'deleting the account removes it');
+ // Forgot password: a code is emailed, wrong codes count, the right one sets a new password and signs other devices out.
+ ok((await call('POST','/api/auth/forgot',{data:{login:'nobody-'+name}})).status===200&&sent.length===0,'an unknown login sends nothing but answers the same');
+ ok((await call('POST','/api/auth/forgot',{data:{login:name}})).status===200&&sent.length===1&&sent[0].to[0]===email&&sent[0].auth==='Bearer test-key'&&/username is /.test(sent[0].text),'the code goes to the email on the account');
+ const code=/\b(\d{6})\b/.exec(sent[0].subject)[1];await call('POST','/api/auth/forgot',{data:{login:email}});ok(sent.length===1,'asking again within a minute does not send another email');
+ ok((await call('POST','/api/auth/reset',{data:{login:name,code:code==='000000'?'111111':'000000',password:'new password 1'}})).body.error==='Wrong code.','a wrong code is refused');
+ const reset=await call('POST','/api/auth/reset',{data:{login:email,code,password:'new password 1'}});ok(reset.status===200&&reset.body.token,'the right code sets a new password and signs in');
+ ok((await call('GET','/api/auth/me',{token:mac})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password}})).status===401,'old sessions and the old password stop working');
+ ok((await call('POST','/api/auth/reset',{data:{login:name,code,password:'again pass 2'}})).status===400,'a code works once');
+ const fresh=(await call('POST','/api/auth/login',{data:{username:name,password:'new password 1'}})).body.token;
+ ok((await call('POST','/api/account/email',{token:fresh,data:{email:'new'+email,password:'wrong one!'}})).status===401&&(await call('POST','/api/account/email',{token:fresh,data:{email:'new'+email,password:'new password 1'}})).body.user.email==='new'+email,'changing the email needs the password');
+ ok((await call('GET','/api/auth/me',{token:fresh})).body.user.email==='new'+email,'me reports the email');
+ ok((await call('POST','/api/account/delete',{token:fresh,data:{password:'nope nope'}})).status===401,'deleting needs the password');
+ ok((await call('POST','/api/account/delete',{token:fresh,data:{password:'new password 1'}})).status===200&&(await call('GET','/api/auth/me',{token:fresh})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password:'new password 1'}})).status===401,'deleting the account removes it');
  await call('POST','/api/account/delete',{token:other,data:{password}});
  server.close();console.log(JSON.stringify({ok:true,checks,store:process.env.TURSO_DATABASE_URL?'turso':process.env.DATABASE_URL?'postgres':'memory'}));process.exit(0);
 }

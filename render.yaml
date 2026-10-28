@@ -19,5 +19,9 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: ALLOWED_ORIGINS
         value: https://range-lab-poker-studio.onrender.com
