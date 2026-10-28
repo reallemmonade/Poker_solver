@@ -41,6 +41,8 @@
     const live=folded.map((f,i)=>f?-1:i).filter(i=>i>=0),boardCards=(rec.board||'').length/2,net=Array.isArray(rec.endingStacks)?rec.endingStacks.map((x,i)=>x-rec.config.stacks[i]):null,
       flop=rec.actions.some(a=>a.street>=1)||live.length>1&&boardCards>=3||rec.config.startStreet>0;
     return{n,actions:rec.actions,startStreet:rec.config.startStreet||0,flop,showdown:net&&live.length>1?live:[],won:net?net.map(x=>x>0):[],net};}
-  root.PokerStats={KEYS,empty,tally,add,summary,pct,fromRecord};
+  // Plain meanings for the stat and hand-row codes (Help > Poker terms, and the tooltip on each stat).
+  const TERMS={VPIP:'Voluntarily put money in preflop: how often a player calls or raises before the flop. Around 20–30% is typical at 6-max.',PFR:'Preflop raise: how often a player raises before the flop.','3B':'3-bet: how often a player re-raises a preflop raise.',F3B:'Fold to a 3-bet after raising.',CB:'Continuation bet: the preflop raiser bets the flop.',FCB:'Fold to a continuation bet.',WTSD:'Went to showdown, of the hands that saw a flop.',W$SD:'Won money at showdown, of the hands that reached it.',AF:'Aggression factor: bets and raises per call. Above 2 is aggressive.','bb/100':'Big blinds won per 100 hands.',SRP:'Single-raised pot: one preflop raise, then a call.',Limped:'Nobody raised preflop.','X B C R F':'Your actions in a hand row: check, bet, call, raise, fold. A slash starts the next street (X/X/XC: check preflop, check the flop, check-call the turn).'};
+  root.PokerStats={KEYS,empty,tally,add,summary,pct,fromRecord,TERMS};
   if(typeof module==='object')module.exports=root.PokerStats;
 })(typeof window!=='undefined'?window:globalThis);
