@@ -11,14 +11,16 @@
 // solved ranges keep the shape rule's value.
 //   node tools/preflop/calibrate.cjs --work postflop-work-ev[,more] --out calibration.json
 // Then: node tools/preflop/export.cjs --seats 6 --stack 100 --calibration calibration.json ...
+// With --depths 20,50,100,200 it fits each depth on the spots solved from that depth's charts
+// and writes a calibration set; export.cjs and library.cjs then use the nearest depth's fit.
 const fs=require('fs'),path=require('path');
 const {playability,PLAY}=require('./solve.cjs');
 const table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
 const classes=table.classes,K=classes.length,index=new Map(classes.map((c,i)=>[c,i])),combos=classes.map(c=>c.length===2?6:c[2]==='s'?4:12);
 
-const args={work:'',out:'calibration.json',min:'0.5'};
+const args={work:'',out:'calibration.json',min:'0.5',depths:''};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
-if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5]');process.exit(1);}
+if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200]');process.exit(1);}
 
 // The two players at the flop, from the chart line "seat:kind:target/...": out of position is
 // first after the button (seat 0), and the aggressor is the last raiser (none in a limped pot).
@@ -28,11 +30,14 @@ function roles(key){
  const raises=steps.filter(s=>s.kind==='raise');return{ip,oop,aggressorIsOop:raises.length>0&&raises[raises.length-1].seat===oop};
 }
 
-// Solved shares per spot and side: target[i] and how much data stands behind it.
+// Solved shares per spot and side: target[i] and how much data stands behind it. With a
+// depth, only spots solved from that depth's charts ("NLH cash 6-handed 50bb ...").
+function collect(depth){
 const data=[];let flopCount=0;
 for(const dir of args.work.split(','))for(const id of fs.readdirSync(dir)){
  const meta=path.join(dir,id,'spot.json');if(!fs.existsSync(meta))continue;
- const spot=JSON.parse(fs.readFileSync(meta,'utf8')),r=roles(spot.chart.key),sum={ip:new Float64Array(K),oop:new Float64Array(K)},mass={ip:new Float64Array(K),oop:new Float64Array(K)};let used=0;
+ const spot=JSON.parse(fs.readFileSync(meta,'utf8'));if(depth&&Number((spot.chart.name.match(/ (\d+)bb\b/)||[])[1])!==depth)continue;
+ const r=roles(spot.chart.key),sum={ip:new Float64Array(K),oop:new Float64Array(K)},mass={ip:new Float64Array(K),oop:new Float64Array(K)};let used=0;
  for(const f of fs.readdirSync(path.join(dir,id)).filter(x=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(x))){
   const flop=JSON.parse(fs.readFileSync(path.join(dir,id,f),'utf8'));if(!flop.evs)continue;used++;
   for(const side of ['ip','oop'])for(const [c,ev]of Object.entries(flop.evs[side])){const i=index.get(c);if(i===undefined)continue;sum[side][i]+=flop.weight*(spot.pot/2+ev)/spot.pot;mass[side][i]+=flop.weight;}
@@ -47,7 +52,8 @@ for(const dir of args.work.split(','))for(const id of fs.readdirSync(dir)){
   data.push({spot:id,side,ip:side==='ip',ini,target,weight,oppMass});
  }
 }
-if(!data.length){console.log('No solved flops with EVs found in '+args.work+'.');process.exit(1);}
+return{data,flopCount};
+}
 
 const C=table.compatibility.map(r=>r.map(x=>x/1225)),E=table.equity;
 // Predicted pot share of every class for one datum.
@@ -58,9 +64,11 @@ function predict(d,g,rho,iota,play,out){
   out[i]=seen>0?won/seen:0;}
  return out;
 }
-function loss(g,rho,iota,play){let s=0,w=0;const out=new Float64Array(K);for(const d of data){predict(d,g,rho,iota,play,out);for(let i=0;i<K;i++)if(d.weight[i]){const x=out[i]-d.target[i];s+=d.weight[i]*x*x;w+=d.weight[i];}}return Math.sqrt(s/w);}
+function loss(data,g,rho,iota,play){let s=0,w=0;const out=new Float64Array(K);for(const d of data){predict(d,g,rho,iota,play,out);for(let i=0;i<K;i++)if(d.weight[i]){const x=out[i]-d.target[i];s+=d.weight[i]*x*x;w+=d.weight[i];}}return Math.sqrt(s/w);}
 
-const base=classes.map(c=>playability(c,PLAY)),total=new Float64Array(K);for(const d of data)for(let i=0;i<K;i++)total[i]+=d.weight[i];
+const base=classes.map(c=>playability(c,PLAY));
+function fit({data,flopCount}){
+const total=new Float64Array(K);for(const d of data)for(let i=0;i<K;i++)total[i]+=d.weight[i];
 const maxTotal=Math.max(...total),fitted=i=>total[i]>=Number(args.min)/100*maxTotal;
 function fitPlay(g,rho,iota){
  const play=Float64Array.from(base),out=new Float64Array(K);
@@ -74,14 +82,24 @@ function fitPlay(g,rho,iota){
  return play;
 }
 
-const before=loss(1.2,.12,.06,base);let best=null;
+const before=loss(data,1.2,.12,.06,base);let best=null;
 for(const g of [1,1.1,1.2,1.3,1.4,1.6])for(const rho of [.04,.08,.12,.16,.2,.25])for(const iota of [0,.03,.06,.1,.15]){
- const play=fitPlay(g,rho,iota),l=loss(g,rho,iota,play);if(!best||l<best.l)best={g,rho,iota,play,l};
+ const play=fitPlay(g,rho,iota),l=loss(data,g,rho,iota,play);if(!best||l<best.l)best={g,rho,iota,play,l};
 }
-const shape=loss(best.g,best.rho,best.iota,base);
+const shape=loss(data,best.g,best.rho,best.iota,base);
 const result={format:'range-lab-preflop-calibration-v1',source:`TexasSolver flop solves (${data.length/2} spots, ${flopCount} flops in ${args.work.split(',').map(d=>path.basename(d)).join(', ')})`,createdAt:new Date().toISOString(),
  sharpness:best.g,realization:best.rho,initiative:best.iota,play:Object.fromEntries(classes.map((c,i)=>[c,+best.play[i].toFixed(4)])),
  fit:{rmseDefault:+before.toFixed(5),rmseShapeAtFittedFactors:+shape.toFixed(5),rmseFitted:+best.l.toFixed(5),classesFitted:classes.filter((_,i)=>fitted(i)).length}};
-fs.writeFileSync(args.out,JSON.stringify(result,null,1));
-console.log(`${result.source}. Pot-share error (RMS): default model ${(100*before).toFixed(2)}%, fitted ${(100*best.l).toFixed(2)}%. Sharpness ${best.g}, position x${(1+best.rho).toFixed(2)}/x${(1-best.rho).toFixed(2)}, initiative x${(1+best.iota).toFixed(2)}, playability fitted for ${result.fit.classesFitted} classes. Wrote ${args.out}.`);
+console.log(`${result.source}. Pot-share error (RMS): default model ${(100*before).toFixed(2)}%, fitted ${(100*best.l).toFixed(2)}%. Sharpness ${best.g}, position x${(1+best.rho).toFixed(2)}/x${(1-best.rho).toFixed(2)}, initiative x${(1+best.iota).toFixed(2)}, playability fitted for ${result.fit.classesFitted} classes.`);
 for(const c of ['AA','KK','AKs','AKo','A7s','A5s','KJs','KQo','JTs','76s','54s','22','T8o','72o'])console.log('  '+c.padEnd(4)+' playability '+base[index.get(c)].toFixed(3)+' -> '+best.play[index.get(c)].toFixed(3));
+return result;
+}
+
+// One fit, or a set with a fit per depth. Charts shallower than minStack (push/fold) keep the
+// default model; the others take the fit of the nearest depth (by ratio).
+let out;
+if(args.depths){
+ const buckets=[];for(const depth of args.depths.split(',').map(Number)){const d=collect(depth);if(!d.data.length){console.log(`No solved ${depth}bb flops with EVs found in ${args.work}.`);process.exit(1);}console.log(depth+'bb:');buckets.push({depth,...fit(d)});}
+ out={format:'range-lab-preflop-calibration-set-v1',createdAt:new Date().toISOString(),minStack:15,buckets};
+}else{const d=collect(0);if(!d.data.length){console.log('No solved flops with EVs found in '+args.work+'.');process.exit(1);}out=fit(d);}
+fs.writeFileSync(args.out,JSON.stringify(out,null,1));console.log('Wrote '+args.out+'.');

@@ -16,8 +16,16 @@ const P=require('../../studio/preflop.js');
 function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0,calibration=null}){
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;rake=mtt?0:rake;
  if(game==='plo')return{seats,stack,ante,rake,rakeCap,limp:!!limp,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
- const cal=calibration?JSON.parse(fs.readFileSync(calibration,'utf8')):null;
+ const cal=pickCalibration(calibration?JSON.parse(fs.readFileSync(calibration,'utf8')):null,stack);
  return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{},...cal?{realization:cal.realization,initiative:cal.initiative,sharpness:cal.sharpness,playTable:cal.play,calibrated:cal.source}:{}};
+}
+
+// A calibration set (calibrate.cjs --depths) holds one fit per depth: a chart takes the fit of
+// the nearest depth by ratio (150bb the 200bb fit), and one under the set's minStack none.
+function pickCalibration(cal,stack){
+ if(!cal||cal.format!=='range-lab-preflop-calibration-set-v1')return cal;if(stack<cal.minStack)return null;
+ const b=cal.buckets.slice().sort((x,y)=>Math.abs(Math.log(stack/x.depth))-Math.abs(Math.log(stack/y.depth))||y.depth-x.depth)[0];
+ return{...b,source:b.source+`, ${b.depth}bb fit`};
 }
 
 // Rows are rounded to 4 decimals; the largest entry absorbs the rounding error.

@@ -7,6 +7,8 @@
 //   node tools/postflop/library.cjs solve --charts preflop-library.json.gz --spots btn-bb --flops 100 --out postflop-work
 //   node tools/postflop/library.cjs bundle --out postflop-work
 //   node tools/postflop/library.cjs list
+// --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
+// --limit N stops after the first N unsolved flops (to time one).
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
 const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),L=require('../../studio/local-solver.js'),Lib=require('../../studio/postflop-library.js'),F=require('./flops.cjs'),C=G.Core;
 
@@ -32,11 +34,16 @@ const SPOTS={
  'hu-limp':{label:'Heads-up 100bb · button limps, BB checks',chart:'NLH cash 2-handed 100bb',...line(2,['call','check'])},
  'hu-3bet':{label:'Heads-up 100bb · button opens, BB 3-bets, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','call'])},
 };
+// The same lines at other depths, for tools/preflop/calibrate.cjs: "<id>-<depth>bb" on that
+// depth's chart (btn-bb-50bb). A line that does not reach the flop at a depth (a 3-bet that
+// is all-in) fails in prepare.
+const DEPTHS=[20,50,200];
+for(const [id,s]of Object.entries(SPOTS))for(const d of DEPTHS)SPOTS[id+'-'+d+'bb']={...s,label:s.label.replace('100bb',d+'bb'),chart:s.chart.replace(/100bb$/,d+'bb')};
 // One bet size per street, raises only on the flop (all-in after that), no
 // donk bets: the tree a 100bb flop fits in about 5 GB and solves in minutes.
 const TREE={flop:{bet:[33],raise:[66]},turn:{bet:[66],raise:[]},river:{bet:[75],raise:[]},allinThreshold:.67};
 
-const args={cmd:process.argv[2]||'help',charts:path.join(__dirname,'charts-100bb.json.gz'),spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',name:'Citrus Poker postflop library'};
+const args={cmd:process.argv[2]||'help',charts:path.join(__dirname,'charts-100bb.json.gz'),spots:'btn-bb',flops:'100',out:'postflop-work',threads:String(os.cpus().length),accuracy:'1',iterations:'200',solver:path.join(__dirname,'..','local-solver','TexasSolver','install','console_solver'),timeout:'7200',jobs:'1',name:'Citrus Poker postflop library'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}
@@ -96,7 +103,7 @@ function classEvs(tree){
 }
 
 async function solve(){
- const packs=loadCharts(args.charts),ids=args.spots.split(','),flops=args.flops==='all'?F.all():F.subset(Number(args.flops));
+ const packs=loadCharts(args.charts),ids=args.spots.split(','),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   const spot=prepare(id,packs),dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
   fs.writeFileSync(path.join(dir,'spot.json'),JSON.stringify({id,label:spot.label,chart:{name:spot.pack.name,key:spot.range.key},pot:spot.pot,stack:spot.stack,tree:TREE,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop},null,1));
@@ -106,6 +113,10 @@ async function solve(){
    // stopped above that exploitability (% of pot), for example with more iterations,
    // or --need-evs 1 asks for those saved without per-class EVs.
    const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)){const redo=Number(args['redo-above']);let old=null;try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!(redo>0&&old&&old.exploitability>redo)&&!(args['need-evs']==='1'&&old&&!old.evs))continue;}
+   tasks.push({id,spot,f,file});
+  }
+ }
+ const one=async({id,spot,f,file})=>{
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),stats=await run(L.input(s,{threads:Number(args.threads),output:'out.json'}),work);
@@ -114,8 +125,10 @@ async function solve(){
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
    }catch(error){console.log(id+' '+f.key+' failed: '+error.message);}
    finally{fs.rmSync(work,{recursive:true,force:true});}
-  }
- }
+ };
+ if(Number(args.limit)>0)tasks.splice(Number(args.limit));
+ const worker=async()=>{while(tasks.length)await one(tasks.shift());};
+ await Promise.all(Array.from({length:Math.max(1,Number(args.jobs)|0)},worker));
 }
 
 function bundle(){
@@ -132,5 +145,5 @@ function bundle(){
 if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(e.message);process.exit(1);});
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1]');}
+else console.log('Usage: library.cjs solve|bundle|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s]');}
 module.exports={SPOTS,TREE,prepare,spec,nodes};

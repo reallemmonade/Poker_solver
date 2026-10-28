@@ -1,0 +1,73 @@
+#!/bin/bash
+# Preflop realization calibration at every depth, then the NLH flop library on the result.
+#  1. Pass 1: the 15 NLH flop spots at 20, 50, 100 and 200bb (the 3-bet pots are all-in at 20bb),
+#     36 flops each with per-class EVs, on the v4 charts; one realization fit per depth.
+#  2. Pass 2: the same spots on 6-max and heads-up cash charts rebuilt with the pass-1 fits; fit
+#     again on both passes.
+#  3. preflop-library-v6-calibrated.json.gz: every NLH chart from 20 to 1000bb (2-9 handed, cash
+#     and MTT) rebuilt with the nearest depth's fit; 10bb push/fold and PLO charts kept from v4.
+#  4. The NLH flop library on the v6 ranges, then check.cjs, verify-import and the reference spots.
+# Every step resumes: solved flops, fits and charts already written are kept.
+#   CAL_WORK=~/cal JOBS=12 THREADS=4 bash tools/calibration/smart-calibration.sh
+# $CAL_WORK must hold preflop-library-v4.json.gz; ev1/ may already hold pass-1 flops.
+set -u
+R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
+TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
+export NODE_OPTIONS=--max-old-space-size=65536
+cd "$R" || exit 1
+[ -f "$V4" ] && [ -x "$TSE" ] || { echo "Needs $V4 and $TSE"; exit 1; }
+say(){ echo "$(date -u '+%F %T') $*"; }
+
+SRP=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hu-srp,hu-3bet
+LIMP=sb-bb-limp,hu-limp
+at(){ # spots depth: ids at that depth (100bb ids carry no suffix)
+  local out=() id; for id in ${1//,/ }; do
+    if [ "$2" = 100 ]; then out+=($id); elif [ "$2" = 20 ] && [[ $id == *3bet ]]; then :; else out+=($id-$2bb); fi
+  done; (IFS=,; echo "${out[*]}")
+}
+all(){ local d s=""; for d in 20 50 100 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+solve(){ # charts out spots flops iterations [more args]
+  node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:6}" || say "FAILED solve into $2"
+}
+evs(){ # charts out
+  solve $1 $2 $(all $SRP) 24 150
+  solve $1 $2 $(all $LIMP) 24 400
+}
+fit(){ # work out
+  [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --out $2 || { say "FAILED calibrate $2"; exit 1; }
+}
+charts(){ # calibration dir [library.cjs args]: built charts plus every other v4 chart, bundled
+  node tools/preflop/library.cjs --out $2 --games nlh --limp 1 --calibration $1 --base $V4 --jobs $CHART_JOBS "${@:3}" | grep -E "Problems|FAILED|Bundled|Kept|charts," ; [ -f $2/preflop-library.json.gz ] || { say "FAILED charts $2"; exit 1; }
+}
+
+say "PASS 1: flop solves with EVs on v4 ($JOBS solves at once, $THREADS threads each)"
+evs $V4 $W/ev1
+fit $W/ev1 $W/set1.json
+say "PASS 1 charts"
+charts $W/set1.json $W/charts1 --seats 2,6 --formats cash --depths 20,50,100,200
+
+say "PASS 2: flop solves with EVs on the pass-1 charts"
+evs $W/charts1/preflop-library.json.gz $W/ev2
+fit $W/ev1,$W/ev2 $W/set2.json
+
+say "V6: every NLH chart with the pass-2 fits"
+charts $W/set2.json $W/charts-v6 --depths 20,50,100,150,200,500,1000
+[ -f $V6 ] || cp $W/charts-v6/preflop-library.json.gz $V6
+node studio/build.cjs --web > /dev/null 2>&1
+node studio/verify-import.cjs $V6 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
+node tools/calibration/refcheck.cjs $V4 $V6
+say "CALIBRATION DONE"
+
+# The NLH flop library on the v6 ranges, as the v4 one was built: 100 flops at 150 iterations,
+# then those above 1.2% of the pot again at 400; limped pots 50 flops at 400.
+say "FLOP LIBRARY on v6"
+F=$W/flop-v6; mkdir -p $F
+solve $V6 $F $SRP 100 150
+solve $V6 $F $LIMP 50 400
+solve $V6 $F $SRP 100 400 --redo-above 1.2
+node tools/postflop/library.cjs bundle --out $F | tail -1
+node tools/postflop/check.cjs --library $F/postflop-library.json.gz --charts $V6 2>&1 | grep -v "^    at" | tail -5
+node studio/verify-import.cjs $V6 $F/postflop-library.json.gz 2>&1 | grep -E "PASS|FAIL|passed|Error" | cut -c1-300
+say "ALL DONE"
