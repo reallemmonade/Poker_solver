@@ -111,14 +111,18 @@
  function shape(config,chipEV=false,rake=true){const f=JSON.parse(G.familyId(config));delete f.stacks;if(chipEV){delete f.payouts;delete f.other;}if(!rake){delete f.rake;delete f.cap;delete f.noFlop;}return JSON.stringify(f);}
  // How a chart fits a table's game: 0 for the same game, 1 for a rake-free chart
  // standing in at a raked cash table (any same-rake chart is preferred), else null.
- function fit(pack,table,cache){const ev=pack.chipEV?1:0;if(cache[ev]===undefined)cache[ev]=shape(table,!!ev);if(packShape(pack)===cache[ev])return 0;if(!(table.rakePct>0)||pack.config.rakePct>0)return null;if(cache[ev+2]===undefined)cache[ev+2]=shape(table,!!ev,false);return shape(pack.config,pack.chipEV,false)===cache[ev+2]?1:null;}
+ function fit(pack,table,cache){const ev=pack.chipEV?1:0;if(cache[ev]===undefined)cache[ev]=shape(table,!!ev);if(packShape(pack)===cache[ev])return 0;if(!(table.rakePct>0)||pack.config.rakePct>0)return tourneyFit(pack,table,cache);if(cache[ev+2]===undefined)cache[ev+2]=shape(table,!!ev,false);return shape(pack.config,pack.chipEV,false)===cache[ev+2]?1:tourneyFit(pack,table,cache);}
+ // 2 for a tournament table whose ante no chart has: a chip-EV chart putting about the same dead money in from
+ // antes (within a factor of 1.6), or, with no ante at all, a rake-free cash chart, which is the same chip-EV game.
+ const deadMoney=c=>c.ante*(c.anteMode==='each'?c.seats:1),looseShape=c=>{const f=JSON.parse(shape(c,true,false));delete f.mode;delete f.ante;delete f.anteMode;return JSON.stringify(f);};
+ function tourneyFit(pack,table,cache){const p=pack.config,a=deadMoney(p),b=deadMoney(table);if(table.mode!=='icm'||!(pack.chipEV||p.mode==='cash'&&!(p.rakePct>0))||(a||b)&&!(a>0&&b>0&&Math.abs(Math.log(a/b))<=Math.log(1.6)))return null;if(cache[4]===undefined)cache[4]=looseShape(table);return looseShape(p)===cache[4]?2:null;}
   // A pack's shape never changes; the table's two shapes are computed once per lookup.
   const packShapes=new WeakMap();function packShape(pack){let s=packShapes.get(pack);if(s===undefined){s=shape(pack.config,pack.chipEV);packShapes.set(pack,s);}return s;}
  const topRaise=l=>Math.min(l.allInTo,l.maxRaiseTo);
  function nearest(packs,hand,controlActions=[],tolerance=1.6){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
   const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
-  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null||best&&gap+f>=best.score)continue;best={pack,gap,chart,score:gap+f,rakeFree:f===1};}
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null||best&&gap+f>=best.score)continue;best={pack,gap,chart,score:gap+f,rakeFree:f===1,tourney:f===2};}
   if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
   // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
   // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
@@ -138,7 +142,7 @@
   const total=sum(reference);if(!(total>0)||actions.length<2)return null;result.actions=actions;result.reference=reference.map(p=>p/total);
   [result.actions,result.reference]=ordered(result.actions,result.reference);result.probs=result.reference;
   if(sizeMatch.length){result.sizeMatch=sizeMatch;result.referenceSource.name+=' · earlier raise sizes mapped to the chart\'s: '+sizeMatch.map(m=>m.actual+' → '+m.chart+' bb').join(', ');result.referenceKey+='|sizes:'+sizeMatch.map(m=>m.actual+'>'+m.chart).join(',');}
-  const standIn=best.pack.chipEV&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
+  const standIn=(best.pack.chipEV||best.tourney)&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.tourney&&(deadMoney(best.pack.config)!==deadMoney(table)||table.ante>0&&best.pack.config.anteMode!==table.anteMode)){result.anteStandIn=true;result.referenceSource.name+=' · chart ante differs from this table\'s';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
  }
  // Postflop starting ranges from a chart: replays the preflop line in the
