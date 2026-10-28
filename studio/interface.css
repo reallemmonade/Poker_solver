@@ -68,3 +68,28 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
  .ui-app .ui-live-grid .ui-table-pane .felt{flex:1 1 auto;height:auto;min-height:300px;margin:12px 0 8px}
  .ui-app .ui-live-grid #playActions:not(:empty),.ui-app .ui-live-grid #playActions:empty~.ui-session-line{position:static;box-shadow:none;padding:4px 0}
 }
+/* Earlier hands: filters, list and insights in the History pane */
+.hdb-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:0 0 6px}
+.hdb-bar select,.hdb-body select{font:inherit;font-size:12px;padding:6px 4px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);min-width:0}
+.hdb-sum{font-size:12px;color:var(--muted);margin:0 0 4px}
+.hdb-row{display:flex;align-items:center;gap:8px;width:100%;padding:8px 2px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.hdb-row b{min-width:3.2em}.hdb-row span{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdb-row em,.hdb-leaks em{font-style:normal;font-variant-numeric:tabular-nums}
+.hdb-row:hover{background:var(--accent-soft)}
+.hdb-flag{width:7px;height:7px;border-radius:50%;background:var(--gold);flex:none}
+.hdb-up{color:var(--green)}.hdb-down{color:var(--red)}
+.hdb-more{margin:8px 0;padding:6px 10px;font-size:12px}
+.hdb-insights{margin-top:10px}.hdb-body h3{font-size:12px;color:var(--muted);margin:12px 0 4px;font-weight:600}
+.hdb-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.hdb-kpis span,.hud-grid span{display:flex;flex-direction:column;font-weight:700;font-variant-numeric:tabular-nums}
+.hdb-kpis small,.hud-grid small{font-size:10px;font-weight:500;color:var(--muted);letter-spacing:.03em}
+.hdb-leaks{margin:0;padding-left:18px;font-size:13px}.hdb-leaks li{padding:3px 0}.hdb-leaks li{display:list-item}.hdb-leaks em{float:right;color:var(--muted)}
+.hdb-body select{margin:12px 0 4px}
+.hdb-table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.hdb-table th{font-weight:500;color:var(--muted);text-align:right;padding:4px}.hdb-table td{padding:5px 4px;text-align:right;border-top:1px solid var(--line)}
+.hdb-table th:first-child,.hdb-table td:first-child{text-align:left}
+/* Seat stats popup */
+.hud-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 12px}
+.hud-pop{position:fixed;z-index:70;min-width:168px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;pointer-events:none}
+.hud-head{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px}.hud-head span{color:var(--muted);font-size:11px}
+#table [data-seat]{cursor:pointer}
