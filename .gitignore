@@ -47,6 +47,8 @@
 !/tools/postflop/charts-100bb.json.gz
 !/studio/
 !/studio/app.js
+!/studio/action-bar.js
+!/studio/action-bar.css
 !/studio/bots.js
 !/studio/build.cjs
 !/studio/build-friends.cjs
