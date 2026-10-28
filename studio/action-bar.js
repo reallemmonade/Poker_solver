@@ -9,7 +9,10 @@ const ActionBar=(()=>{
   function snap(x,r){const step=x>=25?.5:x>=5?.1:.01;let v=Math.round(x/step)*step;v=+v.toFixed(2);return Math.max(r.min,Math.min(r.max,v));}
   function presets(r){
     // The sizes the solver has an answer for at this decision, when the caller knows them; the slider covers the rest.
-    if(Array.isArray(r.solved))return [...new Set(r.solved.map(t=>Math.max(r.min,Math.min(r.max,+(+t).toFixed(2)))))].sort((a,b)=>a-b).map(t=>({label:t>=r.allIn-1e-9?'All-in':r.preflop?(r.currentBet<=r.bb?num(t/r.bb)+'x':num(t)+' BB'):Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
+    // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
+    // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot. A lone size is not shown as a
+    // button: it is already the starting amount.
+    if(Array.isArray(r.solved))return [...new Set(r.solved.map(t=>Math.max(r.min,Math.min(r.max,+(+t).toFixed(2)))))].sort((a,b)=>a-b).map(t=>({label:t>=r.allIn-1e-9?'All-in':r.preflop?num(t/(r.currentBet<=r.bb?r.bb:r.currentBet))+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
     // Preflop before anyone raises, sizes are big-blind multiples; otherwise fractions of the pot after calling.
     if(r.preflop&&r.currentBet<=r.bb)return[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>({label,target:snap(m*r.bb,r)}));
     return[.25,.4,.66,.88].map(p=>({label:Math.round(p*100)+'%',target:snap(r.currentBet+p*(r.pot+r.toCall),r)}));
@@ -24,7 +27,7 @@ const ActionBar=(()=>{
     if(box.dataset.abSig!==sig){
       box.dataset.abSig=sig;box.classList.add('ab-bar');box.classList.remove('ab-waiting');
       const left=o.fold?'Fold':'Check / Fold',middle=o.check?'Check':(o.callAllIn?'All-in':'Call')+' <span>'+bbText(o.toCall)+'</span>';
-      box.innerHTML=(r?`<div class="ab-sizing">${presets(r).length?`<div class="ab-presets">${presets(r).map((p,i)=>`<button type="button" class="ab-preset" data-ab-preset="${i}" aria-label="${p.label} · ${num(p.target)} bb">${p.label}</button>`).join('')}</div>`:''}<input class="ab-amount" type="text" inputmode="decimal" autocomplete="off" aria-label="${r.kind==='raise'?'Raise to':'Bet'} amount in bb"><input class="ab-slider" type="range" min="0" max="1000" step="1" aria-label="${r.kind==='raise'?'Raise':'Bet'} size slider"></div>`:'')+
+      box.innerHTML=(r?`<div class="ab-sizing">${presets(r).length>1?`<div class="ab-presets">${presets(r).map((p,i)=>`<button type="button" class="ab-preset" data-ab-preset="${i}" aria-label="${p.label} · ${num(p.target)} bb">${p.label}</button>`).join('')}</div>`:''}<input class="ab-amount" type="text" inputmode="decimal" autocomplete="off" aria-label="${r.kind==='raise'?'Raise to':'Bet'} amount in bb"><input class="ab-slider" type="range" min="0" max="1000" step="1" aria-label="${r.kind==='raise'?'Raise':'Bet'} size slider"></div>`:'')+
         `<div class="ab-main${r?'':' two'}"><button type="button" class="btn ab-big" data-ab="fold">${left}</button><button type="button" class="btn ab-big" data-ab="call">${middle}</button>${r?'<button type="button" class="btn ab-big ab-bet" data-ab="bet"></button>':''}</div>`+(o.note?`<div class="small muted ab-note">${esc(o.note)}</div>`:'');
       box.querySelector('[data-ab="fold"]').onclick=()=>o.fold?o.onFold():o.onCheck();
       box.querySelector('[data-ab="call"]').onclick=()=>o.check?o.onCheck():o.onCall();
