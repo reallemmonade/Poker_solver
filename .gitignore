@@ -57,6 +57,8 @@
 !/studio/friends.js
 !/studio/game.js
 !/studio/history.js
+!/studio/hand-stats.js
+!/studio/hand-db.js
 !/studio/index.html
 !/studio/apple-touch-icon.png
 !/studio/icon-192.png
