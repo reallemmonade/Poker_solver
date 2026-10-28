@@ -112,8 +112,8 @@ function initInterface(){
  const controls=analysisPane.querySelector('.ui-analysis-controls');controls.append($('autoAnalyze').closest('label'),$('analyze'),$('spotStop'));const confirm=create('div','spot-confirm hide');confirm.id='spotConfirm';controls.after(confirm);$('autoAnalyze').closest('label').lastChild.textContent=' Auto-analyze';
  const grading=details('Decision recording'),gradeLabel=$('gradeEvery').closest('label');gradeLabel.lastChild.textContent=' Record an assessment when I act (runs in the background; play continues)';grading.append(gradeLabel);settingsDialog.querySelector('.ui-dialog-content').prepend(grading);
  const alert=create('div','ui-analysis-alert');alert.id='uiAnalysisAlert';analysisPane.append(alert,frequencies);
- const resultDetails=details('Action values');resultDetails.id='uiResultDetails';resultDetails.append($('playFeedback'));analysisPane.append(resultDetails,spotSettings);
- spotSettings.querySelector('summary').textContent='Analysis inputs & accuracy';
+ const resultDetails=details('Action values');resultDetails.id='uiResultDetails';resultDetails.append($('playFeedback'));analysisPane.append(resultDetails);settingsDialog.querySelector('.ui-dialog-content').append(spotSettings);
+ spotSettings.querySelector('summary').textContent='Analysis inputs & solver on your Mac';
  const exportRow=create('div','row gap');exportRow.append($('spotExport'));analysisPane.append(exportRow);
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones
  // the three panes sit side by side and you swipe between them, so the table screen holds only the game.
@@ -205,7 +205,7 @@ function initInterface(){
   document.body.dataset.format=$('mode').value;document.body.dataset.playSeats=String(h?.n||0);$('uiNotices').textContent=$('status').classList.contains('error')?$('status').textContent:'';
   if(h){$('uiHandLine').textContent=compactLine(h);const names=seatNames(h,state.hero);$('handLog').innerHTML=[...historyLog(h.log).map(e=>eventLabel(e,names)),...showdownLines(h,names),...handResultLines(h,names)].map(line=>'<div>'+esc(line)+'</div>').join('');renderPaneHands();
    $('uiCustomBet').hidden=$('customBet').classList.contains('hide');$('uiShowHistory').disabled=false;
-   const same=!h.done&&ui.feedbackKey===PokerSpot.publicKey(observedData(h)),assessing=state.job==='spotSolve'&&!!state.pending?.background,solving=!assessing&&state.job==='spotSolve'&&!['quiz','quizPrepare','review'].includes(state.pending?.kind);$('uiResultDetails').hidden=(!ui.feedbackKey||same&&ui.feedbackSupported===false)&&!solving&&!assessing;$('uiResultDetails').querySelector('summary').textContent=assessing?'Assessing your previous action…':solving?'Solving this position…':same?'Action values':'Previous decision details';if(solving)$('uiResultDetails').open=true;
+   const same=!h.done&&ui.feedbackKey===PokerSpot.publicKey(observedData(h)),assessing=state.job==='spotSolve'&&!!state.pending?.background,solving=!assessing&&state.job==='spotSolve'&&!['quiz','quizPrepare','review'].includes(state.pending?.kind);$('uiResultDetails').hidden=!(solving||assessing||ui.feedbackKey&&same&&ui.feedbackSupported!==false);$('uiResultDetails').querySelector('summary').textContent=assessing?'Assessing your previous action…':solving?'Solving this position…':same?'Action values':'Previous decision details';if(solving)$('uiResultDetails').open=true;
    const result=h.done?null:activeSpotResult(h);
    if(!result&&$('currentPolicy').textContent.includes('Ready to solve this position'))$('currentPolicy').querySelector('.notice')?.classList.replace('notice','ui-ready-hint');
   }

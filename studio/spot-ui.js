@@ -54,7 +54,10 @@ function spotPlan(hand){
 function unsolvableReason(hand){
  if(!hand||hand.done)return '';const live=hand.living().length;
  if(hand.street===0)return 'No preflop chart covers this line.';if(live>2)return 'Too many players left to solve.';
- if(hand.config.variant==='NLH')return 'Turn on the solver on your Mac to solve flops and turns.';return 'Too big to solve here.';
+ if(hand.config.variant==='NLH'&&hand.street===1){let range=null;try{range=PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,hand.actionLog);}catch{}
+  const solved=!!range&&postflopLibrary.libraries.some(l=>l.spots.some(s=>s.chart.key===range.key));
+  return (solved?'Your hand is outside the solved range for this line.':'This line is not in the flop library yet.')+' The solver on your Mac (Settings) can solve it.';}
+ if(hand.config.variant==='NLH')return 'The solver on your Mac (Settings) can solve flops and turns.';return 'Too big to solve here.';
 }
 function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+' s':'about '+Math.round(seconds/60)+' min';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
