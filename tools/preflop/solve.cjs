@@ -62,6 +62,8 @@ function matvec(M,v,out){
 class Solver{
  constructor(options){
   this.tree=Tree.build(options);this.o=this.tree.options;this.n=this.o.seats;this.m=model(this.o);this.K=this.m.K;this.M=matrices(this.o,this.m);this.t=0;
+  // 3-bet and bigger flop pots may use their own realization (tree.cjs reraised).
+  const r=this.o.reraised;this.M3=r&&this.m.variant==='NLH'?matrices({...this.o,...r},{...this.m,play:r.playTable?this.m.classes.map((c,i)=>r.playTable[c]??this.m.play[i]):this.m.play}):this.M;
   const K=this.K,w=this.m.weight;this.mass=v=>{let s=0;for(let i=0;i<K;i++)s+=w[i]*v[i];return s;};
   for(const node of this.tree.nodes){const A=node.actions.length,K=this.K;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
   this.ones=new Float64Array(this.K).fill(1);
@@ -96,7 +98,7 @@ class Solver{
   }
   const q=p===ipSeat?oopSeat:ipSeat;let f=1;
   for(let k=0;k<this.n;k++)if(k!==p&&k!==q&&reach[k]!==this.ones)f*=this.mass(reach[k]);
-  const M=this.M,share=node.type==='allin'?M.allin:node.aggressor===oopSeat?(p===ipSeat?M.ipCaller:M.oopRaiser):p===ipSeat?M.ip:M.oop;
+  const M=node.raises>=2?this.M3:this.M,share=node.type==='allin'?M.allin:node.aggressor===oopSeat?(p===ipSeat?M.ipCaller:M.oopRaiser):p===ipSeat?M.ip:M.oop;
   const won=matvec(share,reach[q],new Float64Array(K)),seen=matvec(this.M.C,reach[q],new Float64Array(K));
   // Low stack-to-pot flop pots blend in all-in equity (tree.cjs commit).
   if(node.commit){const all=matvec(this.M.allin,reach[q],new Float64Array(K));for(let i=0;i<K;i++)won[i]+=node.commit*(all[i]-won[i]);}
