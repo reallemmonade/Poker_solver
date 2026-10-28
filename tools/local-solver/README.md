@@ -125,6 +125,16 @@ The solver prints `Iter: N` and `Total exploitability X precent` lines while it 
 - spec validation;
 - an end-to-end solve through the bridge.
 
+## Solves sent from your phone
+
+A phone can't reach this bridge, so when you tap **Solve this spot** on a spot only the Mac can solve, the phone queues it in your account instead. The bridge collects queued spots, solves them one at a time and syncs each answer back, so it appears on the phone a few seconds after the solve ends.
+
+- **Linking:** open the app on this computer once while signed in, with **Solver on your Mac** on. The app hands the bridge your account (`POST /link`). The bridge keeps it in `~/.citrus-poker-bridge.json` (readable only by you; `CITRUS_BRIDGE_LINK` picks another file), and `/health` shows `linkedUser`.
+- **Queue:** every 20 seconds the bridge pulls your account's changes and runs the oldest queued `solvejob-…` row through its own endpoints (`queue.cjs`, `queue-worker.cjs`). It marks each job running, then done or failed, and writes a done job's answer as a saved spot.
+- **Heartbeat:** every 3 minutes the bridge posts a `macsolver` row with the time, its threads and the computer's load. The phone uses it to tell you whether the Mac is online or busy, and adjusts the time estimate to match.
+- A solve started from the app on this computer always goes first. A queued job that finds the solver busy waits for the next round.
+- After updating the bridge files, restart the bridge. It reads the saved link and picks up where it left off.
+
 ## Licence
 
 TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO solver is part of this project.
