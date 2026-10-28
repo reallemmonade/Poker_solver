@@ -39,6 +39,7 @@
 !/tools/postflop/library.cjs
 !/tools/postflop/flops.cjs
 !/tools/postflop/check.cjs
+!/tools/postflop/check-turn.cjs
 !/tools/postflop/plo-library.cjs
 !/tools/postflop/run-plo-library.command
 !/tools/postflop/run-library.command

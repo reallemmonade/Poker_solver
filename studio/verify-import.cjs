@@ -1,9 +1,9 @@
 'use strict';
 // Imports a real chart bundle and flop library through the app's own file input, then checks lookups and a reload.
-//   node studio/build.cjs --web && node studio/verify-import.cjs <preflop-library.json.gz> [postflop-library.json.gz]
+//   node studio/build.cjs --web && node studio/verify-import.cjs <preflop-library.json.gz> [postflop-library.json.gz] [turn-<spot>.ctl]
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn}=require('node:child_process'),{pathToFileURL}=require('node:url');
-const studio=__dirname,repo=path.dirname(studio),profile=path.join(repo,'import-check-'+process.pid),[charts,flops]=process.argv.slice(2).map(f=>f&&path.resolve(f));
-if(!charts||!fs.existsSync(charts)||flops&&!fs.existsSync(flops))throw Error('Usage: node studio/verify-import.cjs <preflop-library.json.gz> [postflop-library.json.gz]');
+const studio=__dirname,repo=path.dirname(studio),profile=path.join(repo,'import-check-'+process.pid),[charts,flops,turns]=process.argv.slice(2).map(f=>f&&path.resolve(f));
+if(!charts||!fs.existsSync(charts)||flops&&!fs.existsSync(flops)||turns&&!fs.existsSync(turns))throw Error('Usage: node studio/verify-import.cjs <preflop-library.json.gz> [postflop-library.json.gz] [turn-<spot>.ctl]');
 function findChrome(){
  const env=process.env,local=env.LOCALAPPDATA||'',pw=env.PLAYWRIGHT_BROWSERS_PATH||'';
  const listed=[env.CHROME_PATH,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',local&&path.join(local,'Google/Chrome/Application/chrome.exe'),'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -52,9 +52,18 @@ if(flops){
  const near=await ev(`(()=>{const seatsOf=s=>new Set(s.chart.key.split('/').map(x=>x.split(':')[0])).size,lineOf=s=>s.chart.key.split('/').map(x=>{const [,kind,t]=x.split(':');return{kind,target:+t||undefined};});const spot=postflopLibrary.libraries.flatMap(l=>l.spots).find(s=>/BTN/.test(s.label)&&/BB/.test(s.label)&&!/3-?bet/i.test(s.label))||postflopLibrary.libraries[0].spots[0],rng=G.rng(11);let tried=0,answers=0,labelled=0,first=null;for(let t=0;t<400&&tried<60;t++){const deck=[...Array(52).keys()].sort(()=>rng()-.5),board=deck.slice(0,3),cards=deck.slice(3,spot.game==='PLO4'?7:5);if(spot.flops[PokerPostflopLibrary.canonical(board).key])continue;tried++;const h=new G.Hand(G.normalize({variant:spot.game==='PLO4'?'PLO4':'NLH',seats:seatsOf(spot),button:0,stacks:Array(seatsOf(spot)).fill(100)}),{runout:board,rng:G.rng(2)});for(const a of lineOf(spot))h.act(a);h.holes[h.actor]=cards;const r=postflopLibraryReference(h);if(r){answers++;if(r.solve.library.standIn&&/^Stand-in/.test(r.solve.warning))labelled++;first=first||board.map(G.Core.cardName).join('')+' from '+r.solve.library.flop;}}return{tried,answers,labelled,first}})()`);
  assert.ok(near.answers>0&&near.labelled===near.answers,'Unsolved flops get no labelled stand-in: '+JSON.stringify(near));pass(`Unsolved flops are answered from the nearest solved flop of the same texture: ${near.answers} of ${near.tried} random flops and hands, all labelled as stand-ins (e.g. ${near.first})`);
 }
+// A turn file: the first turn decision after the flop checks through comes from it, and both
+// ranges carry onto the turn from the solved flop frequencies.
+const turnHand=`const spot=turnLibrary.spots[0],same=(a,b)=>a.replace(/Citrus Poker/g,'Range Lab')===b.replace(/Citrus Poker/g,'Range Lab'),pack=preflopLibrary.packs.find(p=>same(p.name,spot.chart.name)),key=spot.flops[0].key,flop=G.Core.cards(key),turn=[...Array(52).keys()].find(c=>!flop.includes(c)&&c%5===2),h=new G.Hand(pack.config,{runout:[...flop,turn],rng:G.rng(3)});for(const x of spot.chart.key.split('/')){const [,kind,t]=x.split(':');h.act({kind,target:+t||undefined});}h.act({kind:'check'});h.act({kind:'check'});`;
+const turnCheck=`(async()=>{${turnHand}const carried=await carriedPostflopRanges(h);if(!carried)return{error:'no carried ranges'};const combos=carried.ranges[h.actor].split(',').map(x=>x.split(':')[0]);let answer=null,tried=0;for(const c of combos.slice(0,40)){h.holes[h.actor]=G.Core.cards(c);tried++;answer=await turnLibraryReference(h);if(answer)break;}return{label:spot.label,key,answer:answer&&{actions:answer.actions.map(a=>a.label),freq:answer.reference,line:answer.solve.library.line},tried}})()`;
+let turnAnswer=null;if(turns){
+ const tb=await pick(turns,/^Loaded turn strategies/);const r=await ev(turnCheck);assert.ok(r&&r.answer&&Math.abs(r.answer.freq.reduce((a,b)=>a+b,0)-1)<1e-9,'No turn answer from the turn file: '+JSON.stringify(r));turnAnswer=r.answer;
+ pass(`Turn file imports (${(tb.ms/1000).toFixed(1)} s) and answers the turn after the flop checks through (${r.label} on ${r.key}: ${r.answer.actions.map((a,i)=>a+' '+(100*r.answer.freq[i]).toFixed(0)+'%').join(', ')}), with ranges carried from the flop`);
+}
 // Reload: everything comes back from the browser's storage.
 t=Date.now();await open();await wait('preflopLibrary.ready!==false&&preflopLibrary.packs.length>0',60000);const back={charts:await ev('preflopLibrary.packs.length'),libraries:await ev('postflopLibrary.libraries.length')};
 assert.equal(back.charts,names.length);if(flops)assert.equal(back.libraries,1);pass(`After a reload ${back.charts} charts${flops?' and the flop library':''} are restored (${((Date.now()-t)/1000).toFixed(1)} s to ready)`);
+if(turns){await wait('turnLibrary.spots.length>0',30000);const r=await ev(turnCheck);assert.deepEqual(r.answer,turnAnswer);pass('After a reload the turn file is restored and gives the same answer');}
 const kk2=await look(six(200),[['fold'],['fold'],['raise',2.5],['fold'],['fold'],['raise',10],['raise',23],['raise',200]],'KsKh');assert.deepEqual(kk2,kk);pass('Restored charts give the same answers');
 assert.deepEqual(errors,[]);console.log(count+' import checks passed.');
 }finally{try{await cmd('Browser.close');}catch{}browser.kill();for(const p of pending.values())clearTimeout(p.timer);try{fs.rmSync(profile,{recursive:true,force:true});}catch{}}}
