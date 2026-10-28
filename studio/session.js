@@ -9,7 +9,7 @@ async function takeOverSession(){if(!liveSession.passive)return;try{const value=
 async function refreshSharedHands(){try{const [hands,grades]=await Promise.all([dbAll('hands'),dbAll('grades')]);state.histories=newestRows(hands,validHandRow).rows;state.grades=newestRows(grades.map(r=>{try{return scrubSavedGrade(r)}catch{return null}}),validGradeRow).rows;renderSavedHands();renderProgress();}catch{}}
 if(studioChannel)studioChannel.onmessage=event=>{const m=event.data||{};if(m.tab===studioTab)return;if(m.type==='session'&&liveSession.ready)sessionElsewhere();if(m.type==='hands')refreshSharedHands();};
 function cancelSessionNext(){clearTimeout(liveSession.timer);liveSession.timer=null;}
-function beginLiveSession(config=state.config,hero=state.hero){cancelSessionNext();liveSession.rootConfig=G.normalize(config);liveSession.rootHero=hero;liveSession.rootBots=botSettings.seats.slice();liveSession.handNumber=0;state.sessionHands=0;liveSession.message='';}
+function beginLiveSession(config=state.config,hero=state.hero){cancelSessionNext();liveSession.rootConfig=G.normalize(config);liveSession.rootHero=hero;liveSession.rootBots=botSettings.seats.slice();liveSession.handNumber=0;state.sessionHands=0;liveSession.message='';liveSession.level='';}
 // Blind levels shrink every stack by the same factor in whole chips (0.01 bb), keeping the scaled total exact by largest remainder; no stack drops to zero.
 function scaleChips(stacks,factor){const chips=stacks.map(x=>Math.round(x*100)),raw=chips.map(v=>v/factor),out=raw.map(Math.floor);let left=Math.round(chips.reduce((s,v)=>s+v,0)/factor)-out.reduce((s,v)=>s+v,0);for(const i of raw.map((_,i)=>i).sort((a,b)=>(raw[b]-out[b])-(raw[a]-out[a])))if(left-->0)out[i]++;for(let i=0;i<out.length;i++)if(!out[i]){const j=out.indexOf(Math.max(...out));if(out[j]>1)out[j]--;out[i]++;}return out.map(v=>v/100);}
 // Tournament finish for the hero after a completed hand: bust (place and prize), every remaining prize equal (a satellite's
@@ -25,13 +25,13 @@ function nextPersistentSessionConfig(){
  const root=liveSession.rootConfig,rebuy=h.config.mode==='cash'&&$('botRebuy')?.checked!==false&&root?.stacks?.length===h.n&&h.stacks[state.hero]>0,stacks=h.stacks.map((amount,seat)=>rebuy&&seat!==state.hero&&root.stacks[seat]>0&&G.bb(amount)<root.stacks[seat]/2?G.units(root.stacks[seat]):amount),reloaded=stacks.filter((amount,seat)=>amount!==h.stacks[seat]).length;
  const alive=stacks.map((amount,seat)=>amount>0?seat:-1).filter(seat=>seat>=0),finish=tournamentFinish(h);
  if(!alive.includes(state.hero)||alive.length<2||finish){
-  const busted=!alive.includes(state.hero);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';saveBotSettings();liveSession.round++;liveSession.handNumber=0;state.sessionHands=0;liveSession.message=finish?'Tournament finished · restarting with the original setup.':busted?'You busted · restarting with the original setup.':'You won the table · starting a new session.';return G.normalize(liveSession.rootConfig);
+  const busted=!alive.includes(state.hero);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';saveBotSettings();liveSession.round++;liveSession.handNumber=0;liveSession.level='';state.sessionHands=0;liveSession.message=finish?'Tournament finished · restarting with the original setup.':busted?'You busted · restarting with the original setup.':'You won the table · starting a new session.';return G.normalize(liveSession.rootConfig);
  }
  let nextButton=(h.button+1)%h.n;while(!alive.includes(nextButton))nextButton=(nextButton+1)%h.n;
  const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
  state.hero=alive.indexOf(state.hero);remapBotSeats(alive);
- if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1),scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
- liveSession.message=[h.n-alive.length?h.n-alive.length+' opponent(s) eliminated':'',reloaded?reloaded+' bot'+(reloaded>1?'s':'')+' rebought to the starting stack':''].filter(Boolean).join(' · ');return G.normalize(config);
+ let level='';if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1);if(factor>1)level='Blinds up ×'+fmt(factor,2)+' · level '+(1+state.sessionHands/Math.max(1,+$('levelHands').value));const scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
+ liveSession.level=level;liveSession.message=[level,h.n-alive.length?h.n-alive.length+' opponent(s) eliminated':'',reloaded?reloaded+' bot'+(reloaded>1?'s':'')+' rebought to the starting stack':''].filter(Boolean).join(' · ');return G.normalize(config);
 }
 function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootConfig)beginLiveSession();liveSession.handNumber++;}
 function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
@@ -49,7 +49,7 @@ function scheduleSessionNext(){
  liveSession.timer=setTimeout(()=>{liveSession.timer=null;if(state.hand!==hand||!$('play').classList.contains('active')||!$('autoNextHand').checked||playBusy()||state.dirty)return;deal(true);},4500);
 }
 function sessionHandEnded(){
- liveSession.message=tournamentFinish(state.hand)?.message||(state.hand.stacks[state.hero]===0?'You busted. The next hand restarts the original setup.':state.hand.stacks.filter(x=>x>0).length<2?'You won the table. The next hand starts a fresh session.':'');
+ liveSession.message=tournamentFinish(state.hand)?.message||(state.hand.stacks[state.hero]===0?'You busted. The next hand restarts the original setup.':state.hand.stacks.filter(x=>x>0).length<2?'You won the table. The next hand starts a fresh session.':liveSession.level||'');
  saveLiveSession();renderSessionStatus();scheduleSessionNext();
 }
 function saveLiveSession(){
