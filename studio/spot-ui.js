@@ -137,7 +137,8 @@ function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){
 // Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
 async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j))return;const value={...j,status:'cancelled',cancelledAt:Date.now()};spotUI.jobs.set(id,value);try{await dbPut('meta',{id,value});}catch{}citrusAccount.run();watchSolveJobs();if(state.hand)renderPlay();}
 // A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made.
-function cancelStaleSolveJobs(){const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
+// Not before the saved hand is back after a reload: until then the table holds a placeholder deal.
+function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
@@ -145,7 +146,7 @@ function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs
 function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+' min ago':Math.round(m/60)+' h ago';}
 // Between reports the bar keeps moving at the reported rate, and it never steps back when a new report is lower.
 spotUI.shownProgress=new Map();
-function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(j.rowId)||0));spotUI.shownProgress.set(j.rowId,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
+function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,run=j.rowId+' '+j.startedAt,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(run)||0));spotUI.shownProgress.set(run,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
 function jobState(j){
  if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
  if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
@@ -245,13 +246,12 @@ function spotFrequencyHTML(result){
  const solve=result.solve;return'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
 }
 // Each live player's range as a 13x13 grid: pairs on the diagonal, suited above it, offsuit below, each cell
-// shaded by how much of that hand is in the range. Range text is classes ("AKs:0.5") or exact combos ("AhKh:0.5").
+// shaded by how much of that hand is in the range, read with the solver's own parser so typed shorthand (QQ+,
+// A2s-A5s, AKs:50%) shades the same hands the solve used.
 const GRID_RANKS='AKQJT98765432';
 function rangeClassWeights(text){
- const w=new Map(),add=(k,x,n)=>w.set(k,(w.get(k)||0)+x/n);
- for(const raw of String(text||'').split(/[\s,]+/)){if(!raw)continue;const [hand,wt]=raw.split(':'),x=wt===undefined?1:Number(wt);if(!(x>0))continue;
-  if(/^[AKQJT2-9]{2}[so]?$/.test(hand)){const k=hand[0]===hand[1]?hand.slice(0,2):hand;if(k.length===2&&k[0]!==k[1]){add(k+'s',x,1);add(k+'o',x,1);}else w.set(k,Math.max(w.get(k)||0,x));}
-  else if(/^[AKQJT2-9][cdhs][AKQJT2-9][cdhs]$/.test(hand)){const [a,b]=GRID_RANKS.indexOf(hand[0])<=GRID_RANKS.indexOf(hand[2])?[hand[0],hand[2]]:[hand[2],hand[0]];if(a===b)add(a+b,x,6);else if(hand[1]===hand[3])add(a+b+'s',x,4);else add(a+b+'o',x,12);}}
+ const w=new Map();let rows=null;try{rows=PokerSpot.parseRange(text,{hole:2},[]);}catch{}
+ for(const r of rows||[]){const k=G.Core.handClass(r.cards);w.set(k,(w.get(k)||0)+r.weight/(k.length===2?6:k[2]==='s'?4:12));}
  return w;
 }
 // With mix (hand class -> action frequencies, the acting player's whole strategy), each cell splits into the action
@@ -268,7 +268,7 @@ function spotRangesHTML(result){
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));
- const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':local?'Solved on this computer with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
+ const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':local?'Solved with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
  const actionValues=approximate?'<h3>Estimated action values</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>Estimated EV</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest estimate':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' ± '+fmt(1.96*result.se[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':converged?'<h3>Action values from this decision</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>EV</th><th>Estimated cost</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest EV':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' '+esc(result.units)+'</td><td>'+fmt(result.loss[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':'';
  return'<section class="spot-solution"><div class="eyebrow">Analysis of the current position</div><h3>'+title+'</h3>'+(converged?'<p><strong>Highest-EV action: '+esc(best.label)+'</strong>'+(frequent!==result.best?' · most frequent: '+esc(result.actions[frequent].label)+' ('+fmt(result.reference[frequent]*100,1)+'%)':'')+'</p>':approximate||local?'<p><strong>Most frequent action: '+esc(result.actions[frequent].label)+'</strong></p>':'')+spotFrequencyHTML(result)+spotRangesHTML(result)+actionValues+(converged&&grade?'<p><strong>Your action cost: '+fmt(grade.estimatedLoss??grade.loss,3)+' '+esc(result.units)+'</strong></p>':'')+'</section>';
 }
