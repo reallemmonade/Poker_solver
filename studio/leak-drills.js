@@ -13,10 +13,10 @@ function leakClass(g){if(leakDrill.classes.has(g.id))return leakDrill.classes.ge
  leakDrill.classes.set(g.id,c);return c;}
 // Your graded table decisions (of the given hands' facts), newest first. Only grades with a measured cost or a chart frequency count.
 function leakDecisions(facts=factsOf(state.histories)){const out=[];
- for(const f of facts)for(const g of f.grades.slice().reverse()){
+ for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
   const chart=!!g.referenceSource&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
-  out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}
+  out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
  return out;}
 async function leakSolves(){if(leakDrill.solves)return leakDrill.solves;const index=new Map();
  try{for(const row of await dbAll('solves')){try{const k=JSON.parse(row.key)[1];if(typeof k!=='string'||!row.result?.supported||!row.result.actions?.length)continue;if(!PokerPreflop.isResult(row.result)&&!T.assessmentEvidence(row.result).usable)continue;if(!index.has(k))index.set(k,row);}catch{}}}catch{}
@@ -80,7 +80,7 @@ const leakPct=x=>x===null||x===undefined?'–':Math.round(x*100)+'%';
 function renderLeaks(){const box=$('uiLeaks');if(!box)return;const now=Date.now(),drillable=leakDrill.list.filter(leakDrillable),due=drillable.filter(l=>PokerDrills.isDue(leakDrill.deck.cards[l.key],now)).length;
  $('leakCard').hidden=!leakDrill.spot;$('leakHome').hidden=!!leakDrill.spot;$('leakStart').disabled=!drillable.length;$('leakStart').textContent=due?'Drill · '+due+' due':'Drill';
  $('leakList').innerHTML=leakDrill.list.slice(0,8).map(l=>{const card=leakDrill.deck.cards[l.key],ok=drillable.includes(l);return'<li class="'+(ok?'':'leak-off')+'"'+(l.held?' title="Not drilled yet"':'')+'><div><b>'+esc(l.label)+'</b><small>'+fmt(l.cost,1)+' bb · '+l.mistakes+'/'+l.decisions+'</small></div><div class="leak-rates"><span><small>Table</small>'+leakPct(l.hit)+'</span><span><small>Drill</small>'+leakPct(PokerDrills.drillHit(card))+'</span>'+leakDots(card)+'</div></li>';}).join('');
- $('leakEmpty').textContent=leakDrill.list.length?drillable.length?'':leakDrill.list.every(l=>l.held)?'Vs-open spots aren’t drilled yet.':'Solve these spots once in Study to drill them.':leakDrill.graded?'No leaks found in your graded decisions.':$('gradeEvery').checked?'Play hands to find your leaks.':'Turn on Settings → Decision recording to find your leaks.';
+ $('leakEmpty').textContent=leakDrill.list.length?drillable.length?'':leakDrill.list.every(l=>l.held)?'Vs-open spots aren’t drilled yet.':'Solve these spots once in Study to drill them.':leakDrill.graded?'No leaks found in your graded decisions.':!$('gradeEvery').checked?'Turn on Settings → Decision recording to find your leaks.':solverHelpOn()?'Turn off Settings → Solver help, then play. Hands with help on don’t count.':'Play hands to find your leaks.';
  $('leakEmpty').hidden=!$('leakEmpty').textContent;}
 function initLeakDrills(){const v=$('uiLeaks');if(!v||v.dataset.ready)return;v.dataset.ready='1';
  v.innerHTML='<div id="leakHome"><div class="leak-head"><button type="button" class="btn" id="leakStart">Drill</button></div><ol id="leakList" class="leak-list"></ol><p id="leakEmpty" class="help" hidden></p></div>'+
