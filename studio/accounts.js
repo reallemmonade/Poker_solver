@@ -65,7 +65,7 @@ const citrusAccount=(()=>{
   if(!account)return;if(sync.running){sync.again=true;return sync.running;}
   sync.running=(async()=>{let session=null;
    const first=!read(key('citrus-sync-seeded-v1'),false);sync.status='syncing';render();
-   try{if(first)await seed();await push();const got=await pull();session=got.session;sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';
+   try{if(first)await seed();let full=null;await push().catch(e=>{if(e.status!==507)throw e;full=e;});const got=await pull();session=got.session;if(full){sync.status='full';sync.note=full.message;}else{sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';}
     if(got.hands||got.grades)try{refreshSharedHands()}catch{}if(got.solves)try{refreshSavedSpots()}catch{}
     if(got.hands||got.grades||got.solves||got.meta||got.prefs)dispatchEvent(new CustomEvent('citrus-synced',{detail:got}));
     // Settings and preferences from another device apply on a fresh load; reload once after the first sync if no hand is live.
