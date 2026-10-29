@@ -6,17 +6,20 @@
 // price tightening the defence, a smaller one widening it, labelled approximate), and
 // unsolved flops are answered by a labelled stand-in of the same texture. PLO
 // spots answer stored combos from their rows and other hands from a similar one.
+// Each spot's chart is the app's bundled pack of the same name (studio/libraries), else the one in --charts.
 //   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz
-const fs=require('fs'),zlib=require('zlib');
+const fs=require('fs'),zlib=require('zlib'),path=require('path');
 const G=require('../../studio/game.js'),P=require('../../studio/preflop.js'),Lib=require('../../studio/postflop-library.js'),{SPOTS:NLH}=require('./library.cjs'),{SPOTS:PLO}=require('./plo-library.cjs'),SPOTS={...NLH,...PLO},C=G.Core;
-const args={library:'postflop-work/postflop-library.json.gz',charts:require('path').join(__dirname,'charts-100bb.json.gz')};
+const args={library:'postflop-work/postflop-library.json.gz',charts:path.join(__dirname,'charts-100bb.json.gz')};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
-const library=Lib.validate(read(args.library)),charts=read(args.charts),rng=G.rng(99);let pass=0,fail=0;
+const library=Lib.validate(read(args.library)),charts=read(args.charts),rng=G.rng(99),bundled=path.join(__dirname,'../../studio/libraries');let pass=0,fail=0;
+const same=(a,b)=>a.replace(/Citrus Poker/g,'Range Lab')===b.replace(/Citrus Poker/g,'Range Lab'),manifest=fs.existsSync(path.join(bundled,'manifest.json'))?read(path.join(bundled,'manifest.json')).packs:[];
+const chartFor=name=>{const m=manifest.find(p=>same(p.name,name));return m?read(path.join(bundled,m.file)):(charts.packs||[charts]).find(p=>same(p.name,name));};
 const ok=(cond,msg)=>{if(cond)pass++;else{fail++;console.log('FAIL '+msg);}};
 
 for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
- const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name.replace(/Citrus Poker/g,'Range Lab')===spot.chart.name.replace(/Citrus Poker/g,'Range Lab'));if(!def||!raw){console.log('skip '+spot.id);continue;}
+ const def=SPOTS[spot.id],raw=chartFor(spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
  const pack=P.validate(raw),packs=[pack];
  for(const [key,flop]of Object.entries(spot.flops).slice(0,5)){
   // A real board: the canonical flop under a random suit permutation.
@@ -62,10 +65,10 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
   if(++tried>=5)break;
  }
 }
-// PLO spots (--charts must hold the PLO chart): a stored combo answers from its
+// PLO spots: a stored combo answers from its
 // own row; any other hand answers from the most similar stored combo, labelled.
 for(const spot of library.spots.filter(s=>s.game==='PLO4')){
- const def=SPOTS[spot.id],raw=(charts.packs||[charts]).find(p=>p.name.replace(/Citrus Poker/g,'Range Lab')===spot.chart.name.replace(/Citrus Poker/g,'Range Lab'));if(!def||!raw){console.log('skip '+spot.id);continue;}
+ const def=SPOTS[spot.id],raw=chartFor(spot.chart.name);if(!def||!raw){console.log('skip '+spot.id);continue;}
  const pack=P.validate(raw);
  for(const [key,flop]of Object.entries(spot.flops).slice(0,3)){
   const perm=[0,1,2,3].sort(()=>rng()-.5),board=C.cards(key).map(c=>(c&~3)|perm[c&3]),h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});
