@@ -69,9 +69,10 @@ function spotSettings(hand,pending={}){
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
-const TURN_SECONDS=5,RIVER_SECONDS=3,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
+const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
-function solveTimeKey(plan){return plan.route+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'');}
+// v2: the trees with a small bet, a big bet and an overbet (learned ratios from the one-size trees no longer apply).
+function solveTimeKey(plan){return plan.route+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'-v2');}
 function recordSolveTime(plan,seconds){if(!plan||!(seconds>0)||plan.kind==='multiway'||plan.learned)return;const t=solveTimes(),key=solveTimeKey(plan),ratio=seconds/plan.seed,old=t[key];t[key]=old>0?.6*old+.4*ratio:ratio;try{localStorage.setItem('range-lab-solve-times',JSON.stringify(t))}catch{}}
 // How fast this device runs the solvers' kind of work (typed-array arithmetic over scattered indexes), measured in
 // about 0.2 s and kept for a week. The browser river times above were measured where this scores BENCH_REFERENCE
@@ -91,7 +92,7 @@ function spotPlan(hand){
  if(kind!=='multiway'&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
-  const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?16:spr<30&&c.seats>2?110:300;
+  const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
   const base=kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
   plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
