@@ -22,13 +22,15 @@ async function leakSolves(){if(leakDrill.solves)return leakDrill.solves;const in
  try{for(const row of await dbAll('solves')){try{const k=JSON.parse(row.key)[1];if(typeof k!=='string'||!row.result?.supported||!row.result.actions?.length)continue;if(!PokerPreflop.isResult(row.result)&&!T.assessmentEvidence(row.result).usable)continue;if(!index.has(k))index.set(k,row);}catch{}}}catch{}
  return leakDrill.solves=index;}
 function leakPacks(l){return preflopLibrary.packs.filter(p=>p.config.seats===l.seats&&p.config.variant===l.variant&&p.config.mode===l.mode);}
-function leakPack(l){const depth=p=>{const s=p.config.stacks.slice().sort((a,b)=>a-b);return s[s.length>>1];};let best=null,gap=Infinity;for(const p of leakPacks(l)){const d=Math.abs(Math.log(depth(p)/l.depth));if(d<gap){gap=d;best=p;}}return gap<Math.log(1.6)?best:null;}
+const leakPackDepth=p=>{const s=p.config.stacks.slice().sort((a,b)=>a-b);return s[s.length>>1];};
+function leakPack(l){let best=null,gap=Infinity;for(const p of leakPacks(l)){const d=Math.abs(Math.log(leakPackDepth(p)/l.depth));if(d<gap){gap=d;best=p;}}return gap<Math.log(1.6)?best:null;}
 function leakDrillable(l){if(l.held||leakDrill.stuck.has(l.key))return false;if(l.street===0&&quizChartTopics.includes(l.topic)&&leakPack(l))return true;return(leakDrill.refs.get(l.key)||[]).some(r=>leakReplay(r));}
 async function refreshLeaks(){
  if(!leakDrill.loaded)leakDrill.loaded=dbAll('meta').then(rows=>{const v=rows.find(r=>r.id==='drillLeaks-v1')?.value;if(PokerDrills.validDeck(v))leakDrill.deck=v;}).catch(()=>{});
  leakDrill.solves=null;leakDrill.live=null;await Promise.all([leakDrill.loaded,leakSolves()]);
  const decisions=leakDecisions();leakDrill.refs=new Map();for(const d of decisions){const k=PokerDrills.keyOf(d);if(!leakDrill.refs.has(k))leakDrill.refs.set(k,[]);leakDrill.refs.get(k).push(d);}
- leakDrill.list=PokerDrills.leaks(decisions);PokerDrills.sync(leakDrill.deck,leakDrill.list);leakDrill.graded=decisions.length;renderLeaks();}
+ // A preflop leak drilled on the nearest chart is labelled with that chart's depth, the stack its drills deal.
+ leakDrill.list=PokerDrills.leaks(decisions).map(l=>{const p=l.street===0&&quizChartTopics.includes(l.topic)?leakPack(l):null;return p?{...l,label:PokerDrills.label({...l,depth:leakPackDepth(p)})}:l;});PokerDrills.sync(leakDrill.deck,leakDrill.list);leakDrill.graded=decisions.length;renderLeaks();}
 function saveLeakDeck(){leakDrill.deck.updatedAt=new Date().toISOString();dbPut('meta',{id:'drillLeaks-v1',value:leakDrill.deck}).catch(()=>{});}
 addEventListener('citrus-synced',e=>{if(!e.detail?.meta)return;leakDrill.loaded=null;if($('uiLeaks')?.dataset.ready)refreshLeaks();});
 function leakPick(list,total){let r=Math.random()*total;for(let i=0;i<list.length;i++)if((r-=list[i].w)<=0)return list[i];return list[list.length-1];}
