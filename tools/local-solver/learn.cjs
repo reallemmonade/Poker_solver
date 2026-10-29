@@ -23,7 +23,7 @@ function check(want){
 // The solve spec: the library's tree (the spot's own, else tools/postflop/library.cjs TREE) to 1% of the pot.
 function spec(want){
  const s=want.spot,tree=s.tree&&s.tree.flop?s.tree:TREE,sizes={};
- for(const who of ['ip','oop']){sizes[who]={};for(const st of ['flop','turn','river'])sizes[who][st]={bet:tree[st].bet.slice(),raise:tree[st].raise.slice(),donk:[]};}
+ for(const who of ['ip','oop']){sizes[who]={};for(const st of ['flop','turn','river']){const t=tree[who]?.[st]||tree[st];sizes[who][st]={bet:t.bet.slice(),raise:t.raise.slice(),donk:[]};}}
  return L.validate({version:1,board:C.cards(want.key).map(C.cardName),pot:s.pot,stack:s.stack,sizes,allinThreshold:tree.allinThreshold??TREE.allinThreshold,rangeIp:s.rangeIp,rangeOop:s.rangeOop,path:[],hero:'2c2d',heroSeat:0,heroIsIp:false,accuracy:1,maxIterations:200});
 }
 const spotFile=id=>path.join(DIR,id,'spot.json'),flopFile=(id,key)=>path.join(DIR,id,key+'.json');

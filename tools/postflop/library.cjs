@@ -14,6 +14,7 @@
 // --reverse 1 works from the last one back, so helper computers can share a run going forward.
 // A tree.json in the --out folder ({flop:{bet:[33,75],raise:[66]},turn:...}) replaces the default bet
 // sizes below (TREE) street by street, so one library can use more sizes than the calibration solves.
+// It may also give one player its own sizes per street: {ip:{turn:{bet:[33,66,150],raise:[]}},oop:{...}}.
 // --turn 1 also saves the turn's first decisions (<flop>.turn.json.gz) on the main lines: check-check,
 // bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.ctl per spot.
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
@@ -123,7 +124,7 @@ function prepare(id,packs){
 }
 
 function spec(spot,board){
- const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(const s of ['flop','turn','river'])sizes[who][s]={bet:TREE[s].bet.slice(),raise:TREE[s].raise.slice(),donk:[]};}
+ const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(const s of ['flop','turn','river']){const t=TREE[who]?.[s]||TREE[s];sizes[who][s]={bet:t.bet.slice(),raise:t.raise.slice(),donk:[]};}}
  return L.validate({version:1,board,pot:spot.pot,stack:spot.stack,sizes,allinThreshold:TREE.allinThreshold,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop,path:[],hero:'2c2d',heroSeat:spot.oop,heroIsIp:false,accuracy:Number(args.accuracy),maxIterations:Number(args.iterations)});
 }
 
