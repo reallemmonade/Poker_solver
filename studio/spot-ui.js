@@ -64,12 +64,14 @@ function spotSettings(hand,pending={}){
 //   Through the bridge on a 3-thread Linux box, where a 3-bet flop took 85-130 s (about 6x the Mac), a
 //   single-raised turn took 15 s and a river 10 s, setup included. PLO flops take about 5 minutes on the Mac
 //   (tools/local-solver/README.md) and turns seconds. Pots with three or more players run the app's own engines
-//   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer.
+//   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer, except
+//   three-way NLH pots, which go to the 3-way solver (tools/multiway-solver): MW3_SECONDS are Mac estimates from
+//   its 4-core Linux measurements (README there), flop, turn and river.
 // - Preflop answers come only from charts, so a line no chart covers has no solve.
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
-const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
+const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[300,120,10],MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
 // v2: the trees with a small bet, a big bet and an overbet (learned ratios from the one-size trees no longer apply).
 function solveTimeKey(plan){return plan.route+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'-v2');}
@@ -88,12 +90,12 @@ function spotPlan(hand){
  const c=hand.config,live=hand.living(),simple=!c.rules.low&&!c.bounties.some(x=>x>0),small=typeof smallMemoryDevice==='function'&&smallMemoryDevice();
  if(hand.street===0)return{route:'none',street:0,reason:'No chart covers this preflop line yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
- const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
- if(kind!=='multiway'&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
+ const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
+ if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
-  const base=kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const base=kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
   plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
   if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user)plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on. Your Mac picks up solves from then on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when your Mac is back.';else if(load>.5)plan.note='Your Mac is busy with other work, so this is slower.';}
@@ -179,7 +181,7 @@ addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{deliverSolveJob()
 function spotSourceStamp(snapshot){return JSON.stringify([snapshot?.format,snapshot?.id,snapshot?.episodes,snapshot?.decisions,snapshot?.createdAt,snapshot?.seedState,snapshot?.config,snapshot?.abstraction]);}
 function spotCacheKey(observed,options,extraAction,snapshot){const parts=['spot-v3',PokerSpot.publicKey(observed),options,extraAction],automatic=options.rangeMode==='auto'&&Array.from({length:observed.config.seats},(_,i)=>String(options.ranges[i]||'').trim()).some(text=>!text||/^auto$/i.test(text));if(automatic&&snapshot?.episodes>0&&observed.actions.length)parts.push(spotSourceStamp(snapshot));return JSON.stringify(parts);}
 function validSpotResult(r){
- if(PokerPreflop.isResult(r))return true;if(r?.solve?.method==='postflop-library')return validActions(r);const q=r?.solve,tree=q?.actionTree,local=['local-texassolver','local-plo'].includes(q?.method);if(!r?.supported||q?.version!==1||!['exact-river','exact-postflop','exact-multiway','sampled-subgame'].includes(q.method)&&!local||!Number.isInteger(q.iterations)||q.iterations<(local?0:1)||!Number.isFinite(q.seconds)||!tree||!(local?['betSizes','raiseSizes']:['betSizes','raiseSizes','openSizes','preflopRaiseMultipliers']).every(k=>Array.isArray(tree[k])&&(local||tree[k].length>0)&&tree[k].length<=4&&tree[k].every(x=>Number.isFinite(x)&&x>0))||!Array.isArray(q.rangeAssumptions)||q.rangeAssumptions.length<2||q.rangeAssumptions.length>9)return false;
+ if(PokerPreflop.isResult(r))return true;if(r?.solve?.method==='postflop-library')return validActions(r);const q=r?.solve,tree=q?.actionTree,local=['local-texassolver','local-plo','local-multiway'].includes(q?.method);if(!r?.supported||q?.version!==1||!['exact-river','exact-postflop','exact-multiway','sampled-subgame'].includes(q.method)&&!local||!Number.isInteger(q.iterations)||q.iterations<(local?0:1)||!Number.isFinite(q.seconds)||!tree||!(local?['betSizes','raiseSizes']:['betSizes','raiseSizes','openSizes','preflopRaiseMultipliers']).every(k=>Array.isArray(tree[k])&&(local||tree[k].length>0)&&tree[k].length<=4&&tree[k].every(x=>Number.isFinite(x)&&x>0))||!Array.isArray(q.rangeAssumptions)||q.rangeAssumptions.length<2||q.rangeAssumptions.length>9)return false;
  if(!q.rangeAssumptions.every(v=>v&&Number.isInteger(v.seat)&&v.seat>=0&&v.seat<9&&typeof v.range==='string'&&typeof v.source==='string'&&Number.isFinite(v.combinations)&&v.combinations>0))return false;
  if(['exact-river','exact-postflop','exact-multiway'].includes(q.method)&&(!q.exact||!Number.isFinite(q.gap)||q.gap<0||!Number.isFinite(q.handRegret)||q.handRegret<0||!Number.isFinite(q.tolerance)||q.tolerance<=0))return false;
  return validActions(r);
@@ -233,7 +235,7 @@ function handleSpotWorkerMessage(message){
 }
 function activeSpotResult(hand){return spotUI.last&&PokerSpot.publicKey(observedData(hand))===spotUI.last.baseKey?spotUI.last.result:null;}
 // Frequencies with no EVs: a solve on the Mac (TexasSolver or the PLO solver) or a precomputed flop library.
-function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','postflop-library'].includes(q?.method));}
+function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','local-multiway','postflop-library'].includes(q?.method));}
 function spotApproximate(result){const q=result?.solve;return !!(result?.supported&&q?.approximate&&q.method==='sampled-subgame'&&!spotCertified(result));}
 function spotCertified(result){const q=result?.solve;return !!(result?.supported&&q?.exact&&['exact-river','exact-postflop','exact-multiway'].includes(q.method)&&Number.isFinite(q.gap)&&Number.isFinite(q.tolerance)&&q.gap<=q.tolerance&&Number.isFinite(q.handRegret)&&q.handRegret<=(q.handTolerance??q.tolerance));}
 function spotFrequencyHTML(result){
@@ -268,7 +270,7 @@ function spotRangesHTML(result){
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));
- const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':local?'Solved on this computer with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
+ const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':method==='local-multiway'?'Solved with the 3-way solver':local?'Solved on this computer with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
  const actionValues=approximate?'<h3>Estimated action values</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>Estimated EV</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest estimate':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' ± '+fmt(1.96*result.se[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':converged?'<h3>Action values from this decision</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>EV</th><th>Estimated cost</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest EV':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' '+esc(result.units)+'</td><td>'+fmt(result.loss[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':'';
  return'<section class="spot-solution"><div class="eyebrow">Analysis of the current position</div><h3>'+title+'</h3>'+(converged?'<p><strong>Highest-EV action: '+esc(best.label)+'</strong>'+(frequent!==result.best?' · most frequent: '+esc(result.actions[frequent].label)+' ('+fmt(result.reference[frequent]*100,1)+'%)':'')+'</p>':approximate||local?'<p><strong>Most frequent action: '+esc(result.actions[frequent].label)+'</strong></p>':'')+spotFrequencyHTML(result)+spotRangesHTML(result)+actionValues+(converged&&grade?'<p><strong>Your action cost: '+fmt(grade.estimatedLoss??grade.loss,3)+' '+esc(result.units)+'</strong></p>':'')+'</section>';
 }

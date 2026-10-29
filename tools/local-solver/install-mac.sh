@@ -1,11 +1,12 @@
 #!/bin/bash
 # Builds the solvers for the local bridge:
-# - the PLO solver (tools/plo-solver), plain C++17 with no other dependencies;
+# - the PLO solver (tools/plo-solver) and the 3-way NLH solver (tools/multiway-solver),
+#   plain C++17 with no other dependencies;
 # - TexasSolver's command-line solver for NLH. macOS needs the Xcode command-line
 #   tools and Homebrew (for cmake and libomp). TexasSolver is AGPL-3.0 and free for
 #   personal use; it is downloaded from its author's repository and built on this
 #   computer, never redistributed.
-#   bash tools/local-solver/install-mac.sh [--plo-only]
+#   bash tools/local-solver/install-mac.sh [--plo-only]   (--plo-only: the PLO and 3-way solvers only)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 src="$here/TexasSolver"
@@ -43,6 +44,13 @@ output $smoke/result.json
 EOF
 "$plo/plo_solver" "$smoke/input.txt" >/dev/null
 test -s "$smoke/result.json" && echo "The PLO solver is ready: $plo/plo_solver"
+# The 3-way NLH solver: same compiler and flags, and a small river solve.
+mw="$(cd "$here/../multiway-solver" && pwd)"
+echo "Building the 3-way solver..."
+"${cxx[@]}" -O3 -std=c++17 -pthread ${tune[@]+"${tune[@]}"} -o "$mw/mw_solver" "$mw/mw_solver.cpp"
+printf '%s\n' 'game NLH3' 'board KsQd7h4c2s' 'pot 300' 'stack 1000' 'range0 QQ,JTs,A7o' 'range1 KK,99,65s' 'range2 AA,KQs,T9s' 'threads 2' 'accuracy 0.1' 'max_iterations 300' "output $smoke/mw.json" > "$smoke/mw.txt"
+"$mw/mw_solver" "$smoke/mw.txt" >/dev/null
+test -s "$smoke/mw.json" && echo "The 3-way solver is ready: $mw/mw_solver"
 rm -rf "$smoke"
 if [ "${1:-}" = --plo-only ]; then exit 0; fi
 
