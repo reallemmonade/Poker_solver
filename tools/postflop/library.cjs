@@ -11,6 +11,8 @@
 // --limit N stops after the first N unsolved flops (to time one).
 // --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
 // --reverse 1 works from the last one back, so helper computers can share a run going forward.
+// A tree.json in the --out folder ({flop:{bet:[33,75],raise:[66]},turn:...}) replaces the default bet
+// sizes below (TREE) street by street, so one library can use more sizes than the calibration solves.
 // --turn 1 also saves the turn's first decisions (<flop>.turn.json.gz) on the main lines: check-check,
 // bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.ctl per spot.
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
@@ -158,6 +160,7 @@ function classEvs(tree){
 }
 
 async function solve(){
+ const treeFile=path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
  const packs=loadCharts(args.charts),ids=args.spots.split(','),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   const spot=prepare(id,packs),dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
