@@ -12,6 +12,8 @@ async function main(){
  const name='Tester'+Date.now().toString(36).slice(-6),password='correct horse';let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
  const pre=await fetch(base+'/api/sync',{method:'OPTIONS',headers:{Origin:'http://allowed.test','Access-Control-Request-Headers':'authorization'}});ok(pre.status===204&&/Authorization/.test(pre.headers.get('access-control-allow-headers')),'preflight allows the Authorization header');
  const email=name.toLowerCase()+'@mail.test';
+ const other1=await fetch(base+'/api/auth/login',{method:'OPTIONS',headers:{Origin:'https://phone.example','Access-Control-Request-Headers':'content-type'}});ok(other1.status===204&&other1.headers.get('access-control-allow-origin')==='https://phone.example','account calls work from any site (token auth, no cookies)');
+ ok((await call('POST','/api/rooms',{origin:'https://phone.example',data:{}})).status===403,'rooms stay limited to the allowed sites');
  ok((await call('POST','/api/auth/signup',{data:{username:'ab',email,password}})).status===400,'short usernames are refused');
  ok((await call('POST','/api/auth/signup',{data:{username:name,password}})).status===400&&(await call('POST','/api/auth/signup',{data:{username:name,email:'not-an-email',password}})).status===400,'an email is required');
  ok((await call('POST','/api/auth/signup',{data:{username:name,email,password:'short'}})).status===400,'short passwords are refused');
