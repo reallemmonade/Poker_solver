@@ -14,6 +14,7 @@
 !/tools/local-solver/README.md
 !/tools/local-solver/server.cjs
 !/tools/local-solver/install-mac.sh
+!/tools/local-solver/setup-mac.sh
 !/tools/local-solver/install-linux.sh
 !/tools/local-solver/start.command
 !/tools/local-solver/check-bridge.cjs
