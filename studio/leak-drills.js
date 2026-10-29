@@ -52,7 +52,7 @@ async function leakChartSpot(l){const pack=leakPack(l);if(!pack)return null;if(!
 function leakReplay(ref){const row=leakDrill.solves?.get(ref.publicKey);
  if(row){try{const {hand}=savedSpotContext(row);return{hand,result:row.result};}catch{}}
  if(!leakDrill.live)leakDrill.live=new Map();if(leakDrill.live.has(ref.publicKey))return leakDrill.live.get(ref.publicKey);let out=null;
- try{const g=ref.grade,observed=leakObserved(g),holes=Array(g.config.seats).fill(null);holes[g.hero]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(1)),result=hand.street===0?preflopReference(hand):hand.street===1?postflopLibraryReference(hand):null;if(result?.supported&&result.actions.length>1)out={hand,result};}catch{}
+ try{const g=ref.grade,observed=leakObserved(g),holes=Array(g.config.seats).fill(null);holes[g.hero]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(1)),result=hand.street===0?preflopReference(hand):hand.street===1?postflopLibraryReference(hand):null;if(result?.supported&&!result.offTree&&result.actions.length>1)out={hand,result};}catch{}
  leakDrill.live.set(ref.publicKey,out);return out;}
 // Mistakes come up three times as often as decisions you got right. Each saved decision comes up once per sitting,
 // so a leak is not passed by remembering one answer.

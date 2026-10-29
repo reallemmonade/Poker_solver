@@ -62,6 +62,18 @@ function pass(text){console.log('PASS '+text);count++;}
  const share=bb=>{let w=0,c=0;for(const cls of PF.classes){const n=cls.length===2?6:cls[2]==='s'?4:12,q=at(bb,cardsOf(cls));w+=n;c+=n*(1-q.reference[q.actions.findIndex(a=>a.kind==='fold')]);}return c/w;};
  const s=[5,6,8,12,'jam'].map(share),k=bb=>(1.5/(1+bb))/(1.5/5);assert.ok(s.every((x,i)=>!i||x<s[i-1]),'Bigger sizes do not fold more: '+s);assert.ok([5,6,8,12,20].every((bb,i)=>Math.abs(s[i]-k(bb))<.005),'Continue share misses MDF: '+s);
  pass('Off-tree preflop sizes map pseudo-harmonically, jams fall back to the largest raise, and bigger prices tighten the defence toward MDF as an approximate answer');}
+// Off-tree flop sizes: a hand-made library spot (pot 100, stack 1000, bets 33/66/150% and all-in) maps bets pseudo-harmonically,
+// clamps beyond its sizes, sends a jam to the all-in, and a bigger price than the node's tightens the defence toward MDF.
+{const PL=require('./postflop-library.js'),PF=require('./preflop.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
+ const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),share=i=>(i*7%5)/4,bets=['BET 33','BET 66','BET 150','BET 1000'],facing=b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(i=>[1-share(i),share(i)],2)});
+ const flop={nodes:[{path:'',player:'oop',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},{path:'CHECK',player:'ip',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},...bets.map(facing)]};
+ const spot=PL.validate({format:PL.FORMAT,spots:[{id:'t',label:'Test',chart:{name:'t',key:'t'},pot:100,stack:1000,rangeIp:Object.fromEntries(PF.classes.map(c=>[c,1])),rangeOop:Object.fromEntries(PF.classes.map(c=>[c,1])),flops:{[key]:flop}}]}).spots[0];
+ const at=(amount,allIn=false)=>PL.walk(flop,Object.assign([{kind:'check'},{kind:'bet',amount,allIn}],{pot:100,stack:1000}),1),to=a=>at(a).path.split('/')[1];
+ assert.deepEqual([10,25,45,50,90,100,400].map(to),['BET 33','BET 33','BET 33','BET 66','BET 66','BET 150','BET 150'],'Pseudo-harmonic flop mapping');assert.equal(at(1000,true).path,'CHECK/BET 1000');assert.equal(at(700,true).path,'CHECK/BET 1000','A short all-in maps to the all-in');
+ assert.deepEqual([10,20,25,45,50,150,400].map(a=>!!at(a).offTree),[true,true,false,true,false,false,true],'Mapped beyond 1.6x or tightened is approximate');assert.ok(!at(1000,true).offTree&&at(50).k===1);
+ const cont=a=>{const w=at(a),r=PL.aggregate(spot,flop,w.path,w.k);return 1-r.freq[0];},base=cont(150),c=[150,200,300,600].map(cont),mdf=b=>(100/(100+b))/(100/250);
+ assert.ok(c.every((x,i)=>!i||x<c[i-1]),'Bigger flop bets do not fold more: '+c);assert.ok([150,200,300,600].every((b,i)=>Math.abs(c[i]-base*mdf(b))<1e-6),'Flop continue share misses MDF: '+c);
+ pass('Off-tree flop sizes map pseudo-harmonically between solved sizes, clamp at the ends, jams take the all-in, and bigger prices tighten toward MDF as an approximate answer');}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
 await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');
