@@ -62,7 +62,8 @@ const citrusAccount=(()=>{
   return got;
  }
  async function run(){
-  if(!account)return;if(sync.running){sync.again=true;return sync.running;}
+  // A session the server ended stays ended until a sign-in (which reloads) or another tab's fresh token: retrying would only redraw the sign-in form empty.
+  if(!account)return;if(sync.status==='expired'){dispatchEvent(new CustomEvent('citrus-sync-done',{detail:{session:null}}));return;}if(sync.running){sync.again=true;return sync.running;}
   sync.running=(async()=>{let session=null;
    const first=!read(key('citrus-sync-seeded-v1'),false);sync.status='syncing';render();
    try{if(first)await seed();let full=null;await push().catch(e=>{if(e.status!==507)throw e;full=e;});const got=await pull();session=got.session;if(full){sync.status='full';sync.note=full.message;}else{sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';}
