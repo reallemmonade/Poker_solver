@@ -56,12 +56,13 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=
   const next=[...jobs.entries()].filter(([,j])=>j.status==='queued'||j.status==='running').sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0))[0];if(!next)return;
   // The job's rows from here on are stamped just after the phone's own write, not with this computer's clock, so a
   // cancel the phone writes later wins over them even when its clock is behind or it was offline when you tapped.
-  const [id,job]=next;let n=0;const at=()=>(job.t||Date.now())+ ++n;await stopLearning();const started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
+  const [id,job]=next;let n=0,over=false;const at=()=>(job.t||Date.now())+ ++n;await stopLearning();const started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
   await api('POST','/api/sync',{rows:[meta(id,started,at())]});log('Solving a spot sent from your account ('+id+').');
   // Progress goes up every 10 seconds while the solve runs, and the heartbeat with it: a long solve holds the
-  // regular round, and the phone should still see this computer as online.
-  const first={},report=async()=>{try{await pull();}catch{}if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
-  const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);}const result=out.result;
+  // regular round, and the phone should still see this computer as online. A report still pulling when the solve
+  // ends sends nothing, or its 'running' row would land after the answer and the job would be solved again.
+  const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
+  const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);over=true;}const result=out.result;
   // Cancelled from the phone: the job row already says so, so nothing goes back.
   if(out.cancelled){log('Cancelled '+id+'.');return;}
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
