@@ -41,7 +41,7 @@
   const me=state.players[session.seat],box=$('actions'),key=state.handNumber+':'+h.streetIndex,toCall=me?Math.max(0,+(h.currentBet-me.bet).toFixed(2)):0,legal=kind=>h.legal.find(a=>a.kind===kind);$('customRaise').classList.add('hide');
   if(yourTurn){const pre=ActionBar.take(key,{check:!!legal('check'),toCall}),chosen=pre&&legal(pre);if(chosen&&!busy){ActionBar.clear(box);box.innerHTML='<span class="muted">'+escapeHTML(chosen.label)+'…</span>';setTimeout(()=>act(chosen),0);}
    else{const raise=h.raise,call=legal('call');ActionBar.turn(box,{key:key+':'+h.actions.length,fold:!!legal('fold'),check:!!legal('check'),toCall,callAllIn:!!call&&/all-in/.test(call.label),disabled:busy,
-    raise:raise?{kind:raise.kind,min:raise.min,max:raise.max,allIn:raise.allIn??+(me.bet+me.stack).toFixed(2),pot:h.pot,currentBet:h.currentBet,toCall,preflop:h.streetIndex===0,bb:1}:null,
+    raise:raise?{kind:raise.kind,min:raise.min,max:raise.max,allIn:raise.allIn??+(me.bet+me.stack).toFixed(2),effective:Math.max(0,...state.players.filter(p=>p.seat!==session.seat&&p.active&&!p.folded&&p.stack!==null).map(p=>+(p.bet+p.stack).toFixed(2))),pot:h.pot,currentBet:h.currentBet,toCall,preflop:h.streetIndex===0,bb:1}:null,
     onFold:()=>act(legal('fold')),onCheck:()=>act(legal('check')),onCall:()=>act(call),onBet:target=>act({kind:raise.kind,target})});}}
   else if(!h.done&&me&&!me.folded&&!me.allIn&&me.active&&me.stack>0)ActionBar.waiting(box,{key,toCall});
   else{ActionBar.clear(box);box.innerHTML='<span class="muted">'+(h.done?'Waiting for the host to deal the next hand.':'Waiting for '+escapeHTML(state.players[h.actor]?.name||'the next player')+'…')+'</span>';}

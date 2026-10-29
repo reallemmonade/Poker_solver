@@ -8,22 +8,26 @@ const ActionBar=(()=>{
   // Rounds to a step that grows with the size (0.01, 0.1, then 0.5 bb), then clamps to the legal range (the all-in total is always reachable).
   function snap(x,r){const step=x>=25?.5:x>=5?.1:.01;let v=Math.round(x/step)*step;v=+v.toFixed(2);return Math.max(r.min,Math.min(r.max,v));}
   const clamp=(x,r)=>Math.max(r.min,Math.min(r.max,+(+x).toFixed(2)));
+  // The most anyone can lose here: your stack or the biggest stack still in against you, whichever is smaller.
+  const cover=r=>Math.min(r.allIn,r.effective>0?r.effective:r.allIn);
   const solvedList=r=>[...new Set((Array.isArray(r.solved)?r.solved:[]).map(t=>clamp(t,r)))].sort((a,b)=>a-b);
   function presets(r){
     // The sizes the solver has an answer for at this decision, when it has two or more; the slider covers the rest.
     // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
     // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
-    if(s.length>1)return s.map(t=>({label:t>=r.allIn-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
+    if(s.length>1)return s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
     // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in.
-    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,r.allIn-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
-    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=r.allIn-1e-9?[{label:'All-in',target:r.max}]:[])];
+    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
+    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
-  // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
+  // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
   //     onFold, onCheck, onCall, onBet(target)}
   function turn(box,o){
-    const r=o.raise;if(turnState.key!==o.key){const s=r?solvedList(r):[];turnState={key:o.key,amount:r?s.find(t=>t<r.allIn-1e-9)??s[0]??(r.standard>0?snap(r.standard,r):r.min):null};}
+    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(r.standard,r):r.min):null;
+    // The amount starts at the first solved size; solved sizes that arrive later move it until you pick a size yourself.
+    if(turnState.key!==o.key||!turnState.touched&&turnState.def!==def)turnState={key:o.key,amount:def,def,touched:false};
     // Re-renders keep a typed amount as it is (any 0.01 bb is legal); only the slider snaps to steps.
     if(r)turnState.amount=clamp(turnState.amount??r.min,r);
     const sig=JSON.stringify(['turn',o.key,o.fold,o.check,o.toCall,o.callAllIn,r,o.note||'']);
@@ -40,10 +44,10 @@ const ActionBar=(()=>{
       if(r){
         const amount=box.querySelector('.ab-amount'),slider=box.querySelector('.ab-slider'),list=presets(r);
         const show=(v,typing)=>{turnState.amount=v;if(!typing)amount.value=num(v);slider.value=r.max>r.min?Math.round((v-r.min)/(r.max-r.min)*1000):1000;slider.style.setProperty('--fill',slider.value/10+'%');const bet=box.querySelector('[data-ab="bet"]'),html=betLabel(r,v);if(bet.innerHTML!==html)bet.innerHTML=html;box.querySelectorAll('[data-ab-preset]').forEach(b=>b.classList.toggle('on',Math.abs(list[+b.dataset.abPreset].target-v)<.005));};
-        box.querySelectorAll('[data-ab-preset]').forEach(b=>b.onclick=()=>show(list[+b.dataset.abPreset].target));
-        slider.oninput=()=>{const p=+slider.value;show(p>=1000?r.max:p<=0?r.min:snap(r.min+(r.max-r.min)*p/1000,r));};
+        box.querySelectorAll('[data-ab-preset]').forEach(b=>b.onclick=()=>{turnState.touched=true;show(list[+b.dataset.abPreset].target);});
+        slider.oninput=()=>{turnState.touched=true;const p=+slider.value;show(p>=1000?r.max:p<=0?r.min:snap(r.min+(r.max-r.min)*p/1000,r));};
         amount.onfocus=()=>amount.select();
-        amount.oninput=()=>{const v=Number(amount.value.trim().replace(',','.'));if(amount.value.trim()&&Number.isFinite(v))show(Math.max(r.min,Math.min(r.max,v)),true);};
+        amount.oninput=()=>{const v=Number(amount.value.trim().replace(',','.'));if(amount.value.trim()&&Number.isFinite(v)){turnState.touched=true;show(Math.max(r.min,Math.min(r.max,v)),true);}};
         amount.onblur=()=>show(turnState.amount);
         amount.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();amount.blur();box.querySelector('[data-ab="bet"]').click();}};
         box.querySelector('[data-ab="bet"]').onclick=()=>o.onBet(turnState.amount);
