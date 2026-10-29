@@ -17,7 +17,7 @@ function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).le
   line=[0,1,2,3].map(s=>mine.filter(a=>a.street===s).map(a=>({fold:'F',check:'X',call:'C',bet:'B',raise:'R'})[a.kind]).join('')).filter(Boolean).join('/'),
   grades=(rec.grading||[]).filter(g=>g.hero===undefined||g.hero===hero),mistakes=grades.filter(gradeMistake),combo=comboOf(rec.holes?.[hero]||''),pos=G.positions(c.seats,c.button)[hero]||'Seat '+(hero+1),
   net=base.net?Math.round(base.net[hero]*100)/100:null;
- f={key,id:row.id,at:row.createdAt,hero,pos,combo,group:rec.holes?.[hero]?.length===4?handGroup(combo):'Other',seats:c.seats,depth:c.stacks[hero],pot,ended,line,net,showdown:atShowdown,
+ f={key,id:row.id,at:row.createdAt,assisted:rec.assisted!==false,hero,pos,combo,group:rec.holes?.[hero]?.length===4?handGroup(combo):'Other',seats:c.seats,depth:c.stacks[hero],pot,ended,line,net,showdown:atShowdown,
   mistakes:mistakes.length,cost:mistakes.reduce((s,g)=>s+gradeCost(g),0),grades,base,tally:PokerStats.tally(base)};
  f.tags=[pos,combo,pot.replace(/[\s-]/g,''),ended,net===null?'':net>0?'won':net<0?'lost':'even',atShowdown?'showdown':'',f.mistakes?'mistake mistakes':'',f.group,c.seats===2?'hu headsup':c.seats+'max',line].join(' ').toLowerCase();
  handDB.cache.set(row.id,f);return f;}
@@ -42,13 +42,13 @@ function renderHandDB(box){if(!box)return;
  box.querySelector('.hdb-more').hidden=rows.length<=handDB.shown;box.querySelector('.hdb-insights').hidden=!all.length;
  if(box.querySelector('.hdb-insights').open)box.querySelector('.hdb-body').innerHTML=insightsHTML(rows);}
 // Results swing by ±100 bb/100 over a few hundred hands, so leaks are ranked by solver-measured mistake cost, which settles far sooner.
-function insightsHTML(rows){const you=rows.reduce((t,f)=>PokerStats.add(t,f.tally[f.hero]||PokerStats.empty()),PokerStats.empty()),graded=rows.filter(f=>f.grades.length),cost=rows.reduce((s,f)=>s+f.cost,0);
+function insightsHTML(all){const rows=all.filter(f=>!f.assisted),helped=all.length-rows.length,you=rows.reduce((t,f)=>PokerStats.add(t,f.tally[f.hero]||PokerStats.empty()),PokerStats.empty()),graded=rows.filter(f=>f.grades.length),cost=rows.reduce((s,f)=>s+f.cost,0);
  const kpis='<div class="hdb-kpis"><span><small>Hands</small>'+rows.length+'</span><span><small>bb/100</small>'+signedBB(bbPer100(rows))+'</span><span><small>Mistakes</small>'+rows.reduce((s,f)=>s+f.mistakes,0)+'</span><span><small>Cost/100</small>'+(graded.length?fmt(100*cost/rows.length,1):'–')+'</span></div>';
  const field={pos:'pos',pot:'pot',group:'group',ended:'ended'}[handDB.filter.by]||'pos',groups=new Map();for(const f of rows){const k=f[field];if(!groups.has(k))groups.set(k,[]);groups.get(k).push(f);}
  const table='<select data-hdb="by" aria-label="Break down by">'+[['pos','By position'],['pot','By pot'],['group','By hand'],['ended','By where it ended']].map(([v,t])=>'<option value="'+v+'"'+(field===v?' selected':'')+'>'+t+'</option>').join('')+'</select><table class="hdb-table"><thead><tr><th></th><th>Hands</th><th>bb/100</th><th>Cost</th></tr></thead><tbody>'+[...groups].map(([k,fs])=>({k,n:fs.length,rate:bbPer100(fs),cost:100*fs.reduce((s,f)=>s+f.cost,0)/fs.length})).sort((a,b)=>b.cost-a.cost||(a.rate??0)-(b.rate??0)).map(g=>'<tr><td>'+esc(g.k)+'</td><td>'+g.n+'</td><td class="'+(g.rate>0?'hdb-up':g.rate<0?'hdb-down':'')+'">'+signedBB(g.rate)+'</td><td>'+(g.cost?fmt(g.cost,1):'–')+'</td></tr>').join('')+'</tbody></table>';
  // The same spot types, labels and costs as Practice → Leaks.
  const leaks=typeof leakDecisions==='function'?PokerDrills.leaks(leakDecisions(rows)).slice(0,3):[],leakHTML=leaks.length?'<ol class="hdb-leaks">'+leaks.map(l=>'<li><span>'+esc(l.label)+'</span><em>'+l.mistakes+'× · '+fmt(l.cost,1)+' bb</em></li>').join('')+'</ol>':'<p class="help">'+(graded.length?'No mistakes measured.':$('gradeEvery')?.checked===false?'Turn on Settings → Decision recording to find leaks.':'Play hands to find your leaks.')+'</p>';
- return kpis+'<h3>You</h3>'+hudGridHTML(you)+'<h3>Leaks</h3>'+leakHTML+table;}
+ return(helped?'<p class="help">'+helped+' with solver help left out</p>':'')+kpis+'<h3>You</h3>'+hudGridHTML(you)+'<h3>Leaks</h3>'+leakHTML+table;}
 // Seat stats: bots are keyed by persona (each persona plays one fixed style, and seats are reshuffled between sessions),
 // so a persona's numbers keep building across sessions; your own seat reads every saved hand.
 function playProfiles(h){if(!h||$('controlAll')?.checked)return null;return Array.from({length:h.n},(_,i)=>i===state.hero?'you':profileForSeat(i));}
