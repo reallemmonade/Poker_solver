@@ -5,6 +5,7 @@
 # minutes the first time; the PLO solver in seconds), and starts the bridge as a background login item so it keeps
 # running after Terminal closes and comes back after a restart. Running it again updates the files, rebuilds only
 # what is missing and restarts the bridge. A Mac already set up by hand with ~/RangeLab-bridge is updated in place.
+# Flops it learns while idle (learn.cjs) are kept in <folder>/learned and survive updates.
 # Then open the app on this Mac, sign in, and set Solver settings -> Solver on your Mac to On; phones signed in to
 # the same account can then send it spots.
 set -euo pipefail
@@ -36,7 +37,7 @@ curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$BRANCH" -o "$tmp/src.tgz"
 # Only the app's code and the solver folders; built solvers already in $dir stay.
 tar -xzf "$tmp/src.tgz" -C "$tmp"
 src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
-for part in studio river tools/local-solver tools/plo-solver; do mkdir -p "$dir/$part"; cp -R "$src/$part/." "$dir/$part/"; done
+for part in studio river tools/local-solver tools/plo-solver tools/postflop; do mkdir -p "$dir/$part"; cp -R "$src/$part/." "$dir/$part/"; done
 
 say "3/4 Building the solvers"
 if [ -x "$dir/tools/local-solver/TexasSolver/install/console_solver" ] && [ -x "$dir/tools/plo-solver/plo_solver" ]; then

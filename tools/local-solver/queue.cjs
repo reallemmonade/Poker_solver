@@ -6,9 +6,10 @@
 // phone cancels stops at the next progress check, within 10 seconds), and
 // pushes each answer back as the saved spot the phone looks for, then marks the job done or failed. Every few
 // minutes it also pushes a 'macsolver' heartbeat (last seen, threads, load) so the phone can say whether this
-// computer is online and busy.
+// computer is online and busy. With nothing queued and the computer otherwise idle, it learns the flops your devices
+// asked for ('flopwant-' rows, see learn.cjs) one at a time, and marks each done.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
-const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000,PROGRESS_MS=10000;
+const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000,PROGRESS_MS=10000,IDLE_LOAD=.5,WANT_DAYS=30;
 
 // How far a running solve has got, pushed with the job every 10 seconds. TexasSolver and the PLO solver report
 // exploitability (% of the pot), which falls roughly geometrically, so progress is how far its log has moved from
@@ -25,8 +26,8 @@ function progressOf(job,s,first){
  const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
  return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
 }
-function createQueue({port,threads,busy,status=()=>null,log=console.log}){
- let link=null,cursor=0,running=null,timer=null,beat=0,current=null;const jobs=new Map();
+function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=async()=>{},log=console.log}){
+ let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null;const jobs=new Map(),wants=new Map();
  try{const saved=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;}}catch{}
  const save=()=>{try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
  async function api(method,route,body){
@@ -37,13 +38,13 @@ function createQueue({port,threads,busy,status=()=>null,log=console.log}){
  const heartbeat=()=>meta('macsolver',{seen:Date.now(),threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
-   for(const r of page.rows)if(r.store==='meta'&&/^solvejob-/.test(r.id)&&r.data?.value&&typeof r.data.value==='object')jobs.set(r.id,{...r.data.value,t:r.t});
+   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^flopwant-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
    cursor=page.cursor;if(!page.more)break;}
   save();
  }
  function solve(job){
   return new Promise(resolve=>{
-   const worker=new Worker(path.join(__dirname,'queue-worker.cjs'),{workerData:{observed:job.observed,options:job.options,extraAction:job.extraAction,url:'http://127.0.0.1:'+port}});let out=null;
+   const worker=new Worker(path.join(__dirname,'queue-worker.cjs'),{workerData:{observed:job.observed,options:job.options,extraAction:job.extraAction,url:'http://127.0.0.1:'+port,learned:!!learn}});let out=null;
    current={stop(){out={cancelled:true};fetch('http://127.0.0.1:'+port+'/cancel',{method:'POST'}).catch(()=>{});worker.terminate();}};
    worker.on('message',m=>{out=m;});worker.on('error',e=>{out={error:e.message};});worker.on('exit',()=>{current=null;resolve(out||{error:'The solve stopped without an answer.'});});
   });
@@ -51,7 +52,7 @@ function createQueue({port,threads,busy,status=()=>null,log=console.log}){
  async function runNext(){
   // Only this bridge runs queued solves, one at a time, so a job still marked running here was cut off by a restart.
   const next=[...jobs.entries()].filter(([,j])=>j.status==='queued'||j.status==='running').sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0))[0];if(!next)return;
-  const [id,job]=next,started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
+  const [id,job]=next;await stopLearning();const started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
   await api('POST','/api/sync',{rows:[meta(id,started)]});log('Solving a spot sent from your account ('+id+').');
   // Progress goes up every 10 seconds while the solve runs, and the heartbeat with it: a long solve holds the
   // regular round, and the phone should still see this computer as online.
@@ -70,9 +71,27 @@ function createQueue({port,threads,busy,status=()=>null,log=console.log}){
   running=(async()=>{try{
    if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[heartbeat()]});}
    await pull();if(!busy())await runNext();
+   if(!busy()&&!learning&&![...jobs.values()].some(j=>j.status==='queued'||j.status==='running'))learnNext();
   }catch(e){if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
   return running;
+ }
+ // The newest wanted flop not learned yet, solved in the background while this computer is idle (other work, like a
+ // long calibration, keeps it waiting). A solve from the app or the queue stops it; it is tried again later.
+ function learnNext(){
+  if(!learn||os.loadavg()[0]/os.cpus().length>IDLE_LOAD)return;const L=require('./learn.cjs'),now=Date.now();
+  const open=[...wants.entries()].filter(([,w])=>(w.status==='wanted'||w.status==='learning')&&now-(w.at||0)<WANT_DAYS*864e5).sort((a,b)=>(b[1].at||0)-(a[1].at||0));
+  for(const [id,want]of open){
+   try{L.check(want);}catch{wants.set(id,{...want,status:'failed',message:'Malformed.'});continue;}
+   if(L.has(want)){const done={...want,status:'done'};wants.set(id,done);api('POST','/api/sync',{rows:[meta(id,done)]}).catch(()=>{});continue;}
+   const started={...want,status:'learning',startedAt:now};wants.set(id,started);
+   learning=(async()=>{let row={...want,status:'wanted'};try{
+     await api('POST','/api/sync',{rows:[meta(id,started)]}).catch(()=>{});log('Learning flop '+want.key+' for '+want.spot.label+'.');
+     const out=await learn(want);row={...want,status:'done',learnedAt:Date.now(),seconds:Math.round(out.seconds),exploitability:out.exploitability};log('Learned flop '+want.key+' in '+Math.round(out.seconds)+' s ('+out.exploitability+'% of the pot).');
+    }catch(e){if(!/cancelled|already running/.test(e.message)){row={...want,status:'failed',message:e.message};log('Could not learn flop '+want.key+': '+e.message);}}
+    finally{wants.set(id,row);learning=null;await api('POST','/api/sync',{rows:[meta(id,row)]}).catch(()=>{});}})();
+   learning.id=id;return;
+  }
  }
  function start(){if(!timer){timer=setInterval(tick,POLL_MS);timer.unref?.();}tick();}
  if(link)start();

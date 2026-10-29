@@ -21,6 +21,7 @@
 !/tools/local-solver/spot-worker.cjs
 !/tools/local-solver/queue.cjs
 !/tools/local-solver/queue-worker.cjs
+!/tools/local-solver/learn.cjs
 !/tools/local-solver/texassolver-evs.patch
 !/tools/plo-solver/
 !/tools/plo-solver/plo_solver.cpp
