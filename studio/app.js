@@ -64,7 +64,7 @@ function analyze(hand,pending={kind:'inspect'},extraAction=null){return analyzeS
 // The hero's action always applies at once. Its assessment (when recorded) and automatic
 // analysis run as background jobs that never block the table; see softJob().
 function softJob(job=state.job){return job==='spotSolve'&&!!(state.pending?.automatic||state.pending?.background)}
-function playBusy(){return state.busy&&!softJob()||liveSession.passive||liveSession.hold}
+function playBusy(){return state.busy&&!softJob()||liveSession.passive||liveSession.hold||document.visibilityState==='hidden'&&!!citrusAccount.user}
 // A custom-size error shows by the input and in the status line until the next action or hand.
 function customBetError(message){state.customError=message;status(message,true);$('legalHint').textContent=message;}
 function clearCustomBetError(){if(state.customError&&$('status').textContent===state.customError)status('');state.customError=null;}

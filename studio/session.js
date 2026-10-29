@@ -4,8 +4,8 @@ const liveSession={rootConfig:null,rootHero:0,rootBots:null,round:1,handNumber:0
 // player takes the session over there, which reloads the latest saved state first, so two tabs never fork one session.
 const studioTab=Math.random().toString(36).slice(2),studioChannel=(()=>{try{return typeof BroadcastChannel==='function'?new BroadcastChannel('range-lab-poker-studio'):null}catch{return null}})();
 // Signed-in devices share the same saved session through the account sync. Only one device drives it at a time: the one
-// that acted last. A device opened or brought back to the front waits for a sync first and continues from the newest
-// save; a device that was already open turns read-only until "Continue here". Each dealt hand keeps one id everywhere,
+// that acted last. A device in the background deals no hand and moves no bot (playBusy); one opened or brought back to the front waits for a sync first and continues from the newest
+// save (even one that turned read-only in the background); a device that was already open turns read-only until "Continue here". Each dealt hand keeps one id everywhere,
 // so a hand finished on both devices is still one saved hand.
 const studioDevice=(()=>{try{let d=localStorage.getItem('citrus-device-v1');if(!d){d=studioTab;localStorage.setItem('citrus-device-v1',d);}return d}catch{return studioTab}})();
 const newerElsewhere=v=>!!v&&v.version===1&&v.device!==studioDevice&&(+v.at||0)>liveSession.stamp.at;
@@ -13,7 +13,7 @@ function holdLive(){if(liveSession.passive||!citrusAccount.user)return false;cle
 function releaseLive(remote){if(!liveSession.hold)return;clearTimeout(liveSession.holdTimer);liveSession.hold=false;if(newerElsewhere(remote))restoreLiveSession(remote,true);else resumeLive();}
 function resumeLive(){const h=state.hand;renderAll();if(h?.done&&!state.handSaved)onHandEnd();scheduleSessionNext();if(h&&!h.done)advanceBots();}
 addEventListener('citrus-sync-done',event=>{const remote=event.detail?.session;if(liveSession.hold)releaseLive(remote);else if(liveSession.ready&&newerElsewhere(remote))sessionElsewhere('device');});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&liveSession.ready&&state.hand&&holdLive())renderAll();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible'||!liveSession.ready)return;if(liveSession.passive&&liveSession.elsewhere==='device'&&citrusAccount.user)takeOverSession();else if(state.hand&&holdLive())renderAll();});
 function postStudio(message){try{studioChannel?.postMessage({...message,tab:studioTab})}catch{}}
 function sessionElsewhere(where='tab'){liveSession.elsewhere=where;if(liveSession.passive){renderSessionStatus();return;}liveSession.passive=true;cancelSessionNext();clearTimeout(tableView.botTimer);tableView.botTimer=null;renderAll();}
 async function takeOverSession(){if(!liveSession.passive)return;try{if(citrusAccount.user)await citrusAccount.run();const value=(await dbAll('meta')).find(row=>row?.id==='liveSession')?.value;liveSession.passive=false;if(value)restoreLiveSession(value,true);else{saveLiveSession();renderAll();}status('Continuing here.');}catch(error){liveSession.passive=false;status('Could not read the latest session: '+error.message,true);renderAll();}}
