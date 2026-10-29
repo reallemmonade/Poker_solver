@@ -5,8 +5,8 @@
 .ab-sizing{display:grid;grid-template-columns:auto 86px minmax(80px,1fr);align-items:center;gap:8px 10px}
 .ab-presets{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(44px,1fr);gap:6px}
 .ab-amount{grid-column:2}.ab-slider{grid-column:3}
-.ab-preset{min-height:38px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel2,#1b2d31);color:var(--muted);font:inherit;font-size:13px;font-weight:750;cursor:pointer;touch-action:manipulation}
-.ab-preset:hover{color:var(--ink)}
+.ab-preset{min-height:38px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel2,#1b2d31);color:var(--ink);font:inherit;font-size:13px;font-weight:750;cursor:pointer;touch-action:manipulation}
+.ab-preset:hover{border-color:var(--accent-edge,#638b74)}
 .ab-preset.on{background:var(--accent-soft,#23453a);border-color:var(--accent-edge,#638b74);color:var(--ink)}
 .ab-amount{width:100%;min-width:0;min-height:38px;padding:0 10px;border-radius:7px;border:1px solid var(--line);background:var(--field,#0c171a);color:var(--ink);font:inherit;font-size:16px;font-weight:750;text-align:right}
 .ab-amount:focus{outline:2px solid var(--accent-edge,#638b74);outline-offset:1px}
