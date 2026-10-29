@@ -7,7 +7,7 @@
  if(!G&&typeof require==='function'){try{G=require('./hand-engine.js');}catch{G=require('./game.js');}}
  const C=G&&G.Core,STREETS=['flop','turn','river'],assert=(v,m)=>{if(!v)throw Error(m)};
  const CARD=/^[2-9TJQKA][cdhs]$/,COMBO=/^([2-9TJQKA][cdhs]){2}$/,CLASS=/^(?:([2-9TJQKA])\1|(?:A[2-9TJQK]|K[2-9TJQ]|Q[2-9TJ]|J[2-9T]|T[2-9]|9[2-8]|8[2-7]|7[2-6]|6[2-5]|5[2-4]|4[23]|32)[so])$/;
- const DEFAULT_URL='http://127.0.0.1:8787',LOCAL_TREE={bet:[33,66,75],raise:66,allinThreshold:.67};
+ const DEFAULT_URL='http://127.0.0.1:8787',LOCAL_TREE={bet:[[33,66],[33,66,150],[33,66,150]],later:[66,66],raise:66,allinThreshold:.67};
  // PLO tree: one bet size per street (fraction of pot), a pot raise, at most 2 raises
  // on the flop and 3 later. The solver lowers the caps itself if memory runs short.
  const COMBO4=/^([2-9TJQKA][cdhs]){4}$/,PLO_TREE={bet:[.33,.66,.75],raise:1,cap:[2,3,3],allinThreshold:.67},PLO_MAX_COMBOS=20000,round4=x=>Math.round(x*1e4)/1e4;
@@ -33,11 +33,12 @@
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
   const street=current-1,pot=start.pot,base=pot/2,stack=Math.min(start.stacks[ip],start.stacks[oop]);
   assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
-  // Default tree: one bet size per street and all-in, a raise size on the flop
-  // only, no donk bets (sizes used in the hand are added below). Bets that would
-  // commit over two thirds of the stack become all-in. Raises and donks on every
-  // street took 7.5 GB and 3x the time on a 100bb flop.
-  const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(let s=street;s<3;s++){const bet=[LOCAL_TREE.bet[s]];sizes[who][STREETS[s]]={bet:bet.slice(),raise:s===0?[LOCAL_TREE.raise]:[],donk:[]};}}
+  // Default tree: a small bet, a big bet and an overbet (1/3, 2/3 and 1.5x the pot) and all-in on the turn and the
+  // river; on the flop, where memory is the limit, the small and the big bet, with one size on each later street
+  // (2/3 of the pot). A raise size on the flop only, no donk bets (sizes used in the hand are added below).
+  // Bets that would commit over two thirds of the stack become all-in. Raises and donks on every street took
+  // 7.5 GB and 3x the time on a 100bb flop.
+  const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(let s=street;s<3;s++){const bet=street===0&&s>0?[LOCAL_TREE.later[s-1]]:LOCAL_TREE.bet[s];sizes[who][STREETS[s]]={bet:bet.slice(),raise:s===0?[LOCAL_TREE.raise]:[],donk:[]};}}
   // The 1bb minimum bet: TexasSolver's console has no minimum of its own, so a
   // default size below it in a small pot becomes exactly 1bb.
   const minBet=G.units(config.bb);for(const who of ['ip','oop']){const b=sizes[who][STREETS[street]];b.bet=b.bet.map(p=>p*pot/100<minBet?round(100*minBet/pot):p);}
