@@ -45,26 +45,26 @@
  // node's all-in, else its largest size. steps.pot and steps.stack are the street's real starting
  // pot and stack, at the library's own (scaled) ones (default the same). Solved bets below the
  // table's minimum bet (small limped pots) count as the minimum bet. Answers mapped more than 1.6x
- // away or facing a bigger price than the node's (k = MDF(real)/MDF(node) < 1, see tighten) are
- // offTree. With end, a line that ends where the street does (a call, check-check) returns its path
+ // away, facing a bigger price than the node's (k = MDF(real)/MDF(node) < 1, see tighten) or a smaller
+ // one (wide = alpha(real)/alpha(node) < 1, alpha = bet/(bet+pot), see widen) are offTree. With end, a line that ends where the street does (a call, check-check) returns its path
  // with node null; pot and stack are the library line's at its end, for the next street.
  function walk(flop,steps,scale,minBet=0,end=false,at=null){
-  const nodes=new Map(flop.nodes.map(n=>[n.path,n]));let path='',node=nodes.get(''),substituted=false,far=false,k=1;
+  const nodes=new Map(flop.nodes.map(n=>[n.path,n]));let path='',node=nodes.get(''),substituted=false,far=false,k=1,wide=1;
   const real={pot:steps.pot,stack:steps.stack,paid:[0,0],bet:0},lib={pot:(at||steps).pot,stack:(at||steps).stack,paid:[0,0],bet:0};
   const frac=(h,p,x)=>(h.paid[p]+x-h.bet)/(h.pot+h.bet-h.paid[p]),add=(h,p,x)=>{h.pot+=x;h.paid[p]+=x;h.bet=Math.max(h.bet,h.paid[p]);};
   for(let i=0;i<steps.length;i++){
-   const s=steps[i],p=i%2;if(!node)return null;let label=null;k=1;
+   const s=steps[i],p=i%2;if(!node)return null;let label=null;k=1;wide=1;
    if(s.kind==='check'||s.kind==='call'){label=node.actions.find(a=>a===s.kind.toUpperCase());if(s.kind==='call'){add(real,p,real.bet-real.paid[p]);add(lib,p,lib.bet-lib.paid[p]);}}
    else if(['bet','raise'].includes(s.kind)){
     const options=node.actions.filter(a=>/^(BET|RAISE) /.test(a)).map(a=>({a,amount:a.startsWith('BET ')?Math.max(minBet,parseFloat(a.split(' ')[1])*scale):parseFloat(a.split(' ')[1])*scale}));if(!options.length)return null;
     const allIn=o=>lib.paid[p]+o.amount>=lib.stack*.999,top=options.reduce((m,o)=>o.amount>m.amount?o:m),sizes=options.filter(o=>!allIn(o)).sort((x,y)=>x.amount-y.amount),jam=s.allIn||real.paid[p]+s.amount>=real.stack*.999;let best;
     if(jam||!sizes.length)best=options.find(allIn)||top;
     else{const x=frac(real,p,s.amount),hi=sizes.findIndex(o=>frac(lib,p,o.amount)>x);if(hi<0)best=sizes[sizes.length-1];else if(!hi)best=sizes[0];else{const A=frac(lib,p,sizes[hi-1].amount),B=frac(lib,p,sizes[hi].amount);best=(B-x)*(1+A)/((B-A)*(1+x))>=.5?sizes[hi-1]:sizes[hi];}}
-    if(Math.abs(best.amount-s.amount)>Math.max(2,.03*s.amount)){substituted=true;if(!(jam&&allIn(best))){if(Math.abs(Math.log(best.amount/s.amount))>Math.log(1.6)+1e-9)far=true;k=(real.pot/(real.pot+s.amount))/(lib.pot/(lib.pot+best.amount));}}
+    if(Math.abs(best.amount-s.amount)>Math.max(2,.03*s.amount)){substituted=true;if(!(jam&&allIn(best))){if(Math.abs(Math.log(best.amount/s.amount))>Math.log(1.6)+1e-9)far=true;k=(real.pot/(real.pot+s.amount))/(lib.pot/(lib.pot+best.amount));wide=Math.min(1,(s.amount/(real.pot+s.amount))/(best.amount/(lib.pot+best.amount)));}}
     label=best.a;add(real,p,s.amount);add(lib,p,best.amount);}
    if(!label)return null;path+=(path?'/':'')+label;node=nodes.get(path);
   }
-  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9,k:k<1-1e-9?k:1,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid)}:null;
+  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9||wide<1-1e-9,k:k<1-1e-9?k:1,wide:wide<1-1e-9?wide:1,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid)}:null;
  }
 
  // Answers the current flop decision from the library, or returns null. range is
@@ -92,8 +92,8 @@
    let q=null,near=null,i=-1;if(spot.game==='PLO4'){const p=ploIndex(f,w.node.player,cards,board,hand.rules);if(p){i=p.index;near=p.similar;}}else i=comboIndex(cards);if(i>=0)q=row(w.node,i);
    if(q){flop=f;key=cand.key;found=w;r=q;similar=near;at=i;break;}}
   if(!r)return null;const standIn=key!==c.key;
-  // A bigger price than the node's tightens this combo's defence (and the range grid's) toward MDF.
-  let cut=null;if(found.k<1){const reach=reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),board=spot.game==='PLO4'?null:C.cards(key);cut=i=>tighten(found.node,i,found.k,reach,board);r=scaled(found.node,r,cut(at));}
+  // A bigger price than the node's tightens this combo's defence (and the range grid's) toward MDF, a smaller one widens it.
+  let cut=null;if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),spot.game==='PLO4'?null:C.cards(key));r=cut(at,r);}
   const {actions,probs,index}=libraryActions(hand,found.node,r,scale),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut)};
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
@@ -162,14 +162,28 @@
  }
  // A solved row with its continue share scaled by cut (fold takes the rest).
  const scaled=(node,r,cut)=>{const f=node.actions.indexOf('FOLD');return cut===null||f<0?r:r.map((p,a)=>a===f?1-(1-p)*cut:p*cut);};
+ // Facing a smaller price than the node's, the range's fold share scales by wide (a bluff gains no more than at the node):
+ // the folds removed turn into calls, the strongest folding combos first, by made-hand rank on board plus a draw bonus
+ // (flush draw, open-ender, overcards; none for PLO), then the node's continue share. Returns the combo's kept fold share (0-1).
+ function widen(node,index,wide,reach,board){
+  const f=node.actions.indexOf('FOLD');if(f<0||node.actions.indexOf('CALL')<0)return 1;
+  if(!node.open){const n=reach.length,mass=new Float64Array(n),before=new Float64Array(n),score=new Float64Array(n),share=new Float64Array(n),top=board?Math.max(...board.map(c=>c>>2)):0,bits=cs=>cs.reduce((m,c)=>m|1<<(c>>2)+1|((c>>2)===12?1:0),0);
+   for(let i=0;i<n;i++)if(reach[i]){const r=row(node,i);if(!r||!r[f])continue;mass[i]=reach[i]*r[f];share[i]=1-r[f];if(!board)continue;const cs=COMBOS[i],all=[...cs,...board],v=G.rankHigh(all)/759375,m=bits(all),b=bits(board);let d=cs.filter(c=>c>>2>top).length*.15;
+    if(v<5&&cs.some(c=>all.filter(x=>(x&3)===(c&3)).length>=4))d+=.8;for(let lo=1;lo<=9;lo++){const w=15<<lo;if((m&w)===w&&(b&w)!==w&&v<4){d+=.6;break;}}score[i]=v+d;}
+   let acc=0;for(const i of Array.from(mass.keys()).filter(i=>mass[i]>0).sort((a,b)=>score[b]-score[a]||share[b]-share[a]||a-b)){before[i]=acc;acc+=mass[i];}node.open={mass,before,total:acc};}
+  const {mass,before,total}=node.open;return mass[index]>0?1-Math.min(1,Math.max(0,((1-wide)*total-before[index])/mass[index])):1;
+ }
+ const opened=(node,r,keep)=>{const f=node.actions.indexOf('FOLD'),c=node.actions.indexOf('CALL');return keep>=1||f<0||c<0?r:r.map((p,a)=>a===f?p*keep:a===c?p+r[f]*(1-keep):p);};
+ // Combo i's row r as walk's w ({k,wide}) answers it, or null when neither applies.
+ const fitter=(node,w,reach,board)=>w.k<1?(i,r)=>scaled(node,r,tighten(node,i,w.k,reach,board)):w.wide<1?(i,r)=>opened(node,r,widen(node,i,w.wide,reach,board)):null;
  // Range-weighted action frequencies at one node of a solved flop: each combo
  // counts with its chart weight times the frequency of the acting player's own
- // earlier actions on this line. For flop reports; k<1 tightens the node as walk's k does.
- function aggregate(spot,flop,path,k=1){
+ // earlier actions on this line. For flop reports; k<1 tightens and wide<1 widens the node as walk's do.
+ function aggregate(spot,flop,path,k=1,wide=1){
   const nodes=new Map(flop.nodes.map(n=>[n.path,n])),node=nodes.get(path);if(!node)return null;
   const reach=reachOf(spot,flop,node.player,[[nodes,path]]),key=spot.game==='PLO4'?null:Object.keys(spot.flops).find(x=>spot.flops[x]===flop),board=key?C.cards(key):null;
-  const total=node.actions.map(()=>0);let mass=0;
-  for(let i=0;i<reach.length;i++)if(reach[i]){let r=row(node,i);if(!r)continue;if(k<1)r=scaled(node,r,tighten(node,i,k,reach,board));mass+=reach[i];r.forEach((p,a)=>total[a]+=reach[i]*p);}
+  const total=node.actions.map(()=>0),fit=fitter(node,{k,wide},reach,board);let mass=0;
+  for(let i=0;i<reach.length;i++)if(reach[i]){let r=row(node,i);if(!r)continue;if(fit)r=fit(i,r);mass+=reach[i];r.forEach((p,a)=>total[a]+=reach[i]*p);}
   return mass?{actions:node.actions,player:node.player,freq:total.map(x=>x/mass)}:null;
  }
  // The two players' seats: out of position first after the button.
@@ -209,10 +223,10 @@
   return{actions,probs,index};
  }
  // Each hand class's average action mix at a solved node, over its combos the player can hold, in the order of the
- // mapped actions. For the range grid. cut(i), when given, tightens combo i's row (see tighten).
+ // mapped actions. For the range grid. cut(i,r), when given, adjusts combo i's row (see fitter).
  function classMix(node,index,size,cut=null){
   const sum={},count={};
-  COMBOS.forEach((cs,i)=>{let r=row(node,i);if(!r)return;if(cut)r=scaled(node,r,cut(i));const k=C.handClass(cs),m=sum[k]||(sum[k]=Array(size).fill(0));r.forEach((p,a)=>{m[index[a]]+=p;});count[k]=(count[k]||0)+1;});
+  COMBOS.forEach((cs,i)=>{let r=row(node,i);if(!r)return;if(cut)r=cut(i,r);const k=C.handClass(cs),m=sum[k]||(sum[k]=Array(size).fill(0));r.forEach((p,a)=>{m[index[a]]+=p;});count[k]=(count[k]||0)+1;});
   const out={};for(const k in sum)out[k]=sum[k].map(x=>Math.round(x/count[k]*1000)/1000);return out;
  }
 
@@ -258,7 +272,7 @@
   if(!t||hand.done||hand.street!==2)return null;const line=turnLine(chunk,hand,t);if(!line)return null;
   const found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb),false,line.at);if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
   const cards=hand.holes[hand.actor].map(line.move);let r=row(found.node,comboIndex(cards)),cut=null;if(!r)return null;
-  if(found.k<1){const reach=reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),board=[...C.cards(t.key),line.move(hand.board[3])];cut=i=>tighten(found.node,i,found.k,reach,board);r=scaled(found.node,r,cut(comboIndex(cards)));}
+  if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]);r=cut(comboIndex(cards),r);}
   const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix,...line.offTree||found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:t.flop.iterations||0,exploitability:t.flop.exploitability,seconds:0,rangeAssumptions:[{seat:t.ip,range:'Chart range',source},{seat:t.oop,range:'Chart range',source}],
