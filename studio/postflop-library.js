@@ -144,9 +144,22 @@
  // The two players' seats: out of position first after the button.
  function seats(hand){const live=hand.living(),after=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));return{ip,oop};}
  // The spot for this chart line whose ranges still match, closest in stack-to-pot ratio (within 1.5x).
+ // Flops of the same spot from other libraries (the flops your Mac learned, see missing) are merged in.
+ const merged=new WeakMap();
  function pick(spots,range,potStart,stack,ip,oop){
-  const off=s=>Math.abs(Math.log((stack/potStart)/(s.stack/s.pot))),spot=spots.filter(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key&&sameRanges(s,range,ip,oop)).sort((a,b)=>off(a)-off(b))[0];
-  return spot&&off(spot)<=Math.log(1.5)?spot:null;
+  const off=s=>Math.abs(Math.log((stack/potStart)/(s.stack/s.pot))),fits=spots.filter(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key&&sameRanges(s,range,ip,oop)).sort((a,b)=>off(a)-off(b)),spot=fits[0];
+  if(!spot||off(spot)>Math.log(1.5))return null;
+  const twins=fits.filter(s=>s!==spot&&s.id===spot.id&&Math.abs(s.pot-spot.pot)<=1&&Math.abs(s.stack-spot.stack)<=1);if(!twins.length)return spot;
+  const cached=merged.get(spot);if(cached&&cached.twins.length===twins.length&&cached.twins.every((t,i)=>t===twins[i]&&cached.sizes[i]===Object.keys(t.flops).length))return cached.spot;
+  const out={...spot,flops:Object.assign({},...twins.map(t=>t.flops),spot.flops)};merged.set(spot,{twins,sizes:twins.map(t=>Object.keys(t.flops).length),spot:out});return out;
+ }
+ // The heads-up NLH flop of this hand when its chart line has a library spot but the flop itself
+ // (up to suits) was not solved: {spot, key}, for the bridge to solve with the library's own tree.
+ function missing(libraries,range,hand){
+  if(!range||hand.done||hand.street!==1||range.live.length!==2||range.game!=='NLH')return null;
+  const {ip,oop}=seats(hand),potStart=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),stack=Math.min(...[ip,oop].map(i=>hand.stacks[i]+hand.streetPaid[i]));
+  const spot=pick(libraries.flatMap(l=>l.spots),range,potStart,stack,ip,oop),key=canonical(hand.board).key;
+  return spot&&!spot.game&&!spot.flops[key]?{spot,key}:null;
  }
  // One street's actions as walk steps: bets and raises as chips added this street.
  function streetSteps(hand,street){
@@ -225,6 +238,6 @@
   if(!apply(chunk.nodes,line.flop.path)||!apply(line.turn.nodes,turn.path))return null;
   return weights;
  }
- const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry};
+ const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerPostflopLibrary=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

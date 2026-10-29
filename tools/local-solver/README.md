@@ -146,6 +146,15 @@ A phone can't reach this bridge, so when you tap **Solve this spot** on a spot o
 - A solve started from the app on this computer always goes first. A queued job that finds the solver busy waits for the next round.
 - After updating the bridge files, restart the bridge. It reads the saved link and picks up where it left off.
 
+## Flops your Mac learns
+
+The flop library holds about 100 of the 1,755 distinct flops for each preflop line, and any other flop is answered with the nearest solved flop of the same texture (a stand-in). When a heads-up flop like that comes up, the app adds it to a wanted list in your account (a `flopwant-…` row). When the bridge has no queued solves and the computer is otherwise idle (load under half its cores, so a long calibration run keeps it waiting), it solves the newest wanted flop with the library's own tree, ranges, pot and stack (`learn.cjs`). The new flop then matches the rest of the library exactly.
+
+- A solve from the app or the queue always comes first. It stops the flop being learned, and that flop is tried again later.
+- Learned flops are saved in `learned/<spot>/` next to `studio/` (`CITRUS_LEARNED_DIR` picks another folder), in the library's work-folder layout. A spot whose chart has been re-solved since then starts a fresh folder.
+- The app on this computer loads them from `GET /learned`, so they answer like any library flop. A phone that sends one of these flops to the Mac gets its answer from the learned flop straight away, without a solve, within the sync time.
+- To add them to the site's library for everyone, run `node tools/postflop/library.cjs bundle --out learned` in the bridge folder, then `tools/split-libraries.cjs` as usual.
+
 ## Licence
 
 TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO solver is part of this project.

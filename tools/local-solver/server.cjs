@@ -9,7 +9,7 @@
 //   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--plo-solver path/to/plo_solver] [--port 8787] [--threads N] [--memory MB]
 const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process'),{Worker}=require('worker_threads');
 const L=require('../../studio/local-solver.js');
-const {createQueue}=require('./queue.cjs');
+const {createQueue}=require('./queue.cjs'),learn=require('./learn.cjs');
 
 const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory'].includes(k)?Number(v):v;}
@@ -20,7 +20,13 @@ const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.on
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
 let job=null,finished=null;
-const queue=createQueue({port:args.port,threads:args.threads,busy:()=>!!job,status:()=>job&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}});
+// A flop being learned (learn.cjs) runs only while nothing else wants the solver: any solve from the app or the queue
+// stops it, and it is tried again later.
+const busy=()=>!!job&&!job.learning;
+const learnedCount=()=>{try{return (learn.library()?.spots||[]).reduce((n,s)=>n+Object.keys(s.flops).length,0);}catch{return 0;}};
+async function stopLearning(){const j=job;if(!j?.learning)return;j.cancelled=true;j.child.kill('SIGKILL');await j.closed;}
+const queue=createQueue({port:args.port,threads:args.threads,busy,status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000},
+ learn:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),stopLearning});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
@@ -28,7 +34,7 @@ function headers(req){
 }
 function send(req,res,code,body){res.writeHead(code,headers(req));res.end(JSON.stringify(body));}
 
-function solve(spec){
+function solve(spec,learning=false){
  return new Promise((resolve,reject)=>{
   // The solver runs in its own folder and writes result.json there; a relative
   // name keeps temp paths with spaces out of the solver's input.
@@ -36,7 +42,7 @@ function solve(spec){
   // The PLO solver stops itself a little before the bridge's timeout and still writes its result.
   fs.writeFileSync(file,plo?L.input(spec,{threads:args.threads,output:'result.json',memoryMB:args.memory,timeLimit:args.timeout*.95}):L.input(spec,{threads:args.threads,output:'result.json'}));
   const started=Date.now(),child=spawn(bin,plo?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir});
-  const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
+  const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null,learning};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
   const timer=setTimeout(()=>child.kill('SIGKILL'),args.timeout*1000);
   child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)mine.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)mine.exploitability=+m[1];}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
@@ -81,20 +87,23 @@ function solveSpot(spec){
 const server=http.createServer((req,res)=>{
  if(req.headers.origin&&!originOK(req.headers.origin))return send(req,res,403,{error:'This page is not allowed to use the local solver. Add its origin to RANGE_LAB_ORIGINS.'});
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
- if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:!!job,spot:true,linkedUser:queue.user,version:1});
+ if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy(),learning:!!job?.learning,learnedFlops:learnedCount(),spot:true,linkedUser:queue.user,version:1});
  // The app on this computer links the bridge to the signed-in account, so solves queued from other devices run here.
  if(req.method==='POST'&&req.url==='/link'){let body='';req.on('data',d=>{body+=d;if(body.length>4000)req.destroy();});req.on('end',()=>{try{queue.link(JSON.parse(body));send(req,res,200,{ok:true});}catch(error){send(req,res,400,{error:error.message});}});return;}
- if(req.method==='GET'&&req.url==='/status')return send(req,res,200,job?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
- if(req.method==='POST'&&req.url==='/cancel'){if(!job)return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
+ if(req.method==='GET'&&req.url==='/status')return send(req,res,200,busy()?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
+ if(req.method==='POST'&&req.url==='/cancel'){if(!busy())return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
  // A background solve's outcome, collected once: 202 while it runs.
- if(req.method==='GET'&&req.url==='/result'){if(job)return send(req,res,202,{busy:true});if(!finished)return send(req,res,404,{error:'No finished solve to collect.'});const f=finished;finished=null;return f.error?send(req,res,500,{error:f.error}):send(req,res,200,f.result);}
+ // The flops this computer learned, as one postflop library for the app here.
+ if(req.method==='GET'&&req.url==='/learned'){let lib=null;try{learn.refresh();lib=learn.library();}catch(error){return send(req,res,500,{error:error.message});}return send(req,res,200,lib||{none:true});}
+ if(req.method==='GET'&&req.url==='/result'){if(busy())return send(req,res,202,{busy:true});if(!finished)return send(req,res,404,{error:'No finished solve to collect.'});const f=finished;finished=null;return f.error?send(req,res,500,{error:f.error}):send(req,res,200,f.result);}
  if(req.method==='POST'&&(req.url==='/solve'||req.url==='/solve-async'||req.url==='/spot-async')){
-  if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
+  if(busy())return send(req,res,409,{error:'Another solve is already running on this computer.'});
   const multiway=req.url==='/spot-async';let body='';req.on('data',d=>{body+=d;if(body.length>(multiway?2e7:2e6))req.destroy();});
   req.on('end',async()=>{
    let spec;try{spec=multiway?validateSpot(JSON.parse(body)):L.validate(JSON.parse(body));}catch(error){return send(req,res,400,{error:error.message});}
    // Checked again here: two requests can both pass the check above before
-   // either body has arrived.
+   // either body has arrived. A flop being learned gives way.
+   await stopLearning();
    if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
    // /solve-async answers at once and keeps the outcome for GET /result, so a
    // solve of many minutes needs no long-open request.

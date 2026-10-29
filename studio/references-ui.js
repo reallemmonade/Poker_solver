@@ -23,7 +23,7 @@ function chartPostflopRanges(hand,observed,opts){
 // suits) were solved, and the flop bet sizes are close to the solved ones.
 function postflopLibraryReference(hand){
  if(!hand||hand.done||hand.street!==1||!postflopLibrary.libraries.length||!preflopLibrary.packs.length)return null;
- try{const range=PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,hand.actionLog);return PokerPostflopLibrary.query(postflopLibrary.libraries,range,hand);}catch{return null;}
+ try{const range=PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,hand.actionLog),q=PokerPostflopLibrary.query(postflopLibrary.libraries,range,hand);if((!q||q.solve.library.standIn)&&typeof noteMissingFlop==='function')noteMissingFlop(hand);return q;}catch{return null;}
 }
 // Turn strategies (Library → Preflop solver references → Import a turn-<spot>.ctl file). Each spot's
 // flops are kept apart in their own database, and one flop is unpacked only when a hand of that
