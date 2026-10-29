@@ -6,8 +6,9 @@ const RANKS='23456789TJQKA',POTS=['Walk','Limped','SRP','3-bet','4-bet+','Postfl
 function comboOf(cards){if(!cards||cards.length!==4)return cards||'';const a=cards[0],b=cards[2],s=cards[1]===cards[3],[hi,lo]=RANKS.indexOf(a)>=RANKS.indexOf(b)?[a,b]:[b,a];return hi===lo?hi+lo:hi+lo+(s?'s':'o');}
 function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const hi=RANKS.indexOf(combo[0]),lo=RANKS.indexOf(combo[1]),suited=combo[2]==='s';if(hi===lo)return'Pairs';if(lo>=8)return'Broadway';if(suited&&hi===12)return'Suited aces';if(suited&&hi-lo<=2)return'Suited connectors';return suited?'Other suited':'Other offsuit';}
 // A decision counts as a mistake when the solver measured a loss, or a chart choice is played under 5% in the source.
-// A chip-EV chart standing in for an ICM table does not model the payouts, so its choices are shown but never counted as mistakes.
-function gradeMistake(g){return g.referenceSource?!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+// A chip-EV chart standing in for an ICM table does not model the payouts, and an approximate (off-tree size) answer is not
+// the chart's own, so their choices are shown but never counted as mistakes.
+function gradeMistake(g){return g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
 function gradeCost(g){return g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,

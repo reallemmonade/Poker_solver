@@ -14,7 +14,7 @@ function leakClass(g){if(leakDrill.classes.has(g.id))return leakDrill.classes.ge
 // Your graded table decisions (of the given hands' facts), newest first. Only grades with a measured cost or a chart frequency count.
 function leakDecisions(facts=factsOf(state.histories)){const out=[];
  for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
-  const chart=!!g.referenceSource&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
+  const chart=!!g.referenceSource&&!g.approximate&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
   out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
  return out;}

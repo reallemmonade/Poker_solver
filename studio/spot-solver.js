@@ -43,7 +43,7 @@
  // Starting hands ordered by all-in equity against two random hands. Used only
  // when no explicit, charted or learned range describes a preflop action, so
  // a raiser or caller is not credited with any two cards.
- const PREFLOP_ORDER='AA KK QQ JJ TT 99 AKs 88 AQs AKo AJs ATs AQo KQs 77 KJs AJo KTs A9s KQo ATo QJs A8s 66 KJo QTs A7s K9s JTs KTo A9o QJo A5s A6s Q9s A8o QTo 55 A4s K8s K7s A3s K9o A7o J9s JTo Q8s T9s A2s K6s A5o A6o Q9o J8s A4o K5s 44 T8s K8o K4s Q7s J9o A3o K7o 98s J7s Q6s K3s T9o Q8o A2o K2s Q5s K6o T7s 97s K5o J8o Q4s 33 T8o 87s J6s Q3s J5s T6s K4o Q7o 98o K3o J4s Q2s Q6o 96s J7o 86s 76s Q5o T7o J3s K2o 97o 22 Q4o J2s 65s 87o T5s T4s 75s 85s 95s J6o T3s Q3o 54s J5o T6o 96o T2s 86o Q2o 84s 74s 76o 64s J4o 94s 93s 53s T5o J3o 92s 75o 63s 95o 65o T4o 85o J2o 43s 83s 73s 82s 52s T3o 54o 62s 64o 74o 42s 72s 94o 84o T2o 32s 93o 53o 92o 63o 43o 83o 73o 82o 52o 42o 62o 72o 32o'.split(' '),PREFLOP_SPAN=(()=>{const m=new Map();let done=0;for(const c of PREFLOP_ORDER){const n=c.length===2?6:c[2]==='s'?4:12;m.set(c,[done/1326,(done+n)/1326]);done+=n;}return m;})();
+ const PREFLOP_ORDER=G.preflopOrder,PREFLOP_SPAN=(()=>{const m=new Map();let done=0;for(const c of PREFLOP_ORDER){const n=c.length===2?6:c[2]==='s'?4:12;m.set(c,[done/1326,(done+n)/1326]);done+=n;}return m;})();
  function topShare(cls,p){const [a,b]=PREFLOP_SPAN.get(cls);return Math.min(1,Math.max(0,(p-a)/(b-a)));}
  function heuristicPreflop(config,actions,seat){
   const n=config.seats,bb=n===2?(config.button+1)%n:(config.button+2)%n,open=[.15,.5,.45,.3,.24,.2,.17,.15,.13],steps=[];let raises=0,width=1;
