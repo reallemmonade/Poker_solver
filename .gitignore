@@ -42,6 +42,8 @@
 !/tools/calibration/smart-calibration.sh
 !/tools/calibration/server-run.sh
 !/tools/calibration/refcheck.cjs
+!/tools/calibration/smart-helper.sh
+!/tools/calibration/helpers.sh
 !/tools/split-libraries.cjs
 !/tools/postflop/
 !/tools/postflop/README.md
