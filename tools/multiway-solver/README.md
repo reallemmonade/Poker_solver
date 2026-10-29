@@ -20,7 +20,7 @@ node tools/multiway-solver/test.cjs        # checks, about 2 minutes on 4 cores
 
 **Exploitability.** For each player, the gain of a best response against the other two's average strategies, in percent of the starting pot. The solver reports their mean. Three-player CFR has no convergence guarantee; this measures how far the result is from a Nash equilibrium of the tree.
 
-**Chance.** Turn and river solves enumerate every card, with exact suit isomorphism when the board and all three ranges allow it. A flop with every turn and river card does not fit any laptop (59 GB for the slim tree below, 88 GB with three flop sizes), so flop solves deal an evenly spread subset of turn cards and of river cards per turn. Every rank and suit keeps about its share. Each hand's values are rescaled by the cards it can see. The app's budget is 96 runouts (12 turn cards × 8 river cards); `runouts`, `turn_cards` and `river_cards` change it. Without a budget, the solver picks the most cards that fit `memory_limit_mb`.
+**Chance.** Turn and river solves enumerate every card, with exact suit isomorphism when the board and all three ranges allow it. A flop with every turn and river card does not fit any laptop (59 GB for the slim tree below, 88 GB with three flop sizes), so flop solves deal an evenly spread subset of turn cards and of river cards per turn. Every rank and suit keeps about its share. Each hand's values are rescaled by the cards it can see. The app's budget is 96 runouts (12 turn cards × 8 river cards) for wide ranges, scaled up for narrower ones (see below); `runouts`, `turn_cards` and `river_cards` change it. Without a budget, the solver picks the most cards that fit `memory_limit_mb`.
 
 ## Tree (what the app sends)
 
@@ -41,7 +41,22 @@ Turn and river solves get the full three sizes because they fit (a 1,600-combo t
 
 Measured on this repository's 4-core Linux container (about twice one core's throughput). An M3 Pro with 11 cores should be about 4–5 times faster, as for the PLO solver. Ranges are the app's built-in 6-max 100bb estimates, which are wide: SB 450, BB 770 and BTN 600 weighted combos for BTN opens, SB and BB call.
 
-MEASUREMENTS
+| Spot (combos: first, second, third to act) | Runouts | Memory (peak RSS) | 100 iterations | 200 iterations | 300 iterations |
+| --- | --- | --- | --- | --- | --- |
+| River Ks9h4d2c7s, BTN/SB/BB (403, 657, 505) | every card | 28 MB | 1.2%, 0.7 s | 1.2%, 1.4 s | 0.06% after 1,000, 6 s |
+| Turn Ks9h4d2c, BTN/SB/BB (415, 688, 520), full turn tree | every card | 1.4 GB | 2.7%, 2.7 min | 1.0%, 5.3 min | 0.64%, 7.8 min |
+| Flop Ks9h4d, BTN/SB/BB (416, 700, 525) | 12 × 8 | 1.5 GB | 2.2%, 3.3 min | 0.80%, 6.5 min | 0.38%, 9.8 min |
+| Flop Ks9h4d, BTN/SB/BB | 8 × 6 | 0.75 GB | 2.0%, 1.8 min | 0.68%, 3.5 min | 0.39%, 5.1 min |
+| Flop Ks9h4d, BTN/SB/BB | 16 × 10 | 2.4 GB | 2.1%, 5.4 min | 0.72%, 10.5 min | |
+| Flop Jh8h3c, CO/BTN/BB (656, 366, 290) | 12 × 8 | 1.0 GB | 1.5%, 2.5 min | 0.50%, 4.9 min | 0.28%, 7.2 min |
+| Flop Ks9h4d, SB squeeze vs CO and BTN (60, 84, 84) | 12 × 8 | 60 MB | 0.53%, 8 s | 0.34%, 14 s | 0.28%, 21 s |
+
+Exploitability is in percent of the pot. Times include the best-response check every 20 iterations.
+
+- **Mac:** at the app's flop target (1% of the pot, about 170 iterations for the widest pots) a BTN/SB/BB flop should take 1.5 to 2 minutes, a turn about 2 minutes, a river seconds. The app's estimates (`MW3_SECONDS` in `studio/spot-ui.js`) start there and correct themselves after each solve.
+- **How many runouts:** on the BTN/SB/BB flop the button's strategy after two checks, summed over its range, was 64/21/12/2% (check, 1/3, 2/3, 1.5x) with 48 runouts, 68/19/12/1% with 96, and 72/16/11/2% with 160. Frequencies move a few points between budgets. Single hands' mixes differ more (about 22% between 96 and 160 runouts), mostly among hands close to indifferent. So 96 is a fair working budget for live answers, and a library run should use more where time allows (`--runouts`).
+- **Narrow ranges get more runouts.** The app scales the budget with the ranges: 96 runouts for about 1,600 combos in all, proportionally more for narrower ranges, up to every card. A squeeze pot's 230 combos get about 670 runouts and still solve in a few minutes here.
+- **Every card on a wide flop** needs about 59 GB with this tree (88 GB with three sizes on every street), so it is out of reach of an 18 GB Mac.
 
 ## Input
 

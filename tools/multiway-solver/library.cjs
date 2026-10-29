@@ -9,8 +9,8 @@
 // Options: --threads (default: all cores), --accuracy (% of pot, default 0.5), --iterations (default
 // 300), --memory MB (default 70% of this computer's), --jobs N (flops at once), --limit N (stop after
 // N flops), --shard K/N (every Nth flop from the Kth) and --reverse 1, as in tools/postflop/library.cjs.
-// --runouts N caps turn x river cards dealt per flop line (default 96, as in the app; more is
-// closer to every card, and slower in proportion); --turn-cards T --river-cards R fix them instead.
+// --runouts N caps turn x river cards dealt per flop line (default auto, as in the app: 96 for wide
+// ranges, more for narrow ones; more is closer to every card, and slower in proportion); --turn-cards T --river-cards R fix them instead.
 // Ranges are the app's built-in preflop estimates (studio/spot-solver.js heuristicPreflop), the
 // ranges the app itself uses for these lines when no chart covers them. The preflop chart packs
 // stop at two players to the flop, so they have no three-way lines.
@@ -28,7 +28,7 @@ const SPOTS = {
   'co-btn-bb-squeeze': { label: '6-max 100bb · CO opens, BTN calls, BB squeezes to 12, CO and BTN call', steps: [f, f, open, call, f, { kind: 'raise', target: 1200 }, call, call] },
 };
 
-const args = { cmd: process.argv[2] || 'help', spots: 'btn-sb-bb', flops: '100', out: 'multiway-work', threads: String(os.cpus().length), accuracy: '0.5', iterations: '300', runouts: '96', memory: String(Math.round(os.totalmem() / 1048576 * .7)), solver: path.join(__dirname, 'mw_solver'), timeout: '7200', jobs: '1', name: 'Citrus Poker 3-way flop library' };
+const args = { cmd: process.argv[2] || 'help', spots: 'btn-sb-bb', flops: '100', out: 'multiway-work', threads: String(os.cpus().length), accuracy: '0.5', iterations: '300', runouts: 'auto', memory: String(Math.round(os.totalmem() / 1048576 * .7)), solver: path.join(__dirname, 'mw_solver'), timeout: '7200', jobs: '1', name: 'Citrus Poker 3-way flop library' };
 for (let i = 3; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, '')] = process.argv[i + 1];
 
 // Replays the line; the flop's pot, stack, the three players in postflop order and their
@@ -49,7 +49,7 @@ function spec(spot, board) {
   const ranges = spot.classes.map(cl => { const o = {}; for (const cs of G.combinations([...Array(52).keys()].filter(c => !dead.has(c)), 2)) { const w = cl[C.handClass(cs)]; if (w > 0) o[name(cs)] = w; } return o; });
   const t = L.MW_TREE.flop, sizes = {}, caps = {}; for (const [k, v] of Object.entries(t)) { sizes[k] = { bet: v.bet.map(x => Math.round(x * 1e4) / 1e4), raise: v.raise.map(x => Math.round(x * 1e4) / 1e4) }; caps[k] = L.MW_TREE.cap; }
   const hero = Object.keys(ranges[0])[0];
-  return L.validate({ version: 1, game: 'NLH3', board, pot: spot.pot, stack: spot.stack, minBet: 100, sizes, caps, lead: { flop: spot.seats.map(i => i === spot.raiser) }, allin: true, allinThreshold: L.MW_TREE.allinThreshold, runouts: Number(args.runouts), ranges, seats: spot.seats, path: [], hero, heroIndex: 0, accuracy: Number(args.accuracy), maxIterations: Number(args.iterations) });
+  return L.validate({ version: 1, game: 'NLH3', board, pot: spot.pot, stack: spot.stack, minBet: 100, sizes, caps, lead: { flop: spot.seats.map(i => i === spot.raiser) }, allin: true, allinThreshold: L.MW_TREE.allinThreshold, runouts: args.runouts === 'auto' ? L.mwRunouts(ranges) : Number(args.runouts), ranges, seats: spot.seats, path: [], hero, heroIndex: 0, accuracy: Number(args.accuracy), maxIterations: Number(args.iterations) });
 }
 function run(input, dir) {
   return new Promise((resolve, reject) => {

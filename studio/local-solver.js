@@ -128,6 +128,9 @@
  // even spread of turn and river cards when every card would not fit; turn and river solves use
  // every size and every card.
  const MW_TREE={flop:{flop:{bet:[1/3,2/3,1.5],raise:[2/3]},turn:{bet:[2/3],raise:[]},river:{bet:[2/3],raise:[]}},turn:{turn:{bet:[1/3,2/3,1.5],raise:[2/3]},river:{bet:[1/3,2/3,1.5],raise:[]}},river:{river:{bet:[1/3,2/3,1.5],raise:[2/3]}},cap:1,allinThreshold:.67,runouts:96},MW_MAX_COMBOS=1326;
+ // A flop's runout budget: 96 turn x river cards for wide ranges (about 1,600 combos in all), more in proportion
+ // for narrower ones, which solve faster (a squeeze pot's 230 combos get about 670), so a solve takes about as long.
+ function mwRunouts(ranges){const total=ranges.reduce((s,r)=>s+Object.keys(r).length,0);return Math.min(2352,Math.max(MW_TREE.runouts,Math.round(MW_TREE.runouts*1600/Math.max(1,total))));}
  function mwSpec(data,ranges,opt,config,h,start){
   const current=data.board.length-2,street=current-1,live=h.living();assert(live.length===3,'The 3-way solver needs exactly three players.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,seats=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
@@ -146,7 +149,7 @@
   const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
   const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
   const list=seats.map(combos),heroIndex=seats.indexOf(data.actor);if(!list[heroIndex][hero])list[heroIndex][hero]=.005;
-  return{version:1,game:'NLH3',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,lead,allin:true,allinThreshold:MW_TREE.allinThreshold,ranges:list,seats,path,hero,heroIndex,runouts:street===0?MW_TREE.runouts:0,
+  return{version:1,game:'NLH3',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,lead,allin:true,allinThreshold:MW_TREE.allinThreshold,ranges:list,seats,path,hero,heroIndex,runouts:street===0?mwRunouts(list):0,
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||.5)),maxIterations:Math.min([300,400,1000][street],Math.max(10,Number(opt.localIterations)||1000))};
  }
  function validateMW(s){
@@ -369,6 +372,6 @@
   }
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

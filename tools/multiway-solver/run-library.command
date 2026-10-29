@@ -7,5 +7,5 @@ out="${OUT:-$HOME/Desktop/Poker_Solver/multiway-work}"
 [ -x tools/multiway-solver/mw_solver ] || bash tools/local-solver/install-mac.sh --plo-only
 keep=""; command -v caffeinate >/dev/null && keep="caffeinate -i"
 $keep node tools/multiway-solver/library.cjs solve --out "$out" \
-  --spots "${SPOTS:-btn-sb-bb,co-btn-bb,co-btn-sb-squeeze,co-btn-bb-squeeze,hj-co-bb,utg-btn-bb}" --flops "${FLOPS:-100}" --accuracy "${ACCURACY:-1}" --iterations "${ITERATIONS:-300}" --runouts "${RUNOUTS:-96}"
+  --spots "${SPOTS:-btn-sb-bb,co-btn-bb,co-btn-sb-squeeze,co-btn-bb-squeeze,hj-co-bb,utg-btn-bb}" --flops "${FLOPS:-100}" --accuracy "${ACCURACY:-1}" --iterations "${ITERATIONS:-300}" --runouts "${RUNOUTS:-auto}"
 node tools/multiway-solver/library.cjs bundle --out "$out"
