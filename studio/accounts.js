@@ -121,7 +121,7 @@ const citrusAccount=(()=>{
     else if(forgot){await api('POST','/api/auth/forgot',{login:val('uiAccountUser')},null,waking);resetLogin=val('uiAccountUser').trim();mode='reset';render();}
     else if(reset)await signIn('reset',{login:resetLogin,code:val('uiAccountCode'),password:val('uiAccountPass')});
     else await signIn('login',{username:val('uiAccountUser'),password:val('uiAccountPass')});}
-   catch(e){out.textContent=e.message;submit.disabled=false;}};
+   catch(e){out.textContent=e.message;submit.textContent=label;submit.disabled=false;}};
  }
  function wireEyes(form){const eye=form?.querySelector('.ui-eye');if(!eye)return;eye.onclick=()=>{const show=eye.getAttribute('aria-pressed')!=='true';eye.setAttribute('aria-pressed',String(show));eye.setAttribute('aria-label',show?'Hide password':'Show password');form.querySelectorAll('.ui-pass input').forEach(i=>i.type=show?'text':'password');};}
  function mount(top,settingsButton){
