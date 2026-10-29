@@ -19,11 +19,11 @@ code(){ git -C "$here" ls-files -z | rsync -a0 --files-from=- "$here/" root@$1:$
 flops(){ rsync -aKL --ignore-existing --include '*/' --include '*.json' --include '*.turn.json.gz' --exclude 'spot.json' --exclude '*' "$1" "$2" 2>/dev/null; }
 pull(){ local d; for d in ev1 ev2 flop-v6; do flops root@$1:$work/$d/ "$W/$d/"; done; }
 # Charts go out only once this run has moved past writing them: charts1 when pass 2 has started
-# (ev2/ exists), v6 once its flop library has (flop-v6/ exists).
+# (ev2/ exists), v6 once it is the finished copy of charts-v6/ (flop-v6/ may exist early for tree.json).
 push(){ local d
   for d in ev1 ev2 flop-v6; do [ -d "$W/$d" ] && ssh $1 "mkdir -p $work/$d" && flops "$W/$d/" root@$1:$work/$d/; done
   [ -d "$W/ev2" ] && [ -f "$W/charts1/preflop-library.json.gz" ] && rsync -a --ignore-existing "$W/charts1/preflop-library.json.gz" root@$1:$work/charts1/
-  [ -d "$W/flop-v6" ] && [ -f "$W/preflop-library-v6-calibrated.json.gz" ] && rsync -a --ignore-existing "$W/preflop-library-v6-calibrated.json.gz" root@$1:$work/
+  [ -f "$W/preflop-library-v6-calibrated.json.gz" ] && cmp -s "$W/preflop-library-v6-calibrated.json.gz" "$W/charts-v6/preflop-library.json.gz" && rsync -a --ignore-existing "$W/preflop-library-v6-calibrated.json.gz" root@$1:$work/
   return 0; }
 case $cmd in
 setup) ip=$2
