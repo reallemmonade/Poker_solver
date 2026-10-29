@@ -133,6 +133,8 @@ const citrusAccount=(()=>{
    if(account&&sync.status!=='expired')api('GET','/api/auth/me').then(r=>{if(!account||r.user.id!==account.user.id||r.user.email===account.user.email)return;account.user=r.user;write(ACCOUNT,account);if(!dialog.querySelector('#uiEmailForm input:focus'))render();}).catch(()=>{});};
   render();setInterval(()=>{if(dialog.open&&account)render();},30000);
  }
+ // Signing in or out in another tab switches this device's data, so this tab follows; a fresh token for the same account is just adopted.
+ addEventListener('storage',e=>{if(e.key!==ACCOUNT)return;let next=null;try{next=JSON.parse(e.newValue||'null')}catch{}if(!next?.token||!next?.user?.id)next=null;if((next?.user.id||null)!==(uid()||null))return location.reload();if(next){account=next;if(sync.status==='expired'){sync.status='waiting';schedule(500);}}});
  if(account){addEventListener('load',()=>schedule(1500));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')run();else schedule(500);});addEventListener('online',()=>schedule(500));}
  return{dbName,changed,run,mount,signIn,signOut,get user(){return account?.user||null},get link(){return account?{api:API||location.origin,token:account.token,user:account.user.id}:null},get status(){return sync.status},synced};
 })();
