@@ -17,7 +17,7 @@ const citrusAccount=(()=>{
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){
   if(!API)throw Object.assign(Error('Accounts need the hosted site.'),{status:0});
-  let res;for(let attempt=0;;attempt++){try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined});break;}catch{if(!wake||attempt>=4){
+  let res;for(let attempt=0;;attempt++){try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined,...!wake&&AbortSignal.timeout?{signal:AbortSignal.timeout(9e4)}:{}});break;}catch{if(!wake||attempt>=4){
    // Tell a blocked request (server reachable, browser refused the answer) apart from no connection at all.
    let reachable=false;if(wake)try{await fetch(API+'/api/health',{mode:'no-cors',cache:'no-store'});reachable=true;}catch{}
    throw Object.assign(Error(!wake?'No connection. Your work stays saved on this device.':reachable?'The browser blocked the account server ('+new URL(API).host+') on this page ('+location.origin+').':'Could not reach the account server ('+new URL(API).host+'). Check your connection and try again.'),{status:0});}if(typeof wake==='function')wake();await new Promise(r=>setTimeout(r,[3000,6000,10000,15000][attempt]));}}
