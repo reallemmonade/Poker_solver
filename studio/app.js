@@ -71,6 +71,7 @@ function clearCustomBetError(){if(state.customError&&$('status').textContent===s
 // Solver help: the analysis pane and solved size presets. A hand where any of your decisions had it on, or every card was
 // revealed, is marked assisted; only unassisted hands count toward leaks and insights.
 function solverHelpOn(){return $('solverHelp')?$('solverHelp').checked:true}
+function markAssisted(help){const h=state.hand;if(h&&!h.done&&($('reveal').checked||$('controlAll').checked||help&&h.actor===state.hero)){h.assisted=true;saveLiveSession();}}
 function chooseAction(action){if(!state.hand||state.hand.done||playBusy()||tableView.playing)return;clearCustomBetError();if(state.hand.actor===state.hero&&(solverHelpOn()||$('reveal').checked||$('controlAll').checked))state.hand.assisted=true;const hand=state.hand,before=hand.clone(),baseKey=PokerSpot.publicKey(observedData(hand)),chart=hand.street===0?preflopReference(hand):null,solved=activeSpotResult(hand)||(chart?.supported?chart:null),task=state.pending?.automatic&&state.pending.baseKey===baseKey?state.pending:null,item={kind:'play',action,background:true,hand:before,live:hand,baseKey};
  applyPlayAction(action);
  // The automatic analysis is for a decision that is gone, so stop it without a 'stopped' message.
