@@ -132,6 +132,8 @@ A phone can't reach this bridge, so when you tap **Solve this spot** on a spot o
 - **Linking:** open the app on this computer once while signed in, with **Solver on your Mac** on. The app hands the bridge your account (`POST /link`). The bridge keeps it in `~/.citrus-poker-bridge.json` (readable only by you; `CITRUS_BRIDGE_LINK` picks another file), and `/health` shows `linkedUser`.
 - **Queue:** every 20 seconds the bridge pulls your account's changes and runs the oldest queued `solvejob-…` row through its own endpoints (`queue.cjs`, `queue-worker.cjs`). It marks each job running, then done or failed, and writes a done job's answer as a saved spot.
 - **Heartbeat:** every 3 minutes the bridge posts a `macsolver` row with the time, its threads and the computer's load. The phone uses it to tell you whether the Mac is online or busy, and adjusts the time estimate to match.
+- **Progress:** while a queued solve runs, the bridge pushes its progress every 10 seconds. Progress is how far exploitability has fallen toward the target, or elapsed time against the estimate for multiway solves, along with the time left. The phone shows it as a bar.
+- **Cancel:** a job cancelled on the phone, by hand or because you acted before the answer came, is skipped if it hasn't started. If it's running, it stops at the next progress check.
 - A solve started from the app on this computer always goes first. A queued job that finds the solver busy waits for the next round.
 - After updating the bridge files, restart the bridge. It reads the saved link and picks up where it left off.
 

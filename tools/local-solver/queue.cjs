@@ -2,15 +2,31 @@
 // Solves sent from your other devices. A phone can't reach this bridge, so it queues a spot in your account
 // instead: a 'solvejob-<hash>' meta row holding the spot, its ranges and the solve options (studio/spot-ui.js,
 // sendToMac). Once the app on this computer has linked the bridge to your account (POST /link), the bridge pulls
-// your account's changes every 20 seconds, solves queued spots one at a time through its own endpoints, and
+// your account's changes every 20 seconds, solves queued spots one at a time through its own endpoints (a job the
+// phone cancels stops at the next progress check, within 10 seconds), and
 // pushes each answer back as the saved spot the phone looks for, then marks the job done or failed. Every few
 // minutes it also pushes a 'macsolver' heartbeat (last seen, threads, load) so the phone can say whether this
 // computer is online and busy.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
-const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000;
+const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000,PROGRESS_MS=10000;
 
-function createQueue({port,threads,busy,log=console.log}){
- let link=null,cursor=0,running=null,timer=null,beat=0;const jobs=new Map();
+// How far a running solve has got, pushed with the job every 10 seconds. TexasSolver and the PLO solver report
+// exploitability (% of the pot), which falls roughly geometrically, so progress is how far its log has moved from
+// the first reading toward the job's target; reaching the iteration cap ends a solve too. Multiway solves have no
+// target, so they count time against the estimate. Time left extrapolates the rate so far once there is one.
+function progressOf(job,s,first){
+ if(!s)return{phase:'preparing',p:0,remaining:Math.max(1,job.seconds||60)};
+ const target=Number(job.options?.localAccuracy)||0,cap=Number(job.options?.localIterations)||0,e=Number(s.exploitability),est=Math.max(1,job.seconds||60);let p=0;
+ if(target>0&&e>0){if(!(first.e>0))first.e=e;if(first.e>target*1.01)p=Math.log(first.e/e)/Math.log(first.e/target);}
+ if(cap>0&&s.iterations>0)p=Math.max(p,s.iterations/cap);
+ // Until the solver's first reading, and for multiway solves, time against the estimate stands in (up to 10%).
+ if(!(target>0))p=s.seconds/est;else if(p<.1)p=Math.max(p,Math.min(.1,.1*s.seconds/est));
+ p=Math.min(.99,Math.max(0,p||0));
+ const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
+ return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
+}
+function createQueue({port,threads,busy,status=()=>null,log=console.log}){
+ let link=null,cursor=0,running=null,timer=null,beat=0,current=null;const jobs=new Map();
  try{const saved=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;}}catch{}
  const save=()=>{try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
  async function api(method,route,body){
@@ -18,6 +34,7 @@ function createQueue({port,threads,busy,log=console.log}){
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value)=>({store:'meta',id,t:Date.now(),data:{id,value}});
+ const heartbeat=()=>meta('macsolver',{seen:Date.now(),threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
    for(const r of page.rows)if(r.store==='meta'&&/^solvejob-/.test(r.id)&&r.data?.value&&typeof r.data.value==='object')jobs.set(r.id,{...r.data.value,t:r.t});
@@ -27,7 +44,8 @@ function createQueue({port,threads,busy,log=console.log}){
  function solve(job){
   return new Promise(resolve=>{
    const worker=new Worker(path.join(__dirname,'queue-worker.cjs'),{workerData:{observed:job.observed,options:job.options,extraAction:job.extraAction,url:'http://127.0.0.1:'+port}});let out=null;
-   worker.on('message',m=>{out=m;});worker.on('error',e=>{out={error:e.message};});worker.on('exit',()=>resolve(out||{error:'The solve stopped without an answer.'}));
+   current={stop(){out={cancelled:true};fetch('http://127.0.0.1:'+port+'/cancel',{method:'POST'}).catch(()=>{});worker.terminate();}};
+   worker.on('message',m=>{out=m;});worker.on('error',e=>{out={error:e.message};});worker.on('exit',()=>{current=null;resolve(out||{error:'The solve stopped without an answer.'});});
   });
  }
  async function runNext(){
@@ -35,7 +53,12 @@ function createQueue({port,threads,busy,log=console.log}){
   const next=[...jobs.entries()].filter(([,j])=>j.status==='queued'||j.status==='running').sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0))[0];if(!next)return;
   const [id,job]=next,started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
   await api('POST','/api/sync',{rows:[meta(id,started)]});log('Solving a spot sent from your account ('+id+').');
-  const out=await solve(job),result=out.result;
+  // Progress goes up every 10 seconds while the solve runs, and the heartbeat with it: a long solve holds the
+  // regular round, and the phone should still see this computer as online.
+  const first={},report=async()=>{try{await pull();}catch{}if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,progress:{...progressOf(job,status(),first),at:Date.now()}})];if(Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
+  const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);}const result=out.result;
+  // Cancelled from the phone: the job row already says so, so nothing goes back.
+  if(out.cancelled){log('Cancelled '+id+'.');return;}
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'})]});return;}
   const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
@@ -45,7 +68,7 @@ function createQueue({port,threads,busy,log=console.log}){
  async function tick(){
   if(!link||running)return;
   running=(async()=>{try{
-   if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[meta('macsolver',{seen:Date.now(),threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()})]});}
+   if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[heartbeat()]});}
    await pull();if(!busy())await runNext();
   }catch(e){if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
@@ -61,4 +84,4 @@ function createQueue({port,threads,busy,log=console.log}){
   tick
  };
 }
-module.exports={createQueue};
+module.exports={createQueue,progressOf};
