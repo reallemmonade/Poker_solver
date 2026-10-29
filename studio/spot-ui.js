@@ -146,7 +146,7 @@ function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs
 function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+' min ago':Math.round(m/60)+' h ago';}
 // Between reports the bar keeps moving at the reported rate, and it never steps back when a new report is lower.
 spotUI.shownProgress=new Map();
-function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(j.rowId)||0));spotUI.shownProgress.set(j.rowId,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
+function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,run=j.rowId+' '+j.startedAt,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(run)||0));spotUI.shownProgress.set(run,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
 function jobState(j){
  if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
  if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
