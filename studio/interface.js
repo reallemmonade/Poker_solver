@@ -67,7 +67,7 @@ function initInterface(){
  // Phones: everything under the felt (betting bar, pre-actions, Next hand) lives in a dock whose height only grows, so
  // the table never jumps when buttons appear or swap (interface.css sizes the felt from --dock).
  {let dock=140;const fit=()=>{if(!tablePane.offsetParent||getComputedStyle($('table')).flexGrow!=='0')return;let h=0,seen=false;for(const el of tablePane.children){if(el.id==='table'){seen=true;continue;}if(!seen)continue;const cs=getComputedStyle(el);if(cs.display!=='none')h+=el.offsetHeight+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom);}h=Math.ceil(h);if(h>dock){dock=h;tablePane.style.setProperty('--dock',dock+'px');}};
-  const watch=new ResizeObserver(fit);for(const el of [$('playActions'),sessionLine])watch.observe(el);}
+  const watch=new ResizeObserver(fit),all=()=>{for(const el of tablePane.children)if(el.id!=='table')watch.observe(el);};all();new MutationObserver(all).observe(tablePane,{childList:true});}
  const compatibility=create('div','hide');compatibility.hidden=true;compatibility.append($('tableTitle'),$('samples'));tablePane.append(compatibility);
  play.querySelector('.table-legend')?.remove();playTop.remove();
  analysisPane.append(create('div','ui-analysis-title','<h2>This decision</h2>'),create('div','ui-analysis-controls'));
@@ -114,7 +114,8 @@ function initInterface(){
  document.querySelector('.foot').hidden=true;
  function buttonNode(label,id){const node=create('button','btn secondary',label);node.id=id;node.type='button';return node;}
  function showDialog(d){ui.lastFocus=document.activeElement;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}}
- $('uiEditGame').onclick=()=>{gameError.hidden=true;ui.sizeConfirm=null;showDialog(gameDialog);refresh();};$('uiGameCancel').onclick=()=>{if(state.job==='spotSolve')$('spotStop').onclick();else if(!$('stop').disabled)$('stop').onclick();};$('uiSettingsButton').onclick=()=>showDialog(settingsDialog);// Backups and Help live in the Account sheet.
+ $('uiEditGame').onclick=()=>{gameError.hidden=true;ui.sizeConfirm=null;showDialog(gameDialog);refresh();};// Queued assessments wait while the game is being edited, so Cancel calculation unlocks the settings instead of starting the next one.
+ gameDialog.addEventListener('close',()=>{if(!state.busy)pumpGrades();});$('uiGameCancel').onclick=()=>{if(state.job==='spotSolve')$('spotStop').onclick();else if(!$('stop').disabled)$('stop').onclick();};$('uiSettingsButton').onclick=()=>showDialog(settingsDialog);// Backups and Help live in the Account sheet.
  $('uiAccountDialog').addEventListener('click',event=>{const go=event.target.closest('[data-account-go]')?.dataset.accountGo;if(!go)return;$('uiAccountDialog').close();if(go==='help'){showDialog(settingsDialog);guide.open=true;}else navigate('transfer');});
  const openHistory=()=>{if(liveGrid.scrollWidth>liveGrid.clientWidth+4)ui.showPane(0,true);else historyPane.scrollIntoView({block:'nearest',behavior:glide()});};$('uiShowHistory').onclick=openHistory;handLine.querySelector('[data-history]').onclick=openHistory;historyPane.querySelector('[data-pane-edit]').onclick=()=>$('uiEditGame').click();historyPane.querySelector('[data-pane-friends]').onclick=()=>navigate('friends');
  $('uiTopicsButton').onclick=()=>{practiceTopics.open=!practiceTopics.open;if(practiceTopics.open)practiceTopics.scrollIntoView({block:'nearest',behavior:glide()});};$('uiQuizHistoryButton').onclick=()=>{quizHistory.open=!quizHistory.open;};
