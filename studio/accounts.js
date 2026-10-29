@@ -17,7 +17,7 @@ const citrusAccount=(()=>{
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){
   if(!API)throw Object.assign(Error('Accounts need the hosted site.'),{status:0});
-  let res;for(let attempt=0;;attempt++){try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined});break;}catch{if(!wake||attempt>=4){
+  let res;for(let attempt=0;;attempt++){try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined,...!wake&&AbortSignal.timeout?{signal:AbortSignal.timeout(9e4)}:{}});break;}catch{if(!wake||attempt>=4){
    // Tell a blocked request (server reachable, browser refused the answer) apart from no connection at all.
    let reachable=false;if(wake)try{await fetch(API+'/api/health',{mode:'no-cors',cache:'no-store'});reachable=true;}catch{}
    throw Object.assign(Error(!wake?'No connection. Your work stays saved on this device.':reachable?'The browser blocked the account server ('+new URL(API).host+') on this page ('+location.origin+').':'Could not reach the account server ('+new URL(API).host+'). Check your connection and try again.'),{status:0});}if(typeof wake==='function')wake();await new Promise(r=>setTimeout(r,[3000,6000,10000,15000][attempt]));}}
@@ -65,7 +65,7 @@ const citrusAccount=(()=>{
   if(!account)return;if(sync.running){sync.again=true;return sync.running;}
   sync.running=(async()=>{let session=null;
    const first=!read(key('citrus-sync-seeded-v1'),false);sync.status='syncing';render();
-   try{if(first)await seed();await push();const got=await pull();session=got.session;sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';
+   try{if(first)await seed();let full=null;await push().catch(e=>{if(e.status!==507)throw e;full=e;});const got=await pull();session=got.session;if(full){sync.status='full';sync.note=full.message;}else{sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';}
     if(got.hands||got.grades)try{refreshSharedHands()}catch{}if(got.solves)try{refreshSavedSpots()}catch{}
     if(got.hands||got.grades||got.solves||got.meta||got.prefs)dispatchEvent(new CustomEvent('citrus-synced',{detail:got}));
     // Settings and preferences from another device apply on a fresh load; reload once after the first sync if no hand is live.
@@ -86,7 +86,7 @@ const citrusAccount=(()=>{
   account={token:res.token,user:res.user};write(ACCOUNT,account);location.reload();
  }
  async function signOut(){const old=account;if(old){try{await push()}catch{}api('POST','/api/auth/logout',{},old.token).catch(()=>{});}account=null;write(ACCOUNT,null);location.reload();}
- async function deleteAccount(password){await api('POST','/api/account/delete',{password});for(const n of ['citrus-sync-queue-v1','citrus-sync-cursor-v1','citrus-sync-seeded-v1','citrus-sync-at-v1','citrus-prefs-seen-v1'])write(key(n),null);account=null;write(ACCOUNT,null);location.reload();}
+ async function deleteAccount(password){await api('POST','/api/account/delete',{password});for(const n of ['citrus-sync-queue-v1','citrus-sync-cursor-v1','citrus-sync-seeded-v1','citrus-sync-at-v1','citrus-prefs-seen-v1'])write(key(n),null);if(read(OWNER,null)===uid())write(OWNER,null);account=null;write(ACCOUNT,null);location.reload();}
  // Interface: a round account button beside Settings and one dialog.
  const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
  let dialog=null,button=null,mode='login',resetLogin='';
@@ -121,7 +121,7 @@ const citrusAccount=(()=>{
     else if(forgot){await api('POST','/api/auth/forgot',{login:val('uiAccountUser')},null,waking);resetLogin=val('uiAccountUser').trim();mode='reset';render();}
     else if(reset)await signIn('reset',{login:resetLogin,code:val('uiAccountCode'),password:val('uiAccountPass')});
     else await signIn('login',{username:val('uiAccountUser'),password:val('uiAccountPass')});}
-   catch(e){out.textContent=e.message;submit.disabled=false;}};
+   catch(e){out.textContent=e.message;submit.textContent=label;submit.disabled=false;}};
  }
  function wireEyes(form){const eye=form?.querySelector('.ui-eye');if(!eye)return;eye.onclick=()=>{const show=eye.getAttribute('aria-pressed')!=='true';eye.setAttribute('aria-pressed',String(show));eye.setAttribute('aria-label',show?'Hide password':'Show password');form.querySelectorAll('.ui-pass input').forEach(i=>i.type=show?'text':'password');};}
  function mount(top,settingsButton){
@@ -133,6 +133,8 @@ const citrusAccount=(()=>{
    if(account&&sync.status!=='expired')api('GET','/api/auth/me').then(r=>{if(!account||r.user.id!==account.user.id||r.user.email===account.user.email)return;account.user=r.user;write(ACCOUNT,account);if(!dialog.querySelector('#uiEmailForm input:focus'))render();}).catch(()=>{});};
   render();setInterval(()=>{if(dialog.open&&account)render();},30000);
  }
+ // Signing in or out in another tab switches this device's data, so this tab follows; a fresh token for the same account is just adopted.
+ addEventListener('storage',e=>{if(e.key!==ACCOUNT)return;let next=null;try{next=JSON.parse(e.newValue||'null')}catch{}if(!next?.token||!next?.user?.id)next=null;if((next?.user.id||null)!==(uid()||null))return location.reload();if(next){account=next;if(sync.status==='expired'){sync.status='waiting';schedule(500);}}});
  if(account){addEventListener('load',()=>schedule(1500));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')run();else schedule(500);});addEventListener('online',()=>schedule(500));}
  return{dbName,changed,run,mount,signIn,signOut,get user(){return account?.user||null},get link(){return account?{api:API||location.origin,token:account.token,user:account.user.id}:null},get status(){return sync.status},synced};
 })();
