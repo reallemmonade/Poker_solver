@@ -28,8 +28,10 @@ function progressOf(job,s,first){
 }
 function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=async()=>{},log=console.log}){
  let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null;const jobs=new Map(),wants=new Map();
- try{const saved=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;}}catch{}
- const save=()=>{try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
+ // Open jobs and wanted flops are kept with the cursor: a restart pulls only what changed since, so they would be lost.
+ const open=(m,...states)=>[...m].filter(([,v])=>states.includes(v.status));
+ try{const {jobs:j,wants:w,...saved}=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;for(const [id,v]of Array.isArray(j)?j:[])jobs.set(id,v);for(const [id,v]of Array.isArray(w)?w:[])wants.set(id,v);}}catch{}
+ const save=()=>{try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor,jobs:open(jobs,'queued','running'),wants:open(wants,'wanted','learning')}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
  async function api(method,route,body){
   const r=await fetch(link.api.replace(/\/$/,'')+route,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+link.token},body:body?JSON.stringify(body):undefined});
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
@@ -101,7 +103,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=
   get user(){return link?.user||null},
   link(body){const api=String(body?.api||''),token=String(body?.token||''),user=String(body?.user||'');
    if(!/^https:\/\/[a-z0-9.-]+(:\d+)?$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(api.replace(/\/$/,''))||!/^[A-Za-z0-9_-]{20,100}$/.test(token)||!/^[A-Za-z0-9_-]{1,40}$/.test(user))throw Error('The account link is malformed.');
-   if(link?.user!==user||link?.api!==api)cursor=0;link={api,token,user};beat=0;save();log('Linked to your account: solves sent from your other devices run here.');start();},
+   if(link?.user!==user||link?.api!==api){cursor=0;jobs.clear();wants.clear();}link={api,token,user};beat=0;save();log('Linked to your account: solves sent from your other devices run here.');start();},
   tick
  };
 }
