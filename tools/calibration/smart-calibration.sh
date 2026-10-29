@@ -41,9 +41,9 @@ EXTRA=hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj,hj-co-3bet,co-sb-3bet,
 at(){ # spots depth: ids at that depth (100bb ids carry no suffix)
   local out=() id; for id in ${1//,/ }; do
     if [ "$2" = 100 ]; then out+=($id); elif [ "$2" = 20 ] && [[ $id == *3bet ]]; then :; else out+=($id-$2bb); fi
-  done; (IFS=,; echo "${out[*]}")
+  done; (IFS=,; echo "${out[*]-}")
 }
-all(){ local d s=""; for d in 20 50 100 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+all(){ local d x s=""; for d in 20 50 100 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve(){ # charts out spots flops iterations [more args]
   node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:6}" || say "FAILED solve into $2"
 }
@@ -85,7 +85,7 @@ say "CALIBRATION DONE"
 # above 1.2% of the pot again at 400; limped pots at 400. 100bb first.
 say "FLOP LIBRARY on v6 (20-200bb at $DEPTH_FLOPS flops, 100bb at 100)"
 F=$W/flop-v6; mkdir -p $F
-other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+other(){ local d x s=""; for d in 20 50 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve $V6 $F $SRP 100 150 --turn $TURN
 solve $V6 $F $LIMP 100 400 --turn $TURN
 solve $V6 $F $EXTRA $EXTRA_FLOPS 150
