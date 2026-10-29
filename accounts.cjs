@@ -110,7 +110,9 @@ ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data
  };
 }
 
-function chooseStore(){const turso=process.env.TURSO_DATABASE_URL;if(turso)try{return libsqlStore(turso,process.env.TURSO_AUTH_TOKEN)}catch(e){console.error('Accounts are off: the Turso driver did not load ('+e.message+'). Run npm install.');return null;}const url=process.env.DATABASE_URL;if(url)try{return postgresStore(url)}catch(e){console.error('Accounts are off: the Postgres driver did not load ('+e.message+'). Run npm install.');return null;}if(process.env.RENDER&&!process.env.ACCOUNTS_IN_MEMORY)return null;return memoryStore();}
+// Why accounts are off, for /api/health (never includes secrets).
+let offReason='';
+function chooseStore(){const turso=process.env.TURSO_DATABASE_URL;if(turso)try{return libsqlStore(turso.trim(),(process.env.TURSO_AUTH_TOKEN||'').trim())}catch(e){offReason='Turso driver did not load ('+e.message+'); the build command must run npm install';console.error('Accounts are off: '+offReason);return null;}const url=process.env.DATABASE_URL;if(url)try{return postgresStore(url)}catch(e){offReason='Postgres driver did not load ('+e.message+'); the build command must run npm install';console.error('Accounts are off: '+offReason);return null;}if(process.env.RENDER&&!process.env.ACCOUNTS_IN_MEMORY){offReason='TURSO_DATABASE_URL is not set on this service';return null;}return memoryStore();}
 
 // Password-reset email goes through Resend (RESEND_API_KEY, needs a verified domain) or Brevo (BREVO_API_KEY, a verified
 // sender address is enough); EMAIL_FROM is the sender, e.g. "Citrus Poker <you@example.com>".
@@ -123,8 +125,8 @@ function chooseMailer(){
 }
 
 function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMailer()}){
- let ready=store?store.init().then(()=>true,e=>{console.error('Account database could not start:',e.message);ready=null;return false;}):null;
- async function db(){if(!store)throw err(503,'Accounts are not switched on for this server yet.');if(!ready)ready=store.init().then(()=>true,()=>{ready=null;return false;});if(!await ready)throw err(503,'The account database is not reachable right now. Your work stays saved on this device.');return store;}
+ let ready=store?store.init().then(()=>true,e=>{console.error('Account database could not start:',e.message);lastError=e.message;ready=null;return false;}):null,lastError='';
+ async function db(){if(!store)throw err(503,'Accounts are not switched on for this server yet.');if(!ready)ready=store.init().then(()=>true,e=>{lastError=e.message;ready=null;return false;});if(!await ready)throw err(503,'The account database is not reachable right now. Your work stays saved on this device.');return store;}
  const cleanName=value=>String(value||'').replace(/[<>\u0000-\u001f]/g,'').trim();
  const publicUser=u=>({id:u.id,username:u.username,name:u.name,email:u.email||null});
  const cleanEmail=value=>String(value||'').trim().toLowerCase(),validEmail=e=>e.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(e);
@@ -141,7 +143,7 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
    const key=r.store+'\u0000'+r.id,old=out.get(key);if(!old||old.t<r.t)out.set(key,{store:r.store,id:r.id,t:r.t,size,data});
   }return[...out.values()];
  }
- return async function route(req,res,parts,url){
+ const route=async function(req,res,parts,url){
   const kind=parts[1],verb=parts[2];
   if(kind==='auth'&&req.method==='POST'&&(verb==='signup'||verb==='login')){
    limit(req,verb,verb==='signup'?10:30,15*60*1000);const s=await db(),{data,name,username,password}=await credentials(req);
@@ -200,5 +202,8 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   }
   return json(res,404,{error:'Not found.'});
  };
+ // Health line: which database, whether it answered, and whether reset email can be sent.
+ route.status=async()=>{if(!store)return{accounts:'off',reason:offReason};const ok=await(ready||db().then(()=>true,()=>false));return{accounts:store.kind,database:ok?'ok':'unreachable'+(lastError?': '+lastError.replace(/[a-z]+:\/\/\S+/gi,'[url]').slice(0,160):''),resetEmail:!!mail};};
+ return route;
 }
 module.exports={createAccounts,memoryStore,postgresStore,libsqlStore};
