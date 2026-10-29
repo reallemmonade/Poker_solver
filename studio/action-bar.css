@@ -37,6 +37,8 @@
   .ab-sizing{grid-template-columns:minmax(0,1fr) 76px;gap:4px 8px}
   .ab-presets{grid-column:1/-1;grid-auto-columns:minmax(0,1fr);gap:5px}
   .ab-preset,.ab-amount{min-height:34px}
+  /* 34px to save height, with a taller invisible hit area reaching into the row gaps. */
+  .ab-preset{position:relative}.ab-preset:before{content:"";position:absolute;inset:-4px 0 -5px}
   /* The slider and the amount box share one row on phones: slider left, box right. */
   .ab-slider{grid-column:1;grid-row:-1;height:34px}
   .ab-amount{grid-column:2;grid-row:-1}
