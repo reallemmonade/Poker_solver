@@ -12,7 +12,7 @@ const citrusAccount=(()=>{
  let account=read(ACCOUNT,null);if(!account?.token||!account?.user?.id)account=null;
  const uid=()=>account?.user.id,key=name=>name+':'+uid();
  const sync={status:account?'waiting':'signedOut',at:read(account?key('citrus-sync-at-v1'):'',0),timer:0,running:null,again:false,note:''};
- const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-)/.test(id)||id==='macsolver');
+ const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-)/.test(id)||id==='macsolver'||id==='liveSession');
  function dbName(){const owner=read(OWNER,null);if(account)return owner===account.user.id?LEGACY_DB:LEGACY_DB+'-'+account.user.id;return owner?LEGACY_DB+'-guest':LEGACY_DB;}
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){
@@ -51,27 +51,31 @@ const citrusAccount=(()=>{
  // A record from another device replaces the local one unless this device changed it since (that change uploads next).
  function accept(store,row){if(store==='meta'&&!META.has(row?.id)){if(!row||typeof row.id!=='string'||!synced('meta',row.id))throw Error('Invalid setting.');return{id:row.id,value:row.value};}return validateBackupRow(store,row);}
  async function pull(){
-  let since=read(key('citrus-sync-cursor-v1'),0),got={hands:0,grades:0,solves:0,meta:0,prefs:0};
+  let since=read(key('citrus-sync-cursor-v1'),0),got={hands:0,grades:0,solves:0,meta:0,prefs:0,session:null};
   for(;;){
    const page=await api('GET','/api/sync?since='+since),q=queue(),puts=[];
    for(const r of page.rows){if(q[r.store+' '+r.id]>r.t)continue;if(r.store==='prefs'){if(PREFS.includes(r.id)&&typeof r.data==='string'){let cur=null;try{cur=localStorage.getItem(r.id)}catch{}if(cur!==r.data){try{localStorage.setItem(r.id,r.data)}catch{}got.prefs++;}const seen=read(key('citrus-prefs-seen-v1'),{});seen[r.id]=r.data;write(key('citrus-prefs-seen-v1'),seen);}continue;}
     try{puts.push([r.store,accept(r.store,r.data)]);}catch{}}
-   if(puts.length)await idb(STUDY,'readwrite',tx=>{for(const [s,row]of puts){tx.objectStore(s).put(row);got[s]++;}});
+   if(puts.length)await idb(STUDY,'readwrite',tx=>{for(const [s,row]of puts){tx.objectStore(s).put(row);got[s]++;if(s==='meta'&&row.id==='liveSession')got.session=row.value;}});
    since=page.cursor;write(key('citrus-sync-cursor-v1'),since);if(!page.more)break;
   }
   return got;
  }
  async function run(){
   if(!account)return;if(sync.running){sync.again=true;return sync.running;}
-  sync.running=(async()=>{
+  sync.running=(async()=>{let session=null;
    const first=!read(key('citrus-sync-seeded-v1'),false);sync.status='syncing';render();
-   try{if(first)await seed();await push();const got=await pull();sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';
+   try{if(first)await seed();await push();const got=await pull();session=got.session;sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';
     if(got.hands||got.grades)try{refreshSharedHands()}catch{}if(got.solves)try{refreshSavedSpots()}catch{}
     if(got.hands||got.grades||got.solves||got.meta||got.prefs)dispatchEvent(new CustomEvent('citrus-synced',{detail:got}));
     // Settings and preferences from another device apply on a fresh load; reload once after the first sync if no hand is live.
     if(first&&(got.prefs||got.meta)&&(!state.hand||state.hand.done))location.reload();
    }catch(e){if(e.status===401){sync.status='expired';}else if(e.status===503&&/not switched on/.test(e.message)){sync.status='off';}else if(e.status===507){sync.status='full';sync.note=e.message;}else{sync.status='offline';sync.note=e.message;}}
-   finally{sync.running=null;render();if(sync.again){sync.again=false;schedule(1000);}else if(sync.status!=='expired'&&sync.status!=='off')schedule(sync.status==='synced'?90000:30000);}
+   finally{sync.running=null;render();
+    // The live table hands off between devices (session.js): whichever device acted last owns it, and the other turns read-only.
+    dispatchEvent(new CustomEvent('citrus-sync-done',{detail:{session}}));
+    const playing=document.visibilityState==='visible'&&typeof state!=='undefined'&&!!state.hand;
+    if(sync.again){sync.again=false;schedule(1000);}else if(sync.status!=='expired'&&sync.status!=='off')schedule(sync.status==='synced'?(playing?15000:90000):30000);}
   })();return sync.running;
  }
  const waking=()=>{const b=document.getElementById('uiAccountSubmit');if(b)b.textContent='Waking the server…';};
@@ -129,6 +133,6 @@ const citrusAccount=(()=>{
    if(account&&sync.status!=='expired')api('GET','/api/auth/me').then(r=>{if(!account||r.user.id!==account.user.id||r.user.email===account.user.email)return;account.user=r.user;write(ACCOUNT,account);if(!dialog.querySelector('#uiEmailForm input:focus'))render();}).catch(()=>{});};
   render();setInterval(()=>{if(dialog.open&&account)render();},30000);
  }
- if(account){addEventListener('load',()=>schedule(1500));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')run();else if(Date.now()-sync.at>30000)schedule(500);});addEventListener('online',()=>schedule(500));}
+ if(account){addEventListener('load',()=>schedule(1500));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')run();else schedule(500);});addEventListener('online',()=>schedule(500));}
  return{dbName,changed,run,mount,signIn,signOut,get user(){return account?.user||null},get link(){return account?{api:API||location.origin,token:account.token,user:account.user.id}:null},get status(){return sync.status},synced};
 })();
