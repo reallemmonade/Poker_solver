@@ -10,7 +10,7 @@ set -u
 K=$1; N=$2
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/help}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}
+JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; SPOT_FLOPS=${SPOT_FLOPS:-60}
 V4=$W/preflop-library-v4.json.gz; C1=$W/charts1/preflop-library.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 cd "$R" || exit 1
 say(){ echo "$(date -u '+%F %T') $*"; }
@@ -33,6 +33,7 @@ solve(){ # charts out spots flops iterations [more args]
 }
 evs(){ # the main run's order backwards
   solve $1 $2 $(all $LIMP) 24 200
+  [ "${3:-}" = per-spot ] && solve $1 $2 per-spot $SPOT_FLOPS 150
   solve $1 $2 $(all $THREE) 72 150
   solve $1 $2 $(all $SINGLE) 24 150
 }
@@ -41,7 +42,7 @@ say "HELPER $K/$N: pass 1"
 evs $V4 $W/ev1
 wait_for $C1
 say "HELPER $K/$N: pass 2"
-evs $C1 $W/ev2
+evs $C1 $W/ev2 per-spot
 wait_for $V6
 say "HELPER $K/$N: flop library on v6"
 F=$W/flop-v6; mkdir -p $F
