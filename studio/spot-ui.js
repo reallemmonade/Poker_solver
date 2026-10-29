@@ -246,13 +246,12 @@ function spotFrequencyHTML(result){
  const solve=result.solve;return'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
 }
 // Each live player's range as a 13x13 grid: pairs on the diagonal, suited above it, offsuit below, each cell
-// shaded by how much of that hand is in the range. Range text is classes ("AKs:0.5") or exact combos ("AhKh:0.5").
+// shaded by how much of that hand is in the range, read with the solver's own parser so typed shorthand (QQ+,
+// A2s-A5s, AKs:50%) shades the same hands the solve used.
 const GRID_RANKS='AKQJT98765432';
 function rangeClassWeights(text){
- const w=new Map(),add=(k,x,n)=>w.set(k,(w.get(k)||0)+x/n);
- for(const raw of String(text||'').split(/[\s,]+/)){if(!raw)continue;const [hand,wt]=raw.split(':'),x=wt===undefined?1:Number(wt);if(!(x>0))continue;
-  if(/^[AKQJT2-9]{2}[so]?$/.test(hand)){const k=hand[0]===hand[1]?hand.slice(0,2):hand;if(k.length===2&&k[0]!==k[1]){add(k+'s',x,1);add(k+'o',x,1);}else w.set(k,Math.max(w.get(k)||0,x));}
-  else if(/^[AKQJT2-9][cdhs][AKQJT2-9][cdhs]$/.test(hand)){const [a,b]=GRID_RANKS.indexOf(hand[0])<=GRID_RANKS.indexOf(hand[2])?[hand[0],hand[2]]:[hand[2],hand[0]];if(a===b)add(a+b,x,6);else if(hand[1]===hand[3])add(a+b+'s',x,4);else add(a+b+'o',x,12);}}
+ const w=new Map();let rows=null;try{rows=PokerSpot.parseRange(text,{hole:2},[]);}catch{}
+ for(const r of rows||[]){const k=G.Core.handClass(r.cards);w.set(k,(w.get(k)||0)+r.weight/(k.length===2?6:k[2]==='s'?4:12));}
  return w;
 }
 // With mix (hand class -> action frequencies, the acting player's whole strategy), each cell splits into the action
