@@ -14,6 +14,7 @@
 // --reverse 1 works from the last one back, so helper computers can share a run going forward.
 // A tree.json in the --out folder ({flop:{bet:[33,75],raise:[66]},turn:...}) replaces the default bet
 // sizes below (TREE) street by street, so one library can use more sizes than the calibration solves.
+// --tree <file> reads the sizes from that file instead, for example a fuller tree for 3-bet pots.
 // It may also give one player its own sizes per street: {ip:{turn:{bet:[33,66,150],raise:[]}},oop:{...}}.
 // --turn 1 also saves the turn's first decisions (<flop>.turn.json.gz) on the main lines: check-check,
 // bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.ctl per spot.
@@ -180,7 +181,7 @@ function classEvs(tree){
 }
 
 async function solve(){
- const treeFile=path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
+ const treeFile=args.tree||path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
  const packs=loadCharts(args.charts),auto=new Set(args.spots.split(',').includes('per-spot')?PER_SPOT:[]),ids=args.spots.split(',').flatMap(id=>id==='per-spot'?PER_SPOT:[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   // A per-spot line the chart never reaches (a 4-bet that is jam or fold) is skipped.
