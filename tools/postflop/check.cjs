@@ -3,7 +3,7 @@
 // Checks that the app finds library answers for live hands: the preflop line
 // maps to the spot, suit-permuted flops find their canonical flop, hero combos
 // map through the same permutation, off-tree flop bet sizes map to a solved size (a bigger
-// price tightening the defence, labelled approximate), and
+// price tightening the defence, a smaller one widening it, labelled approximate), and
 // unsolved flops are answered by a labelled stand-in of the same texture. PLO
 // spots answer stored combos from their rows and other hands from a similar one.
 //   node tools/postflop/check.cjs --library postflop-work/postflop-library.json.gz
@@ -22,10 +22,10 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
   // A real board: the canonical flop under a random suit permutation.
   const perm=[0,1,2,3].sort(()=>rng()-.5),canon=C.cards(key),board=canon.map(c=>(c&~3)|perm[c&3]);
   ok(Lib.canonical(board).key===key,spot.id+' '+key+' canonical key');
-  for(const [what,flopLine,openScale]of [['root',[],1],['vs check',['check'],1],['vs bet',['check','bet'],1],['vs bet 40%',['check','bet40'],1],['vs bet 120%',['check','bet120'],1],['3bb open',['check'],1.2]]){
+  for(const [what,flopLine,openScale]of [['root',[],1],['vs check',['check'],1],['vs bet',['check','bet'],1],['vs bet 40%',['check','bet40'],1],['vs bet 20%',['check','bet20'],1],['vs bet 120%',['check','bet120'],1],['3bb open',['check'],1.2]]){
    const h=new G.Hand(pack.config,{runout:board,rng:G.rng(7)});
    const proxy=new G.Hand(pack.config,{rng:G.rng(7)});for(const kind of def.steps){const node=pack.index.get(P.historyKey(proxy));if(!node){proxy.act({kind});h.act({kind});continue;}const t=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0))[0].target;proxy.act({kind,target:t});h.act({kind,target:kind==='raise'?Math.round(t*openScale/50)*50:undefined});}
-   const pot=h.pot;for(const s of flopLine){if(s==='check')h.act({kind:'check'});else{const f={bet:.33,bet40:.4,bet120:1.2}[s];h.act({kind:'bet',target:Math.max(h.legal().minRaiseTo,Math.round(pot*f))});}}
+   const pot=h.pot;for(const s of flopLine){if(s==='check')h.act({kind:'check'});else{const f={bet:.33,bet20:.2,bet40:.4,bet120:1.2}[s];h.act({kind:'bet',target:Math.max(h.legal().minRaiseTo,Math.round(pot*f))});}}
    // Hero: a random combo off the board that the solved range holds.
    const range=P.postflopRanges(packs,h.config,h.actionLog),hero=h.actor;let cards;
    for(let t=0;t<500&&!cards;t++){const a=Math.floor(rng()*52),b=Math.floor(rng()*52);if(a===b||board.includes(a)||board.includes(b))continue;const w=range&&range.seats[hero][P.classes.indexOf(C.handClass([a,b]))];if(w>.2)cards=[a,b];}
@@ -38,8 +38,10 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
    if(what==='vs bet 40%'&&Math.round(pot*.4)>h.config.bb*100)ok(!r.solve.library.sizesMatched,spot.id+' '+key+' '+what+': labelled as a nearest size');
    // Same row as decoding the stored node directly with the canonical combo.
    const node=flop.nodes.find(n=>n.path===r.solve.library.line),direct=Lib.row(node,Lib.comboIndex(cards.map(c=>(c&~3)|Lib.canonical(board).map[c&3]))),best=direct.indexOf(Math.max(...direct));
-   // A bigger price than the node's keeps each continuing action's share of the stored row, scaled down.
-   if(r.offTree){const f=node.actions.indexOf('FOLD'),cut=f<0?1:(1-r.reference[f])/Math.max(1e-12,1-direct[f]);ok(!r.solve.library.sizesMatched&&f>=0&&cut<=1+1e-9&&(node.actions.length!==r.actions.length||direct.every((p,i)=>i===f||Math.abs(p*cut-r.reference[i])<1e-9)),spot.id+' '+key+' '+what+': approximate, tightened stored row');continue;}
+   // A bigger price than the node's keeps each continuing action's share of the stored row, scaled down; a smaller one
+   // turns some of its fold into calls.
+   if(r.offTree){const f=node.actions.indexOf('FOLD'),c=node.actions.indexOf('CALL'),cut=f<0?1:(1-r.reference[f])/Math.max(1e-12,1-direct[f]),same=node.actions.length!==r.actions.length;
+    ok(!r.solve.library.sizesMatched&&f>=0&&(cut<=1+1e-9?same||direct.every((p,i)=>i===f||Math.abs(p*cut-r.reference[i])<1e-9):c>=0&&r.reference[f]<=direct[f]+1e-9&&(same||direct.every((p,i)=>Math.abs((i===c?p+direct[f]-r.reference[f]:i===f?r.reference[f]:p)-r.reference[i])<1e-9))),spot.id+' '+key+' '+what+': approximate, tightened or widened stored row');continue;}
    ok(what!=='vs bet 120%','vs bet 120% is approximate');
    ok(node.actions.length!==r.actions.length||direct.every((p,i)=>Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+' '+what+': same row as the stored node');
    ok(Math.abs(r.reference[r.best]-direct[best])<1e-9||node.actions.length!==r.actions.length,spot.id+' '+key+' '+what+': best action');

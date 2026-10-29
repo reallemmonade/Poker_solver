@@ -8,7 +8,8 @@
 //  2. Preflop 3-bet sizes, answered by the opener.
 //  3. Flop bet sizes (5% of the pot to all-in) through PokerPostflopLibrary's walk(), which maps
 //     a bet between solved sizes pseudo-harmonically (clamped at the ends), and aggregate() for the
-//     answering range, tightened toward MDF when the real price is bigger than the node's.
+//     answering range, tightened toward MDF when the real price is bigger than the node's and
+//     widened (fold share scaled by the bluff break-even ratio) when it is smaller.
 //  4. Depths with no chart (30bb, 70bb, 130bb ...): the whole preflop strategy the app serves
 //     there (via nearest) is written into that depth's own game, and its NashConv measured in
 //     the chart model. Exact charts score about 0.0004 bb/hand.
@@ -85,8 +86,8 @@ function flopSweep(spot,o){
    for(const k of pick){const flop=spot.flops[k],amount=fr==='jam'?spot.stack:Math.round(fr*spot.pot);
     let w;try{w=PL.walk(flop,Object.assign([...line.pre,{kind:'bet',amount,allIn:fr==='jam'||amount>=spot.stack}],{pot:spot.pot,stack:spot.stack}),1,100);}catch(e){w=null;agg.error=e.message;}
     if(!w||!w.node){agg.none++;continue;}
-    // The answering range as the app serves it: a bigger price than the node's tightens it (walk's k).
-    const a=PL.aggregate(spot,flop,w.path,w.k);if(!a){agg.none++;continue;}
+    // The answering range as the app serves it: a bigger price than the node's tightens it (walk's k), a smaller one widens it (wide).
+    const a=PL.aggregate(spot,flop,w.path,w.k,w.wide);if(!a){agg.none++;continue;}
     agg.n++;if(w.substituted)agg.substituted++;agg.mapped.add(w.path.split('/').pop());
     a.actions.forEach((x,i)=>{const kind=x==='FOLD'?'fold':x==='CALL'?'call':'raise';agg[kind]+=a.freq[i];});
    }

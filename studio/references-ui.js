@@ -33,7 +33,7 @@ function chartPostflopRanges(hand,observed,opts){
 }
 // Precomputed flop strategies (Library → Preflop solver references → Import).
 // They answer a flop decision when its preflop line, chart and flop (up to
-// suits) were solved; other bet sizes map to a solved one (approximate when far or tightened).
+// suits) were solved; other bet sizes map to a solved one (approximate when far, tightened or widened).
 function postflopLibraryReference(hand){
  if(!hand||hand.done||hand.street!==1||!postflopLibrary.libraries.length||!preflopLibrary.packs.length)return null;
  try{const range=PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,hand.actionLog),q=PokerPostflopLibrary.query(postflopLibrary.libraries,range,hand);if((!q||q.solve.library.standIn)&&typeof noteMissingFlop==='function')noteMissingFlop(hand);return q;}catch{return null;}
