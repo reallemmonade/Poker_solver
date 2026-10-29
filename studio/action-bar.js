@@ -17,9 +17,10 @@ const ActionBar=(()=>{
     // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
     if(s.length>1)return s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
-    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in.
+    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in
+    // (Pot when a pot limit caps the bet below the all-in).
     const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
-    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[])];
+    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,

@@ -258,12 +258,12 @@ function rangeClassWeights(text){
 // colors left to right, and fades with the hand's weight in the range.
 function rangeGridHTML(text,mix=null,tones=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),x=Math.min(1,w.get(k)||0),m=mix&&x>0&&mix[k];cells+='<span '+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':'style="--w:'+x.toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
 function spotRangesHTML(result){
- const all=result?.solve?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&h.n===all.length?G.positions(h.n,h.button):null;
+ const all=result?.solve?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&h.n===all.length?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=(52-nb)*(51-nb)/2;
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
  const mix=result.handMix&&result.handMix.classes&&typeof result.handMix.classes==='object'?result.handMix:null,tones=mix?actionTones(result.actions,h):null;
  // The acting player, whose strategy colors the grid, comes first.
  ranges.sort((p,q)=>(mix&&q.seat===mix.seat)-(mix&&p.seat===mix.seat));
- return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(r.combinations>0?' · '+Math.round(r.combinations/13.26)+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones):'')+(/^All legal hands/.test(r.range)?'<p class="help">Any two cards</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
+ return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(r.combinations>0?' · '+Math.round(100*r.combinations/legal)+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones):'')+(/^All legal hands/.test(r.range)?'<p class="help">Any two cards</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
 }
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
