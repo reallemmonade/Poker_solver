@@ -16,7 +16,9 @@ const ActionBar=(()=>{
     // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
     // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
-    if(s.length>1)return s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
+    // Sizes that share a label (two at or above the effective stack, or two that round to the same share) show once, the smaller kept.
+    const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
+    if(sl.length>1)return sl;
     // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in
     // (Pot when a pot limit caps the bet below the all-in).
     const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
