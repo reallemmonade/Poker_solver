@@ -224,8 +224,9 @@
     // go to the PLO solver on this computer when it is turned on.
     const Local=root.PokerLocalSolver||(typeof require==='function'?require('./local-solver.js'):null),ploLocal=!exact&&this.options.localSolver&&Local&&this.data.config.variant==='PLO4'&&live.length===2&&data.board.length>=3&&simpleUtility&&live.every(seat=>!this.ranges.distributions[seat].uniform);let local=null;
     if(ploLocal){try{local=new Local.Engine(this.data,this.ranges,this.options,hand);}catch{}}
-    // A full solve (effort Full) sends any heads-up spot from the flop on to TexasSolver on this computer.
-    if(!local&&this.options.forceLocal&&this.options.localSolver&&Local&&live.length===2&&data.board.length>=3&&simpleUtility){try{local=new Local.Engine(this.data,this.ranges,this.options,hand);}catch{}}
+    // A full solve (effort Full) sends any heads-up spot from the flop on to TexasSolver on this computer,
+    // and a three-way NLH pot to the 3-way solver there.
+    if(!local&&this.options.forceLocal&&this.options.localSolver&&Local&&(live.length===2||live.length===3&&this.data.config.variant==='NLH')&&data.board.length>=3&&simpleUtility){try{local=new Local.Engine(this.data,this.ranges,this.options,hand);}catch{}}
     // Three or more players from the flop on: the browser's engines rarely fit
     // these ranges, so they go to the bridge, which runs the same engines in Node.
     if(!local&&this.options.forceLocal&&this.options.localSolver&&Local?.SpotEngine&&live.length>2&&data.board.length>=3){try{local=new Local.SpotEngine(this.data,this.ranges,this.options,extra);}catch{}}
@@ -253,5 +254,5 @@
    return{supported:false,approximateWithheld:true,accuracy:check||null,message:'No reliable approximation for this spot. '+reason.replace(/\.?$/,'.')+' The sampled fallback '+[trained?null:'did not settle: only '+Math.round(100*coverage)+'% of later decisions were trained'+(r.solve.halted?' before it reached its memory budget':'')+', and untrained decisions play at random',check?.passed===false?'failed its accuracy check: '+check.reason:null].filter(Boolean).join(', and it ')+'. Its frequencies and EVs would be misleading, so they are not shown. Use fewer bet sizes or raises, narrower ranges under "Solver assumptions and accuracy", fewer players or shallower stacks'+(this.data.board.length?'':', or import a preflop chart under Library → Preflop solver references')+'.'};
   }conditionRanges(data){return this.engine.conditionRanges?.(data)||null;}policyAt(data){return this.engine.policyAt?.(data)||null;}
  }
- const api={VERSION,REVISION,Solver,Ranges,ExactRiverSolver,SampledSolver,parseRange,options,reconstruct,publicKey,keyFor,utility,actionsAt};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerSpot=api;
+ const api={VERSION,REVISION,Solver,Ranges,ExactRiverSolver,SampledSolver,parseRange,options,reconstruct,publicKey,keyFor,utility,actionsAt,heuristicPreflop};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerSpot=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

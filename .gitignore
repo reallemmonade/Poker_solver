@@ -26,6 +26,12 @@
 !/tools/plo-solver/
 !/tools/plo-solver/plo_solver.cpp
 !/tools/plo-solver/test.cjs
+!/tools/multiway-solver/
+!/tools/multiway-solver/mw_solver.cpp
+!/tools/multiway-solver/test.cjs
+!/tools/multiway-solver/library.cjs
+!/tools/multiway-solver/README.md
+!/tools/multiway-solver/run-library.command
 !/tools/preflop/README.md
 !/tools/preflop/tree.cjs
 !/tools/preflop/solve.cjs

@@ -29,7 +29,7 @@
   for(const a of data.actions){if(h.street===current&&!start)start=snapshot(h);h.act(a);}
   if(!start)start=snapshot(h);
   assert(!h.done&&h.actor===data.actor,'The selected spot is no longer an open decision.');
-  const live=h.living();assert(live.length===2,'The local solver handles heads-up pots only.');
+  const live=h.living();if(live.length===3)return mwSpec(data,ranges,opt,config,h,start);assert(live.length===2,'The local solver handles heads-up and three-way pots only.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
   const street=current-1,pot=start.pot,base=pot/2,stack=Math.min(start.stacks[ip],start.stacks[oop]);
   assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
@@ -121,9 +121,70 @@
   return lines.join('\n')+'\n';
  }
 
+ // Three-player NLH pots go to tools/multiway-solver: exact weighted combos in postflop order
+ // (first to act first), one stack for all three (the smallest), bet sizes as fractions of the pot,
+ // raises as fractions of the pot after the call, and the exact amounts already played on this
+ // street (the solver adds them to its tree). Flop solves keep the turn and river slim and deal an
+ // even spread of turn and river cards when every card would not fit; turn and river solves use
+ // every size and every card.
+ const MW_TREE={flop:{flop:{bet:[1/3,2/3,1.5],raise:[2/3]},turn:{bet:[2/3],raise:[]},river:{bet:[2/3],raise:[]}},turn:{turn:{bet:[1/3,2/3,1.5],raise:[2/3]},river:{bet:[1/3,2/3,1.5],raise:[]}},river:{river:{bet:[1/3,2/3,1.5],raise:[2/3]}},cap:1,allinThreshold:.67,runouts:96},MW_MAX_COMBOS=1326;
+ // A flop's runout budget: 96 turn x river cards for wide ranges (about 1,600 combos in all), more in proportion
+ // for narrower ones, which solve faster (a squeeze pot's 230 combos get about 670), so a solve takes about as long.
+ function mwRunouts(ranges){const total=ranges.reduce((s,r)=>s+Object.keys(r).length,0);return Math.min(2352,Math.max(MW_TREE.runouts,Math.round(MW_TREE.runouts*1600/Math.max(1,total))));}
+ function mwSpec(data,ranges,opt,config,h,start){
+  const current=data.board.length-2,street=current-1,live=h.living();assert(live.length===3,'The 3-way solver needs exactly three players.');
+  const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,seats=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
+  const stack=Math.min(...seats.map(i=>start.stacks[i]));assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
+  // Chips of players who folded before this street are dead money in the pot. A player who folds on this street
+  // without putting chips in is left out of the line; anything else needs the full multiway engine.
+  const path=[];
+  for(const a of data.actions.filter(a=>a.street===current)){
+   if(!seats.includes(a.seat)){assert(a.kind==='fold'||a.kind==='check','A player who left this street put chips in.');continue;}
+   assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});
+  }
+  // On the flop only the last preflop raiser may lead (no donk bets), when that player is still in.
+  const raiser=[...data.actions].reverse().find(a=>a.street===0&&(a.kind==='raise'||a.kind==='bet'))?.seat,tree=MW_TREE[STREETS[street]],sizes={},caps={};
+  for(const [k,v] of Object.entries(tree)){sizes[k]={bet:v.bet.map(round4),raise:v.raise.map(round4)};caps[k]=MW_TREE.cap;}
+  const lead=street===0&&seats.includes(raiser)?{flop:seats.map(i=>i===raiser)}:{};
+  const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
+  const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
+  const list=seats.map(combos),heroIndex=seats.indexOf(data.actor);if(!list[heroIndex][hero])list[heroIndex][hero]=.005;
+  return{version:1,game:'NLH3',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,lead,allin:true,allinThreshold:MW_TREE.allinThreshold,ranges:list,seats,path,hero,heroIndex,runouts:street===0?mwRunouts(list):0,
+   accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||.5)),maxIterations:Math.min([300,400,1000][street],Math.max(10,Number(opt.localIterations)||1000))};
+ }
+ function validateMW(s){
+  const num=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi,board=Array.isArray(s.board)?s.board:[];
+  assert(board.length>=3&&board.length<=5&&board.every(c=>typeof c==='string'&&CARD.test(c))&&new Set(board).size===board.length,'Invalid board.');
+  assert(num(s.pot,1,1e9)&&num(s.stack,1,1e10)&&num(s.minBet,1,1e9),'Invalid pot, stack or minimum bet.');
+  const allowed=STREETS.slice(board.length-3);
+  assert(Array.isArray(s.ranges)&&s.ranges.length===3,'Three ranges are needed.');
+  for(const r of s.ranges){assert(r&&typeof r==='object'&&!Array.isArray(r),'Invalid range.');const keys=Object.keys(r);assert(keys.length>0&&keys.length<=MW_MAX_COMBOS,'Each range needs 1 to '+MW_MAX_COMBOS+' combos.');for(const k of keys)assert(COMBO.test(k)&&k.slice(0,2)!==k.slice(2)&&!k.match(/../g).some(c=>board.includes(c))&&num(r[k],1e-6,1),'Invalid range entry '+k.slice(0,12)+'.');}
+  assert(s.sizes&&typeof s.sizes==='object'&&s.caps&&typeof s.caps==='object'&&s.lead&&typeof s.lead==='object','Missing bet sizes.');
+  for(const [street,book] of Object.entries(s.sizes)){assert(allowed.includes(street),'Invalid street '+street+'.');for(const k of ['bet','raise'])assert(Array.isArray(book[k])&&book[k].length<=4&&book[k].every(x=>num(x,.05,3)),'Invalid '+k+' sizes.');}
+  for(const [street,c] of Object.entries(s.caps))assert(allowed.includes(street)&&Number.isInteger(c)&&c>=0&&c<=3,'Invalid raise cap.');
+  for(const [street,l] of Object.entries(s.lead))assert(allowed.includes(street)&&Array.isArray(l)&&l.length===3&&l.every(x=>typeof x==='boolean'),'Invalid lead flags.');
+  assert(typeof s.allin==='boolean'&&num(s.allinThreshold,.1,1),'Invalid all-in settings.');
+  assert(s.runouts===undefined||Number.isInteger(s.runouts)&&num(s.runouts,0,2352),'Invalid runout budget.');
+  assert(num(s.accuracy,.05,5)&&Number.isInteger(s.maxIterations)&&num(s.maxIterations,10,2000),'Invalid accuracy settings.');
+  assert(Array.isArray(s.path)&&s.path.length<=16&&s.path.every(p=>p&&(p.kind==='check'||p.kind==='call')&&p.to===undefined||p&&(p.kind==='bet'||p.kind==='raise')&&num(p.to,1,1e10)),'Invalid action path.');
+  assert(Number.isInteger(s.heroIndex)&&s.heroIndex>=0&&s.heroIndex<3&&typeof s.hero==='string'&&COMBO.test(s.hero)&&s.ranges[s.heroIndex][s.hero]>0,'Invalid hero hand.');
+  return s;
+ }
+ function inputMW(s,{threads=4,output='result.json',memoryMB=8192,timeLimit=1800}={}){
+  validateMW(s);assert(typeof output==='string'&&!/[\r\n]/.test(output),'Invalid output path.');
+  const range=r=>Object.entries(r).map(([k,w])=>w>=1?k:k+':'+w).join(','),n=x=>String(Math.round(x*1e6)/1e6);
+  const lines=['game NLH3','board '+s.board.join(''),'pot '+n(s.pot),'stack '+n(s.stack),'min_bet '+n(s.minBet),'allin_threshold '+n(s.allinThreshold),...s.ranges.map((r,i)=>'range'+i+' '+range(r))];
+  for(const street of STREETS.slice(s.board.length-3)){const book=s.sizes[street]||{bet:[],raise:[]};for(const k of ['bet','raise'])lines.push(k+' '+street+' all '+(book[k].length?book[k].map(n).join(','):'none'));lines.push('cap '+street+' '+(s.caps[street]??1),'allin '+street+' '+(s.allin?1:0));if(s.lead[street])s.lead[street].forEach((x,i)=>lines.push('lead '+street+' '+i+' '+(x?1:0)));}
+  if(s.path.length)lines.push('path '+s.path.map(p=>p.to===undefined?p.kind:'to:'+n(p.to)).join(','));
+  if(s.runouts)lines.push('runouts '+s.runouts);
+  lines.push('threads '+Math.max(1,Math.min(256,threads|0)),'accuracy '+n(s.accuracy),'max_iterations '+s.maxIterations,'print_interval '+(s.board.length===3?20:10),'memory_limit_mb '+Math.max(256,Math.round(memoryMB)),'time_limit '+Math.max(10,Math.round(timeLimit)),'output '+output);
+  return lines.join('\n')+'\n';
+ }
+
  // Strict checks shared by the bridge, which turns a spec into solver commands.
  function validate(s){
   if(s&&s.game==='PLO4'&&s.version===1)return validatePLO(s);
+  if(s&&s.game==='NLH3'&&s.version===1)return validateMW(s);
   const num=(v,lo,hi)=>Number.isFinite(v)&&v>=lo&&v<=hi;
   assert(s&&s.version===1,'Unknown spec version.');
   assert(Array.isArray(s.board)&&s.board.length>=3&&s.board.length<=5&&s.board.every(c=>CARD.test(c))&&new Set(s.board).size===s.board.length,'Invalid board.');
@@ -139,6 +200,7 @@
 
  function input(s,{threads=4,output='output_result.json'}={}){
   if(s&&s.game==='PLO4')return inputPLO(s,arguments[1]);
+  if(s&&s.game==='NLH3')return inputMW(s,arguments[1]);
   validate(s);const range=r=>Object.entries(r).map(([k,w])=>w>=1?k:k+':'+w).join(','),lines=['set_pot '+s.pot,'set_effective_stack '+s.stack,'set_board '+s.board.join(','),'set_range_ip '+range(s.rangeIp),'set_range_oop '+range(s.rangeOop)];
   for(const who of ['ip','oop'])for(const [street,book]of Object.entries(s.sizes[who])){
    for(const k of ['bet','raise','donk'])if(book[k].length)lines.push('set_bet_sizes '+who+','+street+','+k+','+book[k].join(','));
@@ -231,6 +293,34 @@
     warning:'Solved by the PLO solver on this computer for the combos shown, with one bet size and pot-sized raises on every later street. Exploitability is measured exactly, in percent of the pot.'+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(tree.treeReduced?' Raise caps were lowered to fit memory.':'')+(converged?'':' The solve stopped before reaching its accuracy target.')+(adjusted?' This line is rare in the solved strategy for your hand and its mix had not settled, so the best-EV action is shown.':'')}};
  }
 
+ // The 3-way solver's tree has the PLO solver's shape (actions with street totals). No-limit amounts: the
+ // solver plays everyone at the smallest stack, so its all-in is clamped to this player's legal range.
+ const followMW=followPLO;
+ function mapMW(hand,node,row,evs){
+  const legal=hand.legal(),paid=hand.streetPaid[hand.actor],actions=[],probs=[],mean=[],index=[];
+  node.actions.forEach((x,i)=>{
+   let action;
+   if(x.kind==='fold')action={kind:'fold',label:'Fold'};
+   else if(x.kind==='check')action={kind:'check',label:'Check'};
+   else if(x.kind==='call')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
+   else{const top=Math.min(legal.maxRaiseTo,legal.allInTo),target=Math.min(top,Math.max(legal.minRaiseTo,Math.round(x.to))),k=hand.currentBet?'raise':'bet';action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   action.id=action.kind+':'+(action.target||0);const ev=evs?G.bb(evs[i]+paid):null;
+   const same=actions.findIndex(a=>a.id===action.id);index.push(same>=0?same:actions.length);if(same>=0){probs[same]+=row[i];if(ev!==null&&ev>mean[same])mean[same]=ev;}else{actions.push(action);probs.push(row[i]);mean.push(ev);}
+  });
+  const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total),mean,index};
+ }
+ function resultMW(engine){
+  const s=engine.spec,tree=engine.body.tree,node=followMW(tree.tree,s.path),player=node.player,index=tree.combos[player].indexOf(s.hero);
+  assert(player===s.heroIndex&&index>=0,'The solver strategy does not include your hand.');
+  const cash=engine.hand.config.mode==='cash',{actions,probs,mean,index:map}=mapMW(engine.hand,node,node.strategy[index],node.evs[index]),hasEV=cash&&mean.every(Number.isFinite),values=hasEV?mean:actions.map(()=>0),best=hasEV?values.indexOf(Math.max(...values)):probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0),converged=Number.isFinite(tree.exploitability)&&tree.exploitability<=s.accuracy,adjusted=(node.adjusted||[]).includes(index);
+  let handMix=null;try{const table={};tree.combos[player].forEach((c,i)=>{table[c]=node.strategy[i];});handMix={seat:engine.hand.actor,classes:classMix(table,map,actions.length)};}catch{}
+  const street=STREETS[s.board.length-3],book=s.sizes[street],shortest=Math.min(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]))<Math.max(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]));
+  return{supported:true,actions,reference:probs,mean:values,se:zeros,loss:hasEV?values.map(v=>values[best]-v):zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:cash?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),reliable:hasEV&&converged,...handMix?{handMix}:{},
+   solve:{version:1,method:'local-multiway',exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],bestEVRow:adjusted,sampledRunouts:tree.sampledRunouts,turnCards:tree.turnCards,riverCards:tree.riverCards,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:s.ranges.map(r=>Object.keys(r).length),
+    actionTree:{betSizes:book.bet,raiseSizes:book.raise,maxRaises:s.caps[street],jam:true},
+    warning:'Solved by the 3-way solver on this computer for the ranges shown, with bets of '+book.bet.map(x=>Math.round(100*x)+'%').join(', ')+' of the pot and all-in on this street'+(s.board.length===3?', and one size (2/3 of the pot) on the turn and river':'')+'. Exploitability is the average gain of a best response for each player, in percent of the pot. Card removal between your two opponents is treated as independent.'+(tree.sampledRunouts?' To fit memory, '+tree.chance+' were dealt instead of every card.':'')+(shortest?' All three play the smallest stack.':'')+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(converged?'':' The solve stopped before reaching its accuracy target.')+(adjusted?' This line is rare in the solved strategy for your hand and its mix had not settled, so the best-EV action is shown.':'')}};
+ }
+
  // Worker engine: one HTTP request, then complete. step() never blocks.
  class Engine{
   constructor(data,ranges,opt,hand,fetcher,custom=false){
@@ -256,6 +346,7 @@
   result(){
    if(this.error)return{supported:false,message:'Local solver: '+this.error};
    if(this.spec.game==='PLO4')return resultPLO(this);
+   if(this.spec.game==='NLH3')return resultMW(this);
    const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length)};}catch{}
    return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
     solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
@@ -281,6 +372,6 @@
   }
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
