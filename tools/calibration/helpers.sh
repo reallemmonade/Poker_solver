@@ -14,8 +14,9 @@ here="$(cd "$(dirname "$0")/../.." && pwd)"; W=${CAL_WORK:-$HOME/cal}
 repo=/root/poker_solver; work=/root/help
 ssh(){ command ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o BatchMode=yes root@"$@"; }
 code(){ git -C "$here" ls-files -z | rsync -a0 --files-from=- "$here/" root@$1:$repo/; }
-# Solved flops only: spot.json is written by each run itself, *.tmp are being written.
-flops(){ rsync -a --ignore-existing --include '*/' --include '*.json' --include '*.turn.json.gz' --exclude 'spot.json' --exclude '*' "$1" "$2" 2>/dev/null; }
+# Solved flops only: spot.json is written by each run itself, *.tmp are being written. -L follows
+# spot folders that are symlinks into another work folder; -K keeps them as links on this side.
+flops(){ rsync -aKL --ignore-existing --include '*/' --include '*.json' --include '*.turn.json.gz' --exclude 'spot.json' --exclude '*' "$1" "$2" 2>/dev/null; }
 pull(){ local d; for d in ev1 ev2 flop-v6; do flops root@$1:$work/$d/ "$W/$d/"; done; }
 # Charts go out only once this run has moved past writing them: charts1 when pass 2 has started
 # (ev2/ exists), v6 once its flop library has (flop-v6/ exists).
