@@ -7,7 +7,13 @@ const fs=require('fs'),{Solver,PLAY}=require('./solve.cjs');
 const P=require('../../studio/preflop.js');
 
 // NLH open sizes by format and depth: 2bb when short, 2.2bb in tournaments, 2.5bb in cash.
-// Up to 200bb NLH drops 4-bet flats that leave under 6x the pot behind, so the 5-bet jam range keeps KK and AK (see README).
+// Facing a 4-bet, NLH up to 100bb keeps the flat when it leaves at least 2x the pot behind (the
+// small 4-bet; the big one is jam or fold), and from 101 to 200bb only when it leaves 6x, so the
+// 5-bet jam range keeps KK: deeper flats there make the 3-bettor flat KK and the 4-bettor fold KK
+// to the jam (see README). The 100bb flats also rely on the 3-bet-pot realization below.
+// 3-bet and bigger pots without a calibrated fit of their own: the fit to 192 TexasSolver 100bb
+// 3-bet-pot flops (6 spots, October 2026), which picked sharpness 1.6 on every split of the data.
+const RERAISED={sharpness:1.6,realization:.16,initiative:.06};
 // PLO raises are always pot-sized. PLO equities run closer, so realization is sharper (hands
 // behind realize much less), position counts for more and the last raiser gets no extra edge;
 // this matches published 6-max opening ranges and leaves room to flat in position.
@@ -17,7 +23,14 @@ function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0,calibration
  const short=stack<40,mtt=format==='mtt',ante=mtt?1:0;rake=mtt?0:rake;
  if(game==='plo')return{seats,stack,ante,rake,rakeCap,limp:!!limp,variant:'PLO4',potLimit:true,realization:.1,initiative:0,sharpness:1.5,foldRemoval:false};
  const cal=pickCalibration(calibration?JSON.parse(fs.readFileSync(calibration,'utf8')):null,stack);
- return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=200?{callSPR:6}:{},...cal?{realization:cal.realization,initiative:cal.initiative,sharpness:cal.sharpness,playTable:cal.play,calibrated:cal.source,...cal.reraised?{reraised:{realization:cal.reraised.realization,initiative:cal.reraised.initiative,sharpness:cal.reraised.sharpness,playTable:cal.reraised.play}}:{}}:{}};
+ return{seats,stack,ante,rake,rakeCap,limp:!!limp,open:short?2:mtt?2.2:2.5,sbOpen:short?2.5:3,...stack<=100?{callSPR:2}:stack<=200?{callSPR:6}:{},reraised:cal?.reraised?{realization:cal.reraised.realization,initiative:cal.reraised.initiative,sharpness:cal.reraised.sharpness,playTable:cal.reraised.play}:RERAISED,...cal?{realization:cal.realization,initiative:cal.initiative,sharpness:cal.sharpness,playTable:cal.play,calibrated:cal.source}:{},...cal?.spots?{spots:spotsFor(cal.spots,`NLH ${mtt?'MTT':'cash'} ${seats}-handed ${stack}bb${rake>0?' rake':''}`)}:{}};
+}
+
+// Per-spot fits (calibrate.cjs --per-spot) keyed "<chart>|<line>": the lines of this chart only.
+function spotsFor(spots,chart){
+ const out={};let n=0;
+ for(const [k,f]of Object.entries(spots)){const [c,line]=k.split('|');if(c===chart){out[line]={realization:f.realization,initiative:f.initiative,sharpness:f.sharpness,playTable:f.play};n++;}}
+ return n?out:null;
 }
 
 // A calibration set (calibrate.cjs --depths) holds one fit per depth: a chart takes the fit of
@@ -27,6 +40,9 @@ function pickCalibration(cal,stack){
  const b=cal.buckets.slice().sort((x,y)=>Math.abs(Math.log(stack/x.depth))-Math.abs(Math.log(stack/y.depth))||y.depth-x.depth)[0];
  return{...b,source:b.source+`, ${b.depth}bb fit`};
 }
+
+// Raise sizes as text: 3 -> "3x", [3,4] -> "3x or 4x".
+const xs=k=>[].concat(k).map(x=>x+'x').join(' or ');
 
 // Rows are rounded to 4 decimals; the largest entry absorbs the rounding error.
 function tidy(row){
@@ -52,9 +68,9 @@ function solve(spec,{iterations=2000,every=500,log=()=>{}}={}){
  });
  const n=o.seats,mtt=spec.format==='mtt',settings=[
   `${n}-handed, ${o.stack}bb, blinds ${o.sb}/${o.bb}, ${mtt?'1bb big-blind ante, chip EV (no ICM)':o.rake>0?`no ante; ${o.rake}% rake capped at ${o.rakeCap}bb, no flop no drop (a flop pot is raked as if it grew ${o.rakeGrowth}x by the river)`:'no ante or rake'}.`,
-  plo?`Pot-limit, four-card Omaha. Every raise is pot-sized; all-in once a pot raise reaches the stack. Hands are grouped into ${m.K} groups by suits, pairing, connectedness, suited ace and equity against a random hand; everything in a group plays the same strategy.`:`Sizes: open ${o.open}bb (SB ${o.sbOpen}bb), 3-bet ${o.threeBetIP}x in position or ${o.threeBetOOP}x from the blinds plus ${o.squeezePerCaller}x per caller, 4-bet ${o.fourBet}x${o.deep?', 5-bet '+o.fiveBet+'x':''}, then all-in; any raise to ${o.jamShare*100}% of the stack or more is all-in${o.extraJam?'; all-in is also offered at every raise':''}.`,
+  plo?`Pot-limit, four-card Omaha. Every raise is pot-sized; all-in once a pot raise reaches the stack. Hands are grouped into ${m.K} groups by suits, pairing, connectedness, suited ace and equity against a random hand; everything in a group plays the same strategy.`:`Sizes: open ${o.open}bb (SB ${o.sbOpen}bb), 3-bet ${xs(o.threeBetIP)} in position or ${xs(o.threeBetOOP)} from the blinds plus ${o.squeezePerCaller}x per caller, 4-bet ${xs(o.fourBet)}${o.deep?', 5-bet '+o.fiveBet+'x':''}, then all-in; any raise to ${o.jamShare*100}% of the stack or more is all-in${o.extraJam?'; all-in is also offered at every raise':''}.`,
   `Trimmed tree: ${o.limp?`no open-limps except the small blind completing when folded to (the big blind then checks or raises to ${o.isoRaise}bb)`:'no open-limps'}, at most one player flats an open, other players fold to a 3-bet, a flatter continues against a squeeze only if the opener folds, facing a 4-bet a call that leaves under ${o.callSPR}x the pot behind is dropped, and every flop is heads-up.`,
-  `Postflop is not played out. All-in pots pay all-in equity; flop pots pay an equity-realization share (odds to the power ${o.sharpness}, in position x${(1+o.realization).toFixed(2)}, out of position x${(1-o.realization).toFixed(2)}, last raiser x${(1+o.initiative).toFixed(2)}, playability ${plo?'by hand shape, see tools/preflop/plo-model.cjs':o.playTable?'per hand class, calibrated to '+o.calibrated:JSON.stringify({...PLAY,...o.playability})})${o.reraised?`; 3-bet pots and bigger have their own fit (odds to the power ${o.reraised.sharpness}, in position x${(1+o.reraised.realization).toFixed(2)}, out of position x${(1-o.reraised.realization).toFixed(2)}, last raiser x${(1+o.reraised.initiative).toFixed(2)}, playability per hand class)`:''}, blended into all-in equity as the stack-to-pot ratio falls from ${o.flopSPR} to ${o.allInSPR}.`,
+  `Postflop is not played out. All-in pots pay all-in equity; flop pots pay an equity-realization share (odds to the power ${o.sharpness}, in position x${(1+o.realization).toFixed(2)}, out of position x${(1-o.realization).toFixed(2)}, last raiser x${(1+o.initiative).toFixed(2)}, playability ${plo?'by hand shape, see tools/preflop/plo-model.cjs':o.playTable?'per hand class, calibrated to '+o.calibrated:JSON.stringify({...PLAY,...o.playability})})${o.reraised?`; 3-bet pots and bigger have their own fit (odds to the power ${o.reraised.sharpness}, in position x${(1+o.reraised.realization).toFixed(2)}, out of position x${(1-o.reraised.realization).toFixed(2)}, last raiser x${(1+o.reraised.initiative).toFixed(2)}, playability per hand class)`:''}${solver.spotCount?`; ${solver.spotCount} preflop lines have a fit of their own from TexasSolver solves of that line`:''}, blended into all-in equity as the stack-to-pot ratio falls from ${o.flopSPR} to ${o.allInSPR}.`,
   ...plo?['Approximate: grouped PLO hands and a realization model, not a full PLO solve.']:[],
   `CFR+ with linear averaging, ${best.t} iterations, NashConv ${gap.nashConv.toFixed(4)} bb/hand within this model.`,
   'Each node carries reach: how often the averaged strategies arrive there (0-1). Lines that almost never happen (reach under 0.0001) are solved against a token range only and are less reliable.',
