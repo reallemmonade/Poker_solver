@@ -58,7 +58,7 @@ function pass(text){console.log('PASS '+text);count++;}
  const at=(bb,cls)=>{const h=new G.Hand(chart.config,{rng:G.rng(6)});h.act({kind:'raise',target:bb==='jam'?h.legal().allInTo:G.units(bb)});if(cls)h.holes[h.actor]=G.Core.cards(cls);return PF.nearest([chart],h);};
  assert.equal(at(2.7).sizeMatch[0].chart,2);assert.equal(at(2.8).sizeMatch[0].chart,4,'Pseudo-harmonic mapping sends 2.8bb (between 2 and 4) to 4');assert.ok(!at(2.8).offTree&&at(2.7).offTree);
  const cardsOf=c=>c[0]+'s'+c[1]+(c.length===2||c[2]==='o'?'h':'s'),jam=at('jam','AsAh');assert.ok(jam&&jam.offTree&&jam.sizeMatch[0].chart===4&&/approximate/.test(jam.referenceSource.name),'An all-in with no chart jam is unanswered');
- assert.deepEqual([jam.actions[1].label,jam.reference[1],at('jam','7c2d').reference[0]],['Call 19 bb',1,1],'AA does not call a jam the chart maps to its 4bb open, or 72o does');
+ assert.deepEqual([jam.actions[1].label,jam.reference[1],at('jam','7c2d').reference[0]],['Call 19 bb · all-in',1,1],'AA does not call a jam the chart maps to its 4bb open, or 72o does');
  const share=bb=>{let w=0,c=0;for(const cls of PF.classes){const n=cls.length===2?6:cls[2]==='s'?4:12,q=at(bb,cardsOf(cls));w+=n;c+=n*(1-q.reference[q.actions.findIndex(a=>a.kind==='fold')]);}return c/w;};
  const s=[5,6,8,12,'jam'].map(share),k=bb=>(1.5/(1+bb))/(1.5/5);assert.ok(s.every((x,i)=>!i||x<s[i-1]),'Bigger sizes do not fold more: '+s);assert.ok([5,6,8,12,20].every((bb,i)=>Math.abs(s[i]-k(bb))<.005),'Continue share misses MDF: '+s);
  pass('Off-tree preflop sizes map pseudo-harmonically, jams fall back to the largest raise, and bigger prices tighten the defence toward MDF as an approximate answer');}
