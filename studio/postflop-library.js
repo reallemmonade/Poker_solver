@@ -83,9 +83,9 @@
    let q=null,near=null;if(spot.game==='PLO4'){const at=ploIndex(f,w.node.player,cards,board,hand.rules);if(at){q=row(w.node,at.index);near=at.similar;}}else q=row(w.node,comboIndex(cards));
    if(q){flop=f;key=cand.key;found=w;r=q;similar=near;break;}}
   if(!r)return null;const standIn=key!==c.key;
-  const {actions,probs}=libraryActions(hand,found.node,r,scale);
+  const {actions,probs,index}=libraryActions(hand,found.node,r,scale),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length)};
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
-  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
+  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[{seat:ip,range:'Chart range',source},{seat:oop,range:'Chart range',source}],
     library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,scale,...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
     warning:(standIn?'Stand-in flop strategy for '+spot.label+': '+board+' is not in the library, so the nearest solved flop of the same texture, '+spaced(key)+', answers, with your cards moved to match. Treat it as a rough guide. It was':'Precomputed flop strategy for '+spot.label+' on '+spaced(key)+' (the same flop up to suits),')+' solved by '+(spot.game==='PLO4'?'the PLO solver':'TexasSolver')+' for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(similar?' Your hand is not among the '+flop.combos[found.node.player].length+' combos solved for this flop, so the most similar one, '+similar+', answers for it (similar made hand and draws).':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+(spot.game==='PLO4'?' Exploitability is measured exactly, in percent of the pot. The library keeps frequencies only, so no decision cost is graded.':' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.')}};
@@ -169,12 +169,19 @@
  }
  // A solved node's actions as this hand's legal actions, with the hero's frequencies r.
  function libraryActions(hand,node,r,scale){
-  const legal=hand.legal(),actions=[],probs=[];
+  const legal=hand.legal(),actions=[],probs=[],index=[];
   node.actions.forEach((label,i)=>{const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};else if(kind==='CHECK')action={kind:'check',label:'Check'};else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
    else{const k=hand.currentBet?'raise':'bet',target=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(parseFloat(amount)*scale)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
-   action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
-  return{actions,probs};
+   action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
+  return{actions,probs,index};
+ }
+ // Each hand class's average action mix at a solved node, over its combos the player can hold, in the order of the
+ // mapped actions. For the range grid.
+ function classMix(node,index,size){
+  const sum={},count={};
+  COMBOS.forEach((cs,i)=>{const r=row(node,i);if(!r)return;const k=C.handClass(cs),m=sum[k]||(sum[k]=Array(size).fill(0));r.forEach((p,a)=>{m[index[a]]+=p;});count[k]=(count[k]||0)+1;});
+  const out={};for(const k in sum)out[k]=sum[k].map(x=>Math.round(x/count[k]*1000)/1000);return out;
  }
 
  // Turn strategies (tools/postflop/library.cjs --turn 1, then bundle-turn): one file per spot.
@@ -218,8 +225,8 @@
   if(!t||hand.done||hand.street!==2)return null;const line=turnLine(chunk,hand,t.scale);if(!line)return null;
   const found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb));if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
   const cards=hand.holes[hand.actor].map(line.move),r=row(found.node,comboIndex(cards));if(!r)return null;
-  const {actions,probs}=libraryActions(hand,found.node,r,t.scale),zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
-  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
+  const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
+  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix,
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:t.flop.iterations||0,exploitability:t.flop.exploitability,seconds:0,rangeAssumptions:[{seat:t.ip,range:'Chart range',source},{seat:t.oop,range:'Chart range',source}],
     library:{spot:t.spot.label,flop:t.key,turn:line.prefix.split('|')[1],standIn:false,line:line.prefix+(found.path?'/'+found.path:''),sizesMatched:!substituted,scale:t.scale},
     warning:'Precomputed turn strategy for '+t.spot.label+' on '+spaced(t.key)+' '+line.prefix.split('|')[1]+' (the same board up to suits), solved by TexasSolver together with the flop for the preflop chart ranges'+(Math.abs(t.scale-1)>.02?' and scaled to this pot':'')+'.'+(substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+' Exploitability is the solver\'s own estimate for the whole flop solve, in percent of the pot. It reports no action EVs, so no decision cost is graded.'}};
