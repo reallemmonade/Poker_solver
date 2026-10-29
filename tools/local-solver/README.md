@@ -9,6 +9,15 @@ In the app, set **Analysis inputs & accuracy → Solver on your Mac** to **On**.
 
 ## Setup (Mac)
 
+**One step:** paste this in Terminal. It checks for Apple's command-line tools, Homebrew and Node (and installs Node), downloads the solver files into `~/CitrusPokerSolver`, builds both solvers, and starts the bridge as a login item that keeps running in the background. Running it again updates everything.
+
+```
+curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash
+```
+
+Then open the app on that Mac, sign in, and set **Solver settings → Solver on your Mac** to **On**. The app shows the same steps under that setting. The manual steps are below.
+
+
 1. Install the Xcode command-line tools (`xcode-select --install`), [Homebrew](https://brew.sh) and Node (`brew install node`).
 2. Build the solvers: `bash tools/local-solver/install-mac.sh`.
    - It first compiles the PLO solver with the system `c++` (`-O3 -std=c++17 -pthread`, plus `-mcpu=native` or `-march=native` when the compiler supports it) and runs a small test solve.

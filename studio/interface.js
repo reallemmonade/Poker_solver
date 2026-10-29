@@ -72,6 +72,11 @@ function initInterface(){
  const alert=create('div','ui-analysis-alert');alert.id='uiAnalysisAlert';analysisPane.append(alert,frequencies);
  const resultDetails=details('Action values');resultDetails.id='uiResultDetails';resultDetails.append($('playFeedback'));analysisPane.append(resultDetails);settingsDialog.querySelector('.ui-dialog-content').append(spotSettings);
  spotSettings.querySelector('summary').textContent='Solver settings';
+ // How anyone sets up the solver on their own Mac: one Terminal command (tools/local-solver/setup-mac.sh), then this
+ // setting. The status line under the setting says whether it is running.
+ {const cmd='curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash',setup=details('Set up the solver on a Mac');setup.classList.add('ui-solver-setup');
+  setup.append(create('ol','help','<li>Open Terminal on the Mac and paste this. The first time takes about 10 minutes.<pre class="ui-solver-cmd"><code>'+esc(cmd)+'</code></pre>'+button('Copy command','id="uiSolverCopy"')+'</li><li>On that Mac, sign in here and set <b>Solver on your Mac</b> to <b>On</b>.</li><li>Phones signed in to the same account send it spots from then on.</li>'));
+  const wrap=create('div','field wide');wrap.append(setup);$('spotLocalSolver').closest('.field').after(wrap);const copy=$('uiSolverCopy');copy.onclick=()=>navigator.clipboard?.writeText(cmd).then(()=>{copy.textContent='Copied';setTimeout(()=>copy.textContent='Copy command',2000);},()=>{});}
  const exportRow=create('div','row gap');exportRow.append($('spotExport'));analysisPane.append(exportRow);
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones
  // the three panes sit side by side and you swipe between them, so the table screen holds only the game.

@@ -212,7 +212,22 @@ function spotFrequencyHTML(result){
  if(!spotCertified(result))return '<div class="notice"><strong>No solver answer for this spot.</strong> The solve did not reach its accuracy target.</div>';
  const solve=result.solve;return'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%"></i></div></div>').join('')+'</div>';
 }
-function spotRangesHTML(result){const ranges=result?.solve?.rangeAssumptions||[];return ranges.length?'<div class="spot-ranges"><h3>Ranges</h3><ul>'+ranges.map(r=>'<li><strong>Seat '+(r.seat+1)+':</strong> '+esc(r.range)+'</li>').join('')+'</ul></div>':'';}
+// Each live player's range as a 13x13 grid: pairs on the diagonal, suited above it, offsuit below, each cell
+// shaded by how much of that hand is in the range. Range text is classes ("AKs:0.5") or exact combos ("AhKh:0.5").
+const GRID_RANKS='AKQJT98765432';
+function rangeClassWeights(text){
+ const w=new Map(),add=(k,x,n)=>w.set(k,(w.get(k)||0)+x/n);
+ for(const raw of String(text||'').split(/[\s,]+/)){if(!raw)continue;const [hand,wt]=raw.split(':'),x=wt===undefined?1:Number(wt);if(!(x>0))continue;
+  if(/^[AKQJT2-9]{2}[so]?$/.test(hand)){const k=hand[0]===hand[1]?hand.slice(0,2):hand;if(k.length===2&&k[0]!==k[1]){add(k+'s',x,1);add(k+'o',x,1);}else w.set(k,Math.max(w.get(k)||0,x));}
+  else if(/^[AKQJT2-9][cdhs][AKQJT2-9][cdhs]$/.test(hand)){const [a,b]=GRID_RANKS.indexOf(hand[0])<=GRID_RANKS.indexOf(hand[2])?[hand[0],hand[2]]:[hand[2],hand[0]];if(a===b)add(a+b,x,6);else if(hand[1]===hand[3])add(a+b+'s',x,4);else add(a+b+'o',x,12);}}
+ return w;
+}
+function rangeGridHTML(text){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),x=Math.min(1,w.get(k)||0);cells+='<span style="--w:'+x.toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%">'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
+function spotRangesHTML(result){
+ const all=result?.solve?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&h.n===all.length?G.positions(h.n,h.button):null;
+ const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
+ return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(r.combinations>0?' · '+Math.round(r.combinations/13.26)+'% of hands':'')+'</figcaption>'+(/^All legal hands/.test(r.range)?'<p class="help">Any two cards</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range):'<p class="help">'+esc(r.range)+'</p>')+'</figure>').join('')+'</div></div>';
+}
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));
