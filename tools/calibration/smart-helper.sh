@@ -25,9 +25,9 @@ T4=4max-co-bb,4max-btn-bb,4max-co-btn,4max-sb-bb,4max-btn-bb-3bet,4max-sb-bb-3be
 T9=9max-utg-bb,9max-hj-bb,9max-co-bb,9max-btn-bb,9max-utg-btn,9max-co-btn,9max-sb-bb,9max-btn-bb-3bet,9max-sb-bb-3bet
 at(){ local out=() id; for id in ${1//,/ }; do
     if [ "$2" = 100 ]; then out+=($id); elif [ "$2" = 20 ] && [[ $id == *3bet ]]; then :; else out+=($id-$2bb); fi
-  done; (IFS=,; echo "${out[*]}"); }
-all(){ local d s=""; for d in 20 50 100 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
-other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+  done; (IFS=,; echo "${out[*]-}"); }
+all(){ local d x s=""; for d in 20 50 100 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
+other(){ local d x s=""; for d in 20 50 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve(){ # charts out spots flops iterations [more args]
   node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE --shard $K/$N --reverse 1 "${@:6}" || say "FAILED solve into $2"
 }
