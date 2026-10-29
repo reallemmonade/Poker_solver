@@ -137,7 +137,8 @@ function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){
 // Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
 async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j))return;const value={...j,status:'cancelled',cancelledAt:Date.now()};spotUI.jobs.set(id,value);try{await dbPut('meta',{id,value});}catch{}citrusAccount.run();watchSolveJobs();if(state.hand)renderPlay();}
 // A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made.
-function cancelStaleSolveJobs(){const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
+// Not before the saved hand is back after a reload: until then the table holds a placeholder deal.
+function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
