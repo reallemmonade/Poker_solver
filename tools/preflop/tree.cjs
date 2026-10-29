@@ -8,7 +8,9 @@ const round=x=>Math.round(x*10)/10;
 
 function defaults(raw={}){
  const n=raw.seats||9,stack=raw.stack||200;
- return{seats:n,stack,sb:.5,bb:1,ante:0,open:2.5,sbOpen:3,threeBetIP:3,threeBetOOP:4,squeezePerCaller:1,fourBet:2.3,fiveBet:2.2,
+ // 3-bets (times the open, plus squeezePerCaller per caller) and 4-bets (times the 3-bet) offer a
+ // small and a big size; a number instead of a list gives one size.
+ return{seats:n,stack,sb:.5,bb:1,ante:0,open:2.5,sbOpen:3,threeBetIP:[3,4],threeBetOOP:[3.5,4.5],squeezePerCaller:1,fourBet:[2.2,2.7],fiveBet:2.2,
   // Short stacks may also shove at every raise; deep stacks get a sized 5-bet.
   extraJam:stack<=25,deep:stack>=300,jamShare:.4,pushFold:false,potLimit:false,foldRemoval:true,playability:{},
   // Flop realization (solve.cjs matrices): position edge, extra edge for the last raiser, and
@@ -17,6 +19,9 @@ function defaults(raw={}){
   // reraised: {realization, initiative, sharpness, playTable} for flop pots after a 3-bet or more,
   // which play shallower than single-raised pots; null uses the settings above for every pot.
   reraised:null,
+  // spots: {line key: {realization, initiative, sharpness, playTable}} for single flop lines
+  // (calibrate.cjs --per-spot), which win over reraised and the settings above.
+  spots:null,
   // Flop pots pay all-in equity below allInSPR (stack behind / pot), the realization share above
   // flopSPR, and a blend in between: with that little behind the money goes in on most flops.
   allInSPR:.5,flopSPR:1.5,
@@ -47,25 +52,23 @@ function build(raw){
  const root=step({bets,folded:Array(n).fill(false),bet:o.bb,allIn:false,level:0,raiser:-1,prevRaiser:-1,callers:0,caller:-1,pending:order.slice(),history:[]});
  return{options:o,root,nodes};
 
- // The sized raise for this actor, or null when the next raise is all-in.
- function sizeFor(s,actor){
+ // The sized raises for this actor, smallest first; null stands for a size that would be all-in.
+ function sizesFor(s,actor){
   // Pot limit: every raise is pot-sized (call, then raise the pot), all-in once that reaches the stack.
-  if(o.potLimit){const to=Math.floor((2*s.bet-s.bets[actor]+sum(s.bets)+sum(dead))*10+1e-9)/10;return to>=cap[actor]?null:to;}
-  let to;
-  if(s.level===0)to=s.callers>0?o.isoRaise:actor===sbSeat&&n>2?o.sbOpen:o.open;
-  else if(s.level===1)to=s.bet*(actor===sbSeat||actor===bbSeat?o.threeBetOOP:o.threeBetIP)+s.bet*o.squeezePerCaller*s.callers;
-  else if(s.level===2)to=s.bet*o.fourBet;
-  else if(s.level===3&&o.deep)to=s.bet*o.fiveBet;
-  else return null;
-  to=round(to);
-  return to>=o.jamShare*o.stack?null:to;
+  if(o.potLimit){const to=Math.floor((2*s.bet-s.bets[actor]+sum(s.bets)+sum(dead))*10+1e-9)/10;return[to>=cap[actor]?null:to];}
+  const list=x=>[].concat(x);let to;
+  if(s.level===0)to=[s.callers>0?o.isoRaise:actor===sbSeat&&n>2?o.sbOpen:o.open];
+  else if(s.level===1)to=list(actor===sbSeat||actor===bbSeat?o.threeBetOOP:o.threeBetIP).map(k=>s.bet*k+s.bet*o.squeezePerCaller*s.callers);
+  else if(s.level===2)to=list(o.fourBet).map(k=>s.bet*k);
+  else if(s.level===3&&o.deep)to=[s.bet*o.fiveBet];
+  else return[null];
+  return [...new Set(to.map(round))].sort((a,b)=>a-b).map(x=>x>=o.jamShare*o.stack?null:x);
  }
  function raises(s,actor){
   if(cap[actor]<=s.bet)return[];
   if(o.pushFold)return[{kind:'raise',to:cap[actor],jam:true}];
-  const sized=sizeFor(s,actor),out=[];
-  if(sized!==null)out.push({kind:'raise',to:sized});
-  if(sized===null||o.extraJam&&!o.potLimit)out.push({kind:'raise',to:cap[actor],jam:true});
+  const sizes=sizesFor(s,actor),out=sizes.filter(x=>x!==null).map(to=>({kind:'raise',to}));
+  if(sizes.includes(null)||o.extraJam&&!o.potLimit)out.push({kind:'raise',to:cap[actor],jam:true});
   return out;
  }
  function options(s,actor){
@@ -127,9 +130,11 @@ function build(raw){
   // commit: weight of all-in equity in a flop pot's payoff (1 when effectively all-in).
   const commit=s.allIn?1:Math.min(1,Math.max(0,(o.flopSPR-spr)/(o.flopSPR-o.allInSPR)));
   const rake=Math.min(o.rakeCap,o.rake/100*pot*(1+(1-Math.min(1,commit))*(o.rakeGrowth-1)));
-  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,raises:s.level,...commit>0&&commit<1?{commit}:{},...rake>0?{net:pot-rake}:{}};
+  return{type:commit>=1?'allin':'flop',players:[ip,ip===a?b:a],inv,pot,aggressor:s.raiser,raises:s.level,key:lineKey(s.history),...commit>0&&commit<1?{commit}:{},...rake>0?{net:pot-rake}:{}};
  }
 }
 function sum(a){return a.reduce((x,y)=>x+y,0);}
+// A line as chart packs key it (studio/preflop.js historyKey): seat:kind:raise target in hundredths of a bb.
+function lineKey(history){return history.map(e=>`${e.seat}:${e.kind}:${e.kind==='raise'?Math.round(e.to*100):0}`).join('/');}
 
-module.exports={build,defaults,blinds,actionOrder,postflopRank};
+module.exports={build,defaults,blinds,actionOrder,postflopRank,lineKey};

@@ -7,6 +7,7 @@
 //   node tools/postflop/library.cjs solve --charts preflop-library.json.gz --spots btn-bb --flops 100 --out postflop-work
 //   node tools/postflop/library.cjs bundle --out postflop-work
 //   node tools/postflop/library.cjs list
+// --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration.
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
 // --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
@@ -58,6 +59,24 @@ const SPOTS={
  'hu-limp':{label:'Heads-up 100bb · button limps, BB checks',chart:'NLH cash 2-handed 100bb',...line(2,['call','check'])},
  'hu-3bet':{label:'Heads-up 100bb · button opens, BB 3-bets, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','call'])},
 };
+// Every heads-up flop line of the 6-max 100bb tree, for per-spot calibration (calibrate.cjs
+// --per-spot): each open and call, each 3-bet the opener calls (small, and "-big" for the
+// larger size), and each small 4-bet the 3-bettor calls. Existing ids keep their lines.
+// A step "raise2" takes the node's second-smallest raise.
+{const P6=['utg','hj','co','btn','sb','bb'],L6=['UTG','HJ','CO','BTN','SB','BB'],f=n=>Array(n).fill('fold');
+ for(let i=0;i<5;i++)for(let j=i+1;j<6;j++){
+  const head=[...f(i),'raise',...f(j-i-1)],tail=f(5-j),o=P6[i],r=P6[j],lab=`6-max 100bb · ${L6[i]} opens, ${L6[j]}`;
+  const add=(id,label,steps)=>{if(!SPOTS[id])SPOTS[id]={label,chart:'NLH cash 6-handed 100bb',...line(6,steps)};};
+  add(`${o}-${r}`,`${lab} calls`,[...head,'call',...tail]);
+  add(`${o}-${r}-3bet`,`${lab} 3-bets, ${L6[i]} calls`,[...head,'raise',...tail,'call']);
+  add(`${o}-${r}-3bet-big`,`${lab} 3-bets big, ${L6[i]} calls`,[...head,'raise2',...tail,'call']);
+  add(`${o}-${r}-4bet`,`${lab} 3-bets, ${L6[i]} 4-bets, ${L6[j]} calls`,[...head,'raise',...tail,'raise','call']);
+ }
+ SPOTS['hu-3bet-big']={label:'Heads-up 100bb · button opens, BB 3-bets big, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise2','call'])};
+ SPOTS['hu-4bet']={label:'Heads-up 100bb · button opens, BB 3-bets, button 4-bets, BB calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','raise','call'])};
+ SPOTS['hu-limp-raise']={label:'Heads-up 100bb · button limps, BB raises, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['call','raise','call'])};
+}
+const PER_SPOT=Object.keys(SPOTS).filter(id=>/^(utg|hj|co|btn|sb)-|^hu-/.test(id));
 // The same lines at other depths, for tools/preflop/calibrate.cjs: "<id>-<depth>bb" on that
 // depth's chart (btn-bb-50bb). A line that does not reach the flop at a depth (a 3-bet that
 // is all-in) fails in prepare.
@@ -92,10 +111,10 @@ function prepare(id,packs){
  const def=SPOTS[id];if(!def)throw Error('Unknown spot '+id+'. Known: '+Object.keys(SPOTS).join(', '));
  const raw=packs.find(p=>p.name.startsWith(def.chart+' '));if(!raw)throw Error('The chart library has no "'+def.chart+'" pack.');
  const pack=P.validate(raw),h=new G.Hand(pack.config,{rng:G.rng(5)}),actions=[];
- for(const kind of def.steps){const node=pack.index.get(P.historyKey(h));
+ for(let kind of def.steps){const node=pack.index.get(P.historyKey(h));
   // A chart leaves out decisions that are always folds (BB behind an SB 3-bet).
   if(!node&&kind==='fold'){actions.push({seat:h.actor,street:0,kind});h.act({kind});continue;}
-  if(!node)throw Error('Line leaves the chart at '+kind+'.');const options=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0));if(!options.length)throw Error('The chart has no '+kind+' here.');const a={seat:h.actor,street:0,kind,target:options[0].target};actions.push(a);h.act({kind,target:a.target});}
+  if(!node)throw Error('Line leaves the chart at '+kind+'.');const second=kind==='raise2';if(second)kind='raise';const options=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0));if(!options[second?1:0])throw Error('The chart has no '+(second?'second ':'')+kind+' here.');const a={seat:h.actor,street:0,kind,target:options[second?1:0].target};actions.push(a);h.act({kind,target:a.target});}
  if(h.street!==1)throw Error('The line does not reach the flop.');
  const range=P.postflopRanges([pack],pack.config,actions);if(!range||range.key!==P.historyKey(h))throw Error('Could not derive ranges for '+id+'.');
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));
@@ -161,9 +180,11 @@ function classEvs(tree){
 
 async function solve(){
  const treeFile=path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
- const packs=loadCharts(args.charts),ids=args.spots.split(','),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
+ const packs=loadCharts(args.charts),auto=new Set(args.spots.split(',').includes('per-spot')?PER_SPOT:[]),ids=args.spots.split(',').flatMap(id=>id==='per-spot'?PER_SPOT:[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
-  const spot=prepare(id,packs),dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
+  // A per-spot line the chart never reaches (a 4-bet that is jam or fold) is skipped.
+  let spot;try{spot=prepare(id,packs);}catch(e){if(!auto.has(id))throw e;console.log(`${id}: skipped (${e.message})`);continue;}
+  const dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
   fs.writeFileSync(path.join(dir,'spot.json'),JSON.stringify({id,label:spot.label,chart:{name:spot.pack.name,key:spot.range.key},pot:spot.pot,stack:spot.stack,tree:TREE,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop},null,1));
   console.log(spot.label+': pot '+G.bb(spot.pot)+' bb, stack '+G.bb(spot.stack)+' bb, '+flops.length+' flops');
   for(const f of flops){

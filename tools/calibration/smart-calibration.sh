@@ -14,6 +14,7 @@
 # Every step resumes: solved flops, fits and charts already written are kept.
 #   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
 # EXTRA_FLOPS: flops per spot for the other 6-max 100bb lines in step 4 (default 50, which gives 56).
+# SPOT_FLOPS: flops per line for the per-spot fits in pass 2 (default 60; library.cjs --spots per-spot).
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
 # 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
 # TURN=1 also keeps the turn's first decisions for the 6-max and heads-up 100bb spots (bigger solver
@@ -22,7 +23,7 @@
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; SPOT_FLOPS=${SPOT_FLOPS:-60}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -49,10 +50,12 @@ solve(){ # charts out spots flops iterations [more args]
 evs(){ # charts out
   solve $1 $2 $(all $SINGLE) 24 150
   solve $1 $2 $(all $THREE) 72 150
+  # Pass 2 only (charts on the current tree): every 6-max and heads-up 100bb line for the per-spot fits.
+  [ "${3:-}" = per-spot ] && solve $1 $2 per-spot $SPOT_FLOPS 150
   solve $1 $2 $(all $LIMP) 24 200
 }
 fit(){ # work out
-  [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --split 1 --out $2 || { say "FAILED calibrate $2"; exit 1; }
+  [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --split 1 --per-spot 1 --out $2 || { say "FAILED calibrate $2"; exit 1; }
 }
 charts(){ # calibration dir [library.cjs args]: built charts plus every other v4 chart, bundled
   node tools/preflop/library.cjs --out $2 --games nlh --limp 1 --calibration $1 --base $V4 --jobs $CHART_JOBS "${@:3}" | grep -E "Problems|FAILED|Bundled|Kept|charts," ; [ -f $2/preflop-library.json.gz ] || { say "FAILED charts $2"; exit 1; }
@@ -65,7 +68,7 @@ say "PASS 1 charts"
 charts $W/set1.json $W/charts1 --seats 2,6 --formats cash --depths 20,50,100,200
 
 say "PASS 2: flop solves with EVs on the pass-1 charts"
-evs $W/charts1/preflop-library.json.gz $W/ev2
+evs $W/charts1/preflop-library.json.gz $W/ev2 per-spot
 fit $W/ev1,$W/ev2 $W/set2.json
 
 say "V6: the 20-200bb NLH charts with the pass-2 fits"
