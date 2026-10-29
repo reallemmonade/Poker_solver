@@ -64,6 +64,10 @@ function initInterface(){
  const handLine=create('div','ui-hand-line','<div id="uiHandLine" class="small muted"></div>'+button('Full history','data-history'));tablePane.append(handLine,$('playActions'));
  const custom=create('div','ui-custom-bet');custom.id='uiCustomBet';custom.append($('customBet'));tablePane.append(custom);$('customTarget').setAttribute('inputmode','decimal');$('customTarget').setAttribute('aria-label','Custom bet or raise size, street total in bb');$('customTarget').addEventListener('focus',e=>e.target.select());$('customTarget').addEventListener('keydown',e=>{if(e.key==='Enter'&&!$('customAction').disabled){e.preventDefault();$('customAction').click();}});
  const sessionLine=create('div','ui-session-line');sessionLine.append($('sessionStatus'),$('deal'));tablePane.append(sessionLine,sessionOptions);
+ // Phones: everything under the felt (betting bar, pre-actions, Next hand) lives in a dock whose height only grows, so
+ // the table never jumps when buttons appear or swap (interface.css sizes the felt from --dock).
+ {let dock=140;const fit=()=>{if(!tablePane.offsetParent||getComputedStyle($('table')).flexGrow!=='0')return;let h=0,seen=false;for(const el of tablePane.children){if(el.id==='table'){seen=true;continue;}if(!seen)continue;const cs=getComputedStyle(el);if(cs.display!=='none')h+=el.offsetHeight+parseFloat(cs.marginTop)+parseFloat(cs.marginBottom);}h=Math.ceil(h);if(h>dock){dock=h;tablePane.style.setProperty('--dock',dock+'px');}};
+  const watch=new ResizeObserver(fit);for(const el of [$('playActions'),sessionLine])watch.observe(el);}
  const compatibility=create('div','hide');compatibility.hidden=true;compatibility.append($('tableTitle'),$('samples'));tablePane.append(compatibility);
  play.querySelector('.table-legend')?.remove();playTop.remove();
  analysisPane.append(create('div','ui-analysis-title','<h2>This decision</h2>'),create('div','ui-analysis-controls'));
