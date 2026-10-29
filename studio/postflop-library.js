@@ -149,7 +149,7 @@
  function pick(spots,range,potStart,stack,ip,oop){
   const off=s=>Math.abs(Math.log((stack/potStart)/(s.stack/s.pot))),fits=spots.filter(s=>sameName(s.chart.name,range.name)&&s.chart.key===range.key&&sameRanges(s,range,ip,oop)).sort((a,b)=>off(a)-off(b)),spot=fits[0];
   if(!spot||off(spot)>Math.log(1.5))return null;
-  const twins=fits.filter(s=>s!==spot&&s.id===spot.id&&Math.abs(s.pot-spot.pot)<=1&&Math.abs(s.stack-spot.stack)<=1);if(!twins.length)return spot;
+  const twins=fits.filter(s=>s!==spot&&s.id===spot.id&&Math.abs(s.pot-spot.pot)<=1&&Math.abs(s.stack-spot.stack)<=1);if(!twins.length||Array.isArray(spot.flops))return spot;
   const cached=merged.get(spot);if(cached&&cached.twins.length===twins.length&&cached.twins.every((t,i)=>t===twins[i]&&cached.sizes[i]===Object.keys(t.flops).length))return cached.spot;
   const out={...spot,flops:Object.assign({},...twins.map(t=>t.flops),spot.flops)};merged.set(spot,{twins,sizes:twins.map(t=>Object.keys(t.flops).length),spot:out});return out;
  }
