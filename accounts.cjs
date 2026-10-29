@@ -178,7 +178,7 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   if(kind==='account'&&req.method==='POST'&&verb==='email'){
    limit(req,'login',30,15*60*1000);const {user}=await signedIn(req),s=await db(),data=await body(req),full=await s.userByName(user.username),email=cleanEmail(data.email);
    if(!full||!await checkPassword(typeof data.password==='string'?data.password:'',full.pass))throw err(401,'Wrong password.');
-   if(!validEmail(email))throw err(400,'Enter a valid email.');if(!await s.setEmail(user.id,email))throw err(409,'That email already has an account.');
+   if(!validEmail(email))throw err(400,'Enter a valid email.');if(!await s.setEmail(user.id,email))throw err(409,'That email already has an account.');await s.deleteReset(user.id);
    return json(res,200,{user:publicUser({...user,email})});
   }
   if(kind==='auth'&&req.method==='POST'&&verb==='logout'){const {hash}=await signedIn(req);await (await db()).deleteSession(hash);return json(res,200,{ok:true});}

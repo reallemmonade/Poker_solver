@@ -1,8 +1,9 @@
-# Local postflop solvers (TexasSolver for NLH, plo_solver for PLO)
+# Local postflop solvers (TexasSolver for NLH, mw_solver for 3-way NLH, plo_solver for PLO)
 
 Heads-up postflop spots that are too large for the in-browser exact solver can be solved on your own computer:
 
 - **No-limit Hold'em** goes to [TexasSolver](https://github.com/bupticybee/TexasSolver).
+- **Three-way no-limit Hold'em** goes to this project's own 3-way solver, `tools/multiway-solver/mw_solver` ([README](../multiway-solver/README.md)).
 - **Pot-limit Omaha** (4 cards, high only) goes to this project's own solver, `tools/plo-solver/plo_solver`.
 
 In the app, set **Analysis inputs & accuracy → Solver on your Mac** to **On**. That one setting turns on both solvers through the same bridge. The app remembers the setting and says under it whether the bridge is running. While it is not running, the app offers no solve for flops and turns; it is checked again when you come back to the app.
@@ -20,10 +21,10 @@ Then open the app on that Mac, sign in, and set **Solver settings → Solver on 
 
 1. Install the Xcode command-line tools (`xcode-select --install`), [Homebrew](https://brew.sh) and Node (`brew install node`).
 2. Build the solvers: `bash tools/local-solver/install-mac.sh`.
-   - It first compiles the PLO solver with the system `c++` (`-O3 -std=c++17 -pthread`, plus `-mcpu=native` or `-march=native` when the compiler supports it) and runs a small test solve.
+   - It first compiles the PLO solver and the 3-way solver with the system `c++` (`-O3 -std=c++17 -pthread`, plus `-mcpu=native` or `-march=native` when the compiler supports it) and runs a small test solve.
      - It needs no Homebrew packages.
      - In a terminal running under Rosetta on Apple silicon, it builds for arm64 anyway.
-     - `--plo-only` stops after this step, and that also works on Linux.
+     - `--plo-only` stops after this step (both solvers), and that also works on Linux.
    - It then downloads TexasSolver's console branch at a pinned commit, plus `cmake` and `libomp` from Homebrew.
    - It builds TexasSolver and runs a small test solve. If Homebrew is missing or is an Intel copy on Apple silicon, it gets cmake from a private Python venv and libomp from `$LIBOMP_PREFIX` or a conda install (`conda install llvm-openmp`).
 3. Start the bridge: double-click `tools/local-solver/start.command`, or run `node tools/local-solver/server.cjs`. Keep the window open while you study.
@@ -37,9 +38,10 @@ Options:
 | `--threads N` | all cores but one |
 | `--port` | 8787 |
 | `--timeout` | 1800 seconds per solve |
-| `--memory MB` | 70% of this computer's memory (PLO solver limit) |
+| `--memory MB` | 70% of this computer's memory (PLO and 3-way solver limit) |
 | `--solver` | path to TexasSolver's `console_solver` |
 | `--plo-solver` | `tools/plo-solver/plo_solver` |
+| `--mw-solver` | `tools/multiway-solver/mw_solver` |
 
 ## NLH: what TexasSolver solves
 
@@ -134,6 +136,10 @@ The solver prints `Iter: N` and `Total exploitability X precent` lines while it 
 - spec validation;
 - an end-to-end solve through the bridge.
 
+## Three-way NLH: what mw_solver solves
+
+A pot with exactly three players left from the flop on goes to `mw_solver` when **Solver on your Mac** is on, from the app on the Mac or through the solve queue from another device. Other multiway pots (four or more players, PLO, or a fourth player who put chips in on this street and then folded) still run the app's own engines on the bridge (`POST /spot-async`). The tree, the card-removal model, speed and memory are in [tools/multiway-solver/README.md](../multiway-solver/README.md).
+
 ## Solves sent from your phone
 
 A phone can't reach this bridge, so when you tap **Solve this spot** on a spot only the Mac can solve, the phone queues it in your account instead. The bridge collects queued spots, solves them one at a time and syncs each answer back, so it appears on the phone a few seconds after the solve ends.
@@ -157,6 +163,6 @@ The flop library holds about 100 of the 1,755 distinct flops for each preflop li
 
 ## Licence
 
-TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO solver is part of this project.
+TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO and 3-way solvers are part of this project.
 
 Check the bridge without a solver: `node tools/local-solver/check-bridge.cjs`.

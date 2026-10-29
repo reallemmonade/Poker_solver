@@ -52,7 +52,7 @@ evs(){ # charts out
   solve $1 $2 $(all $THREE) 72 150
   # Pass 2 only (charts on the current tree): every 6-max and heads-up 100bb line for the per-spot fits.
   [ "${3:-}" = per-spot ] && solve $1 $2 per-spot $SPOT_FLOPS 150
-  solve $1 $2 $(all $LIMP) 24 400
+  solve $1 $2 $(all $LIMP) 24 200
 }
 fit(){ # work out
   [ -f $2 ] || node tools/preflop/calibrate.cjs --work $1 --depths 20,50,100,200 --split 1 --per-spot 1 --out $2 || { say "FAILED calibrate $2"; exit 1; }

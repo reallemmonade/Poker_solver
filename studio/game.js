@@ -134,6 +134,8 @@
     return share.map(x=>x/runs);
   }
   function replay(config,events,options={}){const hand=new Hand(config,options);for(const e of events){assert(!hand.done,'History continues after the hand ended.');assert(hand.actor===e.seat&&hand.street===e.street,'Action history has an inconsistent actor or street.');hand.act({kind:e.kind,target:e.target,id:e.id})}return hand}
-  const api={Hand,normalize,variants,positions,modelActions,equity,information,preBucket,postBucket,texture,rankHigh,evaluate,combinations,rng,pick,units,bb,STREET,Core,replay,U,terminalICM,familyId};
+  // Starting hands ordered by all-in equity against two random hands (spot ranges, chart off-tree sizes).
+  const preflopOrder='AA KK QQ JJ TT 99 AKs 88 AQs AKo AJs ATs AQo KQs 77 KJs AJo KTs A9s KQo ATo QJs A8s 66 KJo QTs A7s K9s JTs KTo A9o QJo A5s A6s Q9s A8o QTo 55 A4s K8s K7s A3s K9o A7o J9s JTo Q8s T9s A2s K6s A5o A6o Q9o J8s A4o K5s 44 T8s K8o K4s Q7s J9o A3o K7o 98s J7s Q6s K3s T9o Q8o A2o K2s Q5s K6o T7s 97s K5o J8o Q4s 33 T8o 87s J6s Q3s J5s T6s K4o Q7o 98o K3o J4s Q2s Q6o 96s J7o 86s 76s Q5o T7o J3s K2o 97o 22 Q4o J2s 65s 87o T5s T4s 75s 85s 95s J6o T3s Q3o 54s J5o T6o 96o T2s 86o Q2o 84s 74s 76o 64s J4o 94s 93s 53s T5o J3o 92s 75o 63s 95o 65o T4o 85o J2o 43s 83s 73s 82s 52s T3o 54o 62s 64o 74o 42s 72s 94o 84o T2o 32s 93o 53o 92o 63o 43o 83o 73o 82o 52o 42o 62o 72o 32o'.split(' ');
+  const api={preflopOrder,Hand,normalize,variants,positions,modelActions,equity,information,preBucket,postBucket,texture,rankHigh,evaluate,combinations,rng,pick,units,bb,STREET,Core,replay,U,terminalICM,familyId};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerGame=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

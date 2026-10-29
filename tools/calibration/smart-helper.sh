@@ -32,7 +32,7 @@ solve(){ # charts out spots flops iterations [more args]
   node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE --shard $K/$N --reverse 1 "${@:6}" || say "FAILED solve into $2"
 }
 evs(){ # the main run's order backwards
-  solve $1 $2 $(all $LIMP) 24 400
+  solve $1 $2 $(all $LIMP) 24 200
   solve $1 $2 $(all $THREE) 72 150
   solve $1 $2 $(all $SINGLE) 24 150
 }

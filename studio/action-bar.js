@@ -16,16 +16,19 @@ const ActionBar=(()=>{
     // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
     // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
-    if(s.length>1)return s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t}));
-    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in.
+    // Sizes that share a label (two at or above the effective stack, or two that round to the same share) show once, the smaller kept.
+    const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
+    if(sl.length>1)return sl;
+    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in
+    // (Pot when a pot limit caps the bet below the all-in).
     const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
-    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[])];
+    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
   //     onFold, onCheck, onCall, onBet(target)}
   function turn(box,o){
-    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(r.standard,r):r.min):null;
+    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(Math.min(r.standard,cover(r)),r):r.min):null;
     // The amount starts at the first solved size; solved sizes that arrive later move it until you pick a size yourself.
     if(turnState.key!==o.key||!turnState.touched&&turnState.def!==def)turnState={key:o.key,amount:def,def,touched:false};
     // Re-renders keep a typed amount as it is (any 0.01 bb is legal); only the slider snaps to steps.
