@@ -30,6 +30,7 @@ async function refreshLeaks(){
  const decisions=leakDecisions();leakDrill.refs=new Map();for(const d of decisions){const k=PokerDrills.keyOf(d);if(!leakDrill.refs.has(k))leakDrill.refs.set(k,[]);leakDrill.refs.get(k).push(d);}
  leakDrill.list=PokerDrills.leaks(decisions);PokerDrills.sync(leakDrill.deck,leakDrill.list);leakDrill.graded=decisions.length;renderLeaks();}
 function saveLeakDeck(){leakDrill.deck.updatedAt=new Date().toISOString();dbPut('meta',{id:'drillLeaks-v1',value:leakDrill.deck}).catch(()=>{});}
+addEventListener('citrus-synced',e=>{if(!e.detail?.meta)return;leakDrill.loaded=null;if($('uiLeaks')?.dataset.ready)refreshLeaks();});
 function leakPick(list,total){let r=Math.random()*total;for(let i=0;i<list.length;i++)if((r-=list[i].w)<=0)return list[i];return list[list.length-1];}
 // Hold'em classes on a chart node's range edge: the main action differs from a neighbour one kicker
 // (or one pair rank) away. Charts are mostly pure, so these are the hands worth drilling.

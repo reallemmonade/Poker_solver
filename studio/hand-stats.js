@@ -1,15 +1,15 @@
 (function(root){
   'use strict';
   // HUD counters for one finished hand. Input: {n, actions:[{seat,street,kind}], startStreet, flop, showdown:[seat], won:[bool]}.
-  // Each counter is a did/could pair (e.g. threeBet/threeBetOpp), so totals add up across hands and players.
+  // Each counter is a did/could pair (e.g. threeBet/threeBetOpp), so totals add up across hands and players. VPIP and PFR leave out walks.
   const KEYS=['hands','pre','vpip','pfr','threeBetOpp','threeBet','foldTo3Opp','foldTo3','cbetOpp','cbet','foldCbetOpp','foldCbet','sawFlop','wtsd','wsd','aggr','calls'];
   const empty=()=>Object.fromEntries(KEYS.map(k=>[k,0]));
   function tally(input){
     const n=input.n,out=Array.from({length:n},empty),folded=Array(n).fill(false),pre=!(input.startStreet>0),acts=input.actions||[];
     let raises=0,opener=-1,aggressor=-1;const facing3=new Set(),faced3=new Set();
-    for(const o of out){o.hands=1;if(pre)o.pre=1;}
+    for(const o of out)o.hands=1;
     for(const a of acts){const o=out[a.seat],aggro=a.kind==='bet'||a.kind==='raise';if(!o)continue;
-      if(a.street===0&&pre){
+      if(a.street===0&&pre){o.pre=1;
         if(raises===1&&a.seat!==opener&&!facing3.has(a.seat)){facing3.add(a.seat);o.threeBetOpp=1;if(aggro)o.threeBet=1;}
         if(raises===2&&a.seat===opener&&!faced3.has(a.seat)){faced3.add(a.seat);o.foldTo3Opp=1;if(a.kind==='fold')o.foldTo3=1;}
         if(aggro||a.kind==='call')o.vpip=1;
