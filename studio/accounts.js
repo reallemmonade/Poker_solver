@@ -14,9 +14,10 @@ const citrusAccount=(()=>{
  const sync={status:account?'waiting':'signedOut',at:read(account?key('citrus-sync-at-v1'):'',0),timer:0,running:null,again:false,note:''};
  const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-)/.test(id)||id==='macsolver');
  function dbName(){const owner=read(OWNER,null);if(account)return owner===account.user.id?LEGACY_DB:LEGACY_DB+'-'+account.user.id;return owner?LEGACY_DB+'-guest':LEGACY_DB;}
- async function api(method,path,data,token=account?.token){
+ // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
+ async function api(method,path,data,token=account?.token,wake=false){
   if(!API)throw Object.assign(Error('Accounts need the hosted site.'),{status:0});
-  let res;try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined});}catch{throw Object.assign(Error('No connection. Your work stays saved on this device.'),{status:0});}
+  let res;for(let attempt=0;;attempt++){try{res=await fetch(API+path,{method,headers:{...data?{'Content-Type':'application/json'}:{},...token?{Authorization:'Bearer '+token}:{}},body:data?JSON.stringify(data):undefined});break;}catch{if(!wake||attempt>=4)throw Object.assign(Error(wake?'Could not reach the account server ('+new URL(API).host+'). Check your connection and try again.':'No connection. Your work stays saved on this device.'),{status:0});if(typeof wake==='function')wake();await new Promise(r=>setTimeout(r,[3000,6000,10000,15000][attempt]));}}
   // Anything but a JSON answer means the request reached the wrong server (for example the static site) or a proxy page.
   const text=await res.text().catch(()=>'');let body=null;try{body=JSON.parse(text)}catch{}
   if(!body||typeof body!=='object'){const host=new URL(API).host;throw Object.assign(Error(res.status>=500||res.status===0?'The account server ('+host+') is not answering. It may be waking up; try again in a minute.':'The account server ('+host+') sent back a page instead of an answer (HTTP '+res.status+'). Its address may be set wrong.'),{status:res.status>=500?res.status:502});}
@@ -70,8 +71,9 @@ const citrusAccount=(()=>{
    finally{sync.running=null;render();if(sync.again){sync.again=false;schedule(1000);}else if(sync.status!=='expired'&&sync.status!=='off')schedule(sync.status==='synced'?90000:30000);}
   })();return sync.running;
  }
+ const waking=()=>{const b=document.getElementById('uiAccountSubmit');if(b)b.textContent='Waking the server…';};
  async function signIn(kind,payload){
-  const res=await api('POST','/api/auth/'+kind,payload,null);
+  const res=await api('POST','/api/auth/'+kind,payload,null,waking);
   if(!res?.token||!res?.user?.id)throw Object.assign(Error('The account server ('+new URL(API).host+') gave an unexpected answer. Try again in a minute.'),{status:502});
   if(read(OWNER,null)===null)write(OWNER,res.user.id);
   account={token:res.token,user:res.user};write(ACCOUNT,account);location.reload();
@@ -109,7 +111,7 @@ const citrusAccount=(()=>{
    if((signup||reset)&&val('uiAccountPass')!==val('uiAccountConfirm')){out.textContent='Passwords do not match.';form.querySelector('#uiAccountConfirm').focus();return;}
    submit.disabled=true;
    try{if(signup)await signIn('signup',{username:val('uiAccountUser'),email:val('uiAccountEmail'),password:val('uiAccountPass')});
-    else if(forgot){await api('POST','/api/auth/forgot',{login:val('uiAccountUser')},null);resetLogin=val('uiAccountUser').trim();mode='reset';render();}
+    else if(forgot){await api('POST','/api/auth/forgot',{login:val('uiAccountUser')},null,waking);resetLogin=val('uiAccountUser').trim();mode='reset';render();}
     else if(reset)await signIn('reset',{login:resetLogin,code:val('uiAccountCode'),password:val('uiAccountPass')});
     else await signIn('login',{username:val('uiAccountUser'),password:val('uiAccountPass')});}
    catch(e){out.textContent=e.message;submit.disabled=false;}};
