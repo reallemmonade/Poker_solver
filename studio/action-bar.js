@@ -25,7 +25,7 @@ const ActionBar=(()=>{
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
   //     onFold, onCheck, onCall, onBet(target)}
   function turn(box,o){
-    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(r.standard,r):r.min):null;
+    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(Math.min(r.standard,cover(r)),r):r.min):null;
     // The amount starts at the first solved size; solved sizes that arrive later move it until you pick a size yourself.
     if(turnState.key!==o.key||!turnState.touched&&turnState.def!==def)turnState={key:o.key,amount:def,def,touched:false};
     // Re-renders keep a typed amount as it is (any 0.01 bb is legal); only the slider snaps to steps.
