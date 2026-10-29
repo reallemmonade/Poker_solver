@@ -172,7 +172,7 @@
  // TexasSolver plays for chips: say so when the table pays prizes, bounties or rake.
  function chipCaveat(config){const notes=[config.mode!=='cash'&&'tournament prizes (ICM)',config.bounties?.some(x=>x>0)&&'bounties',config.rakePct>0&&'rake'].filter(Boolean);return notes.length?' These are chip-EV frequencies: the solve ignores '+notes.join(', ')+'.':'';}
  function mapActions(hand,node,row,spec){
-  const legal=hand.legal(),paid=hand.streetPaid[hand.actor],actions=[],probs=[];
+  const legal=hand.legal(),paid=hand.streetPaid[hand.actor],actions=[],probs=[],index=[];
   node.actions.forEach((label,i)=>{
    const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};
@@ -182,9 +182,16 @@
    // stays all-in for whoever is shorter, or puts the shorter player all-in.
    else{const k=hand.currentBet?'raise':'bet',want=paid+Math.round(parseFloat(amount)),jam=!!spec&&want>=spec.stack,target=Math.min(legal.allInTo,Math.max(want,k==='raise'?legal.minRaiseTo:Math.max(want,G.units(hand.config.bb))));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':jam?' · puts the opponent all-in':'')};}
    action.id=action.kind+':'+(action.target||0);
-   const same=actions.findIndex(a=>a.id===action.id);if(same>=0)probs[same]+=row[i];else{actions.push(action);probs.push(row[i]);}
+   const same=actions.findIndex(a=>a.id===action.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=row[i];else{actions.push(action);probs.push(row[i]);}
   });
-  const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total)};
+  const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total),index};
+ }
+ // The acting player's whole range at this decision: each hand class's average action mix over its combos, in the
+ // order of the mapped actions (index maps solver actions onto them). For the range grid.
+ function classMix(table,index,size){
+  const sum={},count={};
+  for(const [combo,row]of Object.entries(table)){const cs=C.cards(combo);if(cs.length!==2||!Array.isArray(row))continue;const k=C.handClass(cs),t=row.reduce((a,b)=>a+b,0);if(!(t>0))continue;const m=sum[k]||(sum[k]=Array(size).fill(0));row.forEach((p,i)=>{m[index[i]]+=p/t;});count[k]=(count[k]||0)+1;}
+  const out={};for(const k in sum)out[k]=sum[k].map(x=>Math.round(x/count[k]*1000)/1000);return out;
  }
 
  // The PLO solver's tree: actions carry the street total ("to") they bet or raise to.
@@ -248,8 +255,8 @@
   result(){
    if(this.error)return{supported:false,message:'Local solver: '+this.error};
    if(this.spec.game==='PLO4')return resultPLO(this);
-   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);
-   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),
+   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length)};}catch{}
+   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
     solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
      warning:'Solved by TexasSolver on this computer for the ranges shown, with the listed bet sizes on every later street. Exploitability is the solver\'s own estimate, in percent of the pot. It does not report action EVs, so no decision cost is graded.'+chipCaveat(this.hand.config)}};
   }
