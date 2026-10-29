@@ -9,6 +9,8 @@
 //   node tools/postflop/library.cjs list
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
+// --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
+// --reverse 1 works from the last one back, so helper computers can share a run going forward.
 // --turn 1 also saves the turn's first decisions (<flop>.turn.json.gz) on the main lines: check-check,
 // bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.ctl per spot.
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
@@ -166,7 +168,7 @@ async function solve(){
    // stopped above that exploitability (% of pot), for example with more iterations,
    // or --need-evs 1 asks for those saved without per-class EVs.
    const file=path.join(dir,f.key+'.json');if(fs.existsSync(file)&&!(args.turn==='1'&&!fs.existsSync(path.join(dir,f.key+'.turn.json.gz')))){const redo=Number(args['redo-above']);let old=null;try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!(redo>0&&old&&old.exploitability>redo)&&!(args['need-evs']==='1'&&old&&!old.evs))continue;}
-   tasks.push({id,spot,f,file});
+   tasks.push({id,spot,f,file,index:ids.indexOf(id)*flops.length+flops.indexOf(f)});
   }
  }
  const one=async({id,spot,f,file})=>{
@@ -176,12 +178,14 @@ async function solve(){
    try{
     const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
     const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
-    if(args.turn==='1'){const t=path.join(dir,f.key+'.turn.json.gz');fs.writeFileSync(t+'.tmp',zlib.gzipSync(JSON.stringify({key:f.key,nodes:turnNodes(tree)})));fs.renameSync(t+'.tmp',t);}
+    if(args.turn==='1'){const t=path.join(path.dirname(file),f.key+'.turn.json.gz');fs.writeFileSync(t+'.tmp',zlib.gzipSync(JSON.stringify({key:f.key,nodes:turnNodes(tree)})));fs.renameSync(t+'.tmp',t);}
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
    }catch(error){console.log(id+' '+f.key+' failed: '+error.message);}
    finally{fs.rmSync(work,{recursive:true,force:true});}
  };
+ if(args.shard){const [k,n]=args.shard.split('/').map(Number);for(let i=tasks.length-1;i>=0;i--)if(tasks[i].index%n!==k-1)tasks.splice(i,1);}
+ if(args.reverse==='1')tasks.reverse();
  if(Number(args.limit)>0)tasks.splice(Number(args.limit));
  const worker=async()=>{while(tasks.length)await one(tasks.shift());};
  await Promise.all(Array.from({length:Math.max(1,Number(args.jobs)|0)},worker));
