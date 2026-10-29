@@ -29,7 +29,12 @@ at(){ local out=() id; for id in ${1//,/ }; do
 all(){ local d x s=""; for d in 20 50 100 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 other(){ local d x s=""; for d in 20 50 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve(){ # charts out spots flops iterations [more args]
-  node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE --shard $K/$N --reverse 1 "${@:6}" || say "FAILED solve into $2"
+  local base=(node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE --reverse 1 "${@:6}")
+  "${base[@]}" --shard $K/$N || say "FAILED solve into $2"
+  # Then help with what other shards still have left, instead of idling until the next stage.
+  # Flops already solved anywhere (synced through the main computer) are skipped. Not for
+  # --redo-above passes, which would re-solve flops that stay above the limit over and over.
+  [ "$N" -gt 1 ] && [[ " $* " != *" --redo-above "* ]] && { "${base[@]}" || say "FAILED solve into $2"; }
 }
 evs(){ # the main run's order backwards
   solve $1 $2 $(all $LIMP) 24 200
