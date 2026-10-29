@@ -61,8 +61,10 @@ async function main(){
  ok((await call('GET','/api/auth/me',{token:mac})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password}})).status===401,'old sessions and the old password stop working');
  ok((await call('POST','/api/auth/reset',{data:{login:name,code,password:'again pass 2'}})).status===400,'a code works once');
  const fresh=(await call('POST','/api/auth/login',{data:{username:name,password:'new password 1'}})).body.token;
+ await call('POST','/api/auth/forgot',{data:{login:name}});const stale=/\b(\d{6})\b/.exec(sent.at(-1).subject)[1];
  ok((await call('POST','/api/account/email',{token:fresh,data:{email:'new'+email,password:'wrong one!'}})).status===401&&(await call('POST','/api/account/email',{token:fresh,data:{email:'new'+email,password:'new password 1'}})).body.user.email==='new'+email,'changing the email needs the password');
  ok((await call('GET','/api/auth/me',{token:fresh})).body.user.email==='new'+email,'me reports the email');
+ ok((await call('POST','/api/auth/reset',{data:{login:name,code:stale,password:'again pass 3'}})).status===400,'a code sent to the old email stops working once the email changes');
  ok((await call('POST','/api/account/delete',{token:fresh,data:{password:'nope nope'}})).status===401,'deleting needs the password');
  ok((await call('POST','/api/account/delete',{token:fresh,data:{password:'new password 1'}})).status===200&&(await call('GET','/api/auth/me',{token:fresh})).status===401&&(await call('POST','/api/auth/login',{data:{username:name,password:'new password 1'}})).status===401,'deleting the account removes it');
  await call('POST','/api/account/delete',{token:other,data:{password}});
