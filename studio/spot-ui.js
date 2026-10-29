@@ -48,6 +48,14 @@ const TURN_SECONDS=5,RIVER_SECONDS=3,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MU
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
 function solveTimeKey(plan){return plan.route+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'');}
 function recordSolveTime(plan,seconds){if(!plan||!(seconds>0)||plan.kind==='multiway')return;const t=solveTimes(),key=solveTimeKey(plan),ratio=seconds/plan.seed,old=t[key];t[key]=old>0?.6*old+.4*ratio:ratio;try{localStorage.setItem('range-lab-solve-times',JSON.stringify(t))}catch{}}
+// How fast this device runs the solvers' kind of work (typed-array arithmetic over scattered indexes), measured in
+// about 0.2 s and kept for a week. The browser river times above were measured where this scores BENCH_REFERENCE
+// (about 6.2), so an on-device estimate starts from this device's own speed before finished solves correct it.
+const BENCH_REFERENCE=6.2,BENCH_KEY='citrus-device-speed-v1';
+function benchScore(){const n=1<<16,a=new Float64Array(n),b=new Float64Array(n),idx=new Uint32Array(n);let seed=7;for(let i=0;i<n;i++){seed=(seed*1103515245+12345)>>>0;idx[i]=seed%n;a[i]=(seed&1023)/1024;b[i]=1-a[i];}
+ let best=0;for(let round=0;round<3;round++){const t0=performance.now();let passes=0,acc=0;while(performance.now()-t0<60){for(let i=0;i<n;i++){const j=idx[i];acc+=a[j]*b[i];b[i]=Math.max(0,b[i]+a[j]-acc*1e-9);}passes++;}best=Math.max(best,passes/(performance.now()-t0));}return best;}
+function deviceSpeed(){try{const saved=JSON.parse(localStorage.getItem(BENCH_KEY)||'null');if(saved?.score>0&&Date.now()-saved.at<7*864e5)return saved.score;}catch{}const score=benchScore();try{localStorage.setItem(BENCH_KEY,JSON.stringify({score,at:Date.now()}))}catch{}return score;}
+function deviceSlowdown(){return Math.min(8,Math.max(.25,BENCH_REFERENCE/Math.max(.1,deviceSpeed())));}
 function onDeviceRoute(plan){return plan?.route==='river'||plan?.route==='plo-river';}
 function spotPlan(hand){
  if(!hand||hand.done)return null;
@@ -55,7 +63,7 @@ function spotPlan(hand){
  if(hand.street===0)return{route:'none',street:0,reason:'No chart covers this preflop line yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
  const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
- if(kind!=='multiway'&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:kind==='nlh'?25*(small?2.5:1):40,wait:0};
+ if(kind!=='multiway'&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?16:spr<30&&c.seats>2?110:300;
@@ -81,7 +89,7 @@ function solveSpotClick(skipReference=false){
  if(job?.status==='done'){deliverSolveJob(true);return;}
  const box=$('spotConfirm');if(!box)return;
  const show=()=>{box.classList.remove('hide');box.querySelectorAll('[data-solve-effort]').forEach(b=>b.onclick=()=>{hideSolveConfirm();if(state.hand===h&&!h.done)analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.solveEffort});});box.querySelector('[data-solve-cancel]').onclick=hideSolveConfirm;};
- const block=job&&job.status!=='failed'?jobText(job):plan.route==='none'?plan.reason:plan.blocked;
+ const block=job&&(jobPending(job)||job.status==='done')?jobText(job):plan.route==='none'?plan.reason:plan.blocked;
  if(block){box.innerHTML='<p>'+esc(block)+'</p><div class="row"><button type="button" class="btn secondary" data-solve-cancel>OK</button></div>';show();return;}
  if(!plan.efforts&&plan.seconds<=10&&!plan.note){analyzeSpot(h,{kind:'inspect',plan});return;}
  const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">Very wide pots can stop without an answer.</p>':'');
@@ -96,26 +104,47 @@ spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;
 async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;}catch{}watchSolveJobs();}
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
+// This device's id, so it cancels only the solves it sent.
+function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){id=Math.random().toString(36).slice(2,12);localStorage.setItem('citrus-device-id',id);}return id;}catch{return'';}}
+// Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
+async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j))return;const value={...j,status:'cancelled',cancelledAt:Date.now()};spotUI.jobs.set(id,value);try{await dbPut('meta',{id,value});}catch{}citrusAccount.run();watchSolveJobs();if(state.hand)renderPlay();}
+// A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made.
+function cancelStaleSolveJobs(){const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
+document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
-function jobText(j){
- if(j.status==='failed')return'Your Mac could not solve this. '+(j.message||'');if(j.status==='done')return'Solved on your Mac.';
- const mac=spotUI.mac,left=Math.max(0,(j.seconds||0)-(Date.now()-(j.startedAt||j.createdAt||Date.now()))/1000);
- if(j.status==='running')return'Your Mac is solving this'+(left>5?' ('+solveTimeText(left)+' left)':'')+'.';
- return!mac?.seen||Date.now()-mac.seen>MAC_OFFLINE_MS?'Sent to your Mac. It starts when your Mac is online.':'Sent to your Mac ('+solveTimeText(left+QUEUE_SECONDS)+').';
+// Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
+// the Mac every 10 seconds (tools/local-solver/queue.cjs, progressOf); between reports it counts down locally.
+function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+' min ago':Math.round(m/60)+' h ago';}
+// Between reports the bar keeps moving at the reported rate, and it never steps back when a new report is lower.
+spotUI.shownProgress=new Map();
+function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(j.rowId)||0));spotUI.shownProgress.set(j.rowId,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
+function jobState(j){
+ if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
+ if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
+  return{text:g.phase==='preparing'?'Your Mac is preparing the ranges…':'Solving on your Mac · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),p:g.p};}
+ const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac,solve=solveTimeText(j.seconds||60);
+ if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
+ if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
+ if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac (last seen '+agoText(Date.now()-mac.seen)+'). Then '+solve+' to solve.'};
+ const ahead=queuedSeconds()-Math.max(0,j.seconds||0);return{text:'Queued on your Mac. Starts '+(ahead>30?'in '+solveTimeText(ahead):'within 30 s')+', then '+solve+' to solve.',p:0};
 }
+function jobText(j){return jobState(j).text;}
+function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key);return'<div class="notice" id="solveJobNotice">'+(jobPending(j)?'<button type="button" class="ui-text-button solve-cancel" data-cancel-job="'+esc(id)+'">Cancel</button>':'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
+setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
 async function sendToMac(task,observed,opts,extraAction){
  if(!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),street:plan.street,kind:plan.kind,createdAt:Date.now()};
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),street:plan.street,kind:plan.kind,createdAt:Date.now()};
  await dbPut('meta',{id,value:job});spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
 }
-// While a solve is out on the Mac, sync every 20 seconds so its answer shows soon after it lands.
-function watchSolveJobs(){const pending=[...spotUI.jobs.values()].some(jobPending);if(pending&&!spotUI.jobTimer)spotUI.jobTimer=setInterval(()=>{if(document.visibilityState!=='hidden')citrusAccount.run();},20000);else if(!pending&&spotUI.jobTimer){clearInterval(spotUI.jobTimer);spotUI.jobTimer=0;}}
+// While a solve is out on the Mac, sync every 20 seconds, and every 10 while it runs, so its progress stays
+// current and its answer shows soon after it lands.
+function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()];if(!jobs.some(jobPending))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
 // A finished Mac solve for the live spot shows as soon as it syncs in.
 async function deliverSolveJob(force=false){
  const h=state.hand,j=spotJob(h);if(!j||j.status!=='done'||state.busy||activeSpotResult(h))return;if(!force&&spotUI.delivered===j.rowId)return;spotUI.delivered=j.rowId;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
- if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);
+ if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',street:j.street,kind:j.kind,seed:j.seed},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
 }
 addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{deliverSolveJob();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));

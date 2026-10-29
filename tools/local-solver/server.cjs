@@ -20,7 +20,7 @@ const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.on
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
 let job=null,finished=null;
-const queue=createQueue({port:args.port,threads:args.threads,busy:()=>!!job});
+const queue=createQueue({port:args.port,threads:args.threads,busy:()=>!!job,status:()=>job&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
