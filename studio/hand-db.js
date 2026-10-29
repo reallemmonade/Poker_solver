@@ -6,8 +6,9 @@ const RANKS='23456789TJQKA',POTS=['Walk','Limped','SRP','3-bet','4-bet+','Postfl
 function comboOf(cards){if(!cards||cards.length!==4)return cards||'';const a=cards[0],b=cards[2],s=cards[1]===cards[3],[hi,lo]=RANKS.indexOf(a)>=RANKS.indexOf(b)?[a,b]:[b,a];return hi===lo?hi+lo:hi+lo+(s?'s':'o');}
 function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const hi=RANKS.indexOf(combo[0]),lo=RANKS.indexOf(combo[1]),suited=combo[2]==='s';if(hi===lo)return'Pairs';if(lo>=8)return'Broadway';if(suited&&hi===12)return'Suited aces';if(suited&&hi-lo<=2)return'Suited connectors';return suited?'Other suited':'Other offsuit';}
 // A decision counts as a mistake when the solver measured a loss, or a chart choice is played under 5% in the source.
-// A chip-EV chart standing in for an ICM table does not model the payouts, so its choices are shown but never counted as mistakes.
-function gradeMistake(g){return g.referenceSource?!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+// A chip-EV chart standing in for an ICM table does not model the payouts, and an approximate (off-tree size) answer is not
+// the chart's own, so their choices are shown but never counted as mistakes.
+function gradeMistake(g){return g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
 function gradeCost(g){return g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,
@@ -27,14 +28,14 @@ function handDBFiltered(){const q=handDB.filter;let rows=factsOf(state.histories
 const signedBB=x=>x===null||!Number.isFinite(x)?'–':(x>0?'+':'')+fmt(x,1);
 function bbPer100(rows){const r=rows.filter(f=>f.net!==null);return r.length?100*r.reduce((s,f)=>s+f.net,0)/r.length:null;}
 function hudGridHTML(t){return'<div class="hud-grid">'+PokerStats.summary(t).map(([k,v])=>'<span title="'+PokerStats.TERMS[k]+'"><small>'+k+'</small>'+(v===null?'–':v)+'</span>').join('')+'</div>';}
-function handDBOptions(select,values,first){const html='<option value="">'+first+'</option>'+values.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');if(select._html!==html){const keep=select.value;select.innerHTML=html;select._html=html;select.value=values.includes(keep)?keep:'';}}
+function handDBOptions(select,values,first,k){const html='<option value="">'+first+'</option>'+values.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');if(select._html!==html){select.innerHTML=html;select._html=html;}if(!values.includes(handDB.filter[k]))handDB.filter[k]='';select.value=handDB.filter[k];}
 function renderHandDB(box){if(!box)return;
  if(!box.dataset.ready){box.dataset.ready='1';box.classList.add('hdb');box.innerHTML='<div class="hdb-bar"><select data-hdb="pos" aria-label="Position"></select><select data-hdb="pot" aria-label="Pot type"></select><select data-hdb="result" aria-label="Result"><option value="">Result</option><option value="won">Won</option><option value="lost">Lost</option><option value="showdown">Showdown</option><option value="noshowdown">No showdown</option><option value="mistakes">Mistakes</option></select><select data-hdb="sort" aria-label="Sort"><option value="new">Newest</option><option value="big">Biggest wins</option><option value="loss">Biggest losses</option><option value="mistakes">Costliest mistakes</option></select></div><p class="hdb-sum"></p><div class="hdb-list"></div><button type="button" class="btn secondary hdb-more" hidden>More</button><details class="ui-disclosure hdb-insights"><summary>Insights</summary><div class="hdb-body"></div></details>';
   box.addEventListener('change',e=>{const k=e.target.dataset?.hdb;if(!k)return;handDB.filter[k]=e.target.value;handDB.shown=10;box.dataset.key='';renderHandDB(box);});
   box.querySelector('.hdb-more').onclick=()=>{handDB.shown+=20;box.dataset.key='';renderHandDB(box);};box.querySelector('.hdb-insights').addEventListener('toggle',()=>{box.dataset.key='';renderHandDB(box);});}
  const all=factsOf(state.histories),key=JSON.stringify(handDB.filter)+handDB.shown+'|'+all.map(f=>f.key).join()+box.querySelector('.hdb-insights').open;if(box.dataset.key===key)return;box.dataset.key=key;
  const order=['UTG','UTG+1','UTG+2','MP','LJ','HJ','CO','BTN','BTN/SB','SB','BB'],positions=[...new Set(all.map(f=>f.pos))].sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
- handDBOptions(box.querySelector('[data-hdb="pos"]'),positions,'Position');handDBOptions(box.querySelector('[data-hdb="pot"]'),POTS.filter(p=>all.some(f=>f.pot===p)),'Pot');
+ handDBOptions(box.querySelector('[data-hdb="pos"]'),positions,'Position','pos');handDBOptions(box.querySelector('[data-hdb="pot"]'),POTS.filter(p=>all.some(f=>f.pot===p)),'Pot','pot');
  for(const k of ['result','sort'])box.querySelector('[data-hdb="'+k+'"]').value=handDB.filter[k];
  const rows=handDBFiltered(),rate=bbPer100(rows);box.querySelector('.hdb-bar').hidden=!all.length;
  box.querySelector('.hdb-sum').textContent=all.length?rows.length+' hand'+(rows.length===1?'':'s')+(rate===null?'':' · '+signedBB(rate)+' bb/100'):'';

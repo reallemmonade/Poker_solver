@@ -67,7 +67,8 @@ EOF
   launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
 else
-  launchctl kickstart -k "gui/$(id -u)/$label"
+  # Not loaded right now (unloaded by hand, or never started): load it instead.
+  launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null || launchctl bootstrap "gui/$(id -u)" "$plist"
 fi
 health=""; for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 1; health="$(curl -fs http://127.0.0.1:8787/health || true)"; [ -n "$health" ] && break; done
 [ -n "$health" ] || fail "The solver did not start. Its log is $log"

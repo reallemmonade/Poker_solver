@@ -51,6 +51,14 @@
 !/tools/calibration/smart-helper.sh
 !/tools/calibration/helpers.sh
 !/tools/split-libraries.cjs
+!/tools/chart-bots/
+!/tools/chart-bots/README.md
+!/tools/chart-bots/lib.cjs
+!/tools/chart-bots/selfplay.cjs
+!/tools/chart-bots/exploit.cjs
+!/tools/chart-bots/coverage.cjs
+!/tools/chart-bots/offtree.cjs
+!/tools/chart-bots/run-all.cjs
 !/tools/postflop/
 !/tools/postflop/README.md
 !/tools/postflop/library.cjs
@@ -125,3 +133,5 @@
 !/studio/mobile.css
 !/studio/verify-transfer.cjs
 /studio/render-site/
+# Chart bot reports (tools/chart-bots) are never committed.
+/out/

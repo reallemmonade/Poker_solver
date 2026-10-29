@@ -45,7 +45,7 @@
    const keys=[''];for(const e of node.history)keys.push(keys[keys.length-1]+'/'+e?.seat+e?.kind+(e?.to??''));let k=keys.length-1;while(k>0&&!states.has(keys[k]))k--;const h=(states.get(keys[k])||base).clone();
    for(let i=k;i<node.history.length;i++){const e=node.history[i];need(!h.done&&h.street===0&&e.seat===h.actor,'The reference history has an invalid actor or street.');h.act({kind:e.kind,target:['raise','bet'].includes(e.kind)?G.units(e.to):undefined});states.set(keys[i+1],i+1<node.history.length?h.clone():h);}
    // Fold, check and call are checked against legal() exactly as Hand.act checks them; only raises replay on a copy.
-   need(!h.done&&h.street===0&&node.seat===h.actor,'The node seat does not match its action history.');const ids=new Set(),l0=h.legal();node.actions=node.actions.map((a,i)=>{need(['fold','check','call','raise'].includes(a.kind),'Use fold, check, call or raise in a preflop reference.');const action={kind:a.kind,id:'pf'+i,...a.kind==='raise'?{target:a.to===undefined&&Number.isInteger(a.target)?a.target:G.units(a.to)}:{}};if(a.kind==='raise')h.clone().act(action);else need(a.kind==='fold'?l0.fold:a.kind==='check'?l0.check:l0.toCall>0,a.kind==='fold'?'Checking is available; folding to no bet is disabled.':a.kind==='check'?'A bet is outstanding.':'There is no bet to call.');const signature=a.kind+':'+(action.target||0);need(!ids.has(signature),'A reference node contains duplicate actions.');ids.add(signature);const l=h.legal();action.label=a.kind==='raise'?'Raise to '+G.bb(action.target)+' bb'+(action.target===l.allInTo?' · all-in':''):a.kind==='call'?'Call '+G.bb(l.callCost)+' bb':a.kind==='check'?'Check':'Fold';return action;});
+   need(!h.done&&h.street===0&&node.seat===h.actor,'The node seat does not match its action history.');const ids=new Set(),l0=h.legal();node.actions=node.actions.map((a,i)=>{need(['fold','check','call','raise'].includes(a.kind),'Use fold, check, call or raise in a preflop reference.');const action={kind:a.kind,id:'pf'+i,...a.kind==='raise'?{target:a.to===undefined&&Number.isInteger(a.target)?a.target:G.units(a.to)}:{}};if(a.kind==='raise')h.clone().act(action);else need(a.kind==='fold'?l0.fold:a.kind==='check'?l0.check:l0.toCall>0,a.kind==='fold'?'Checking is available; folding to no bet is disabled.':a.kind==='check'?'A bet is outstanding.':'There is no bet to call.');const signature=a.kind+':'+(action.target||0);need(!ids.has(signature),'A reference node contains duplicate actions.');ids.add(signature);const l=h.legal();action.label=a.kind==='raise'?'Raise to '+G.bb(action.target)+' bb'+(action.target===l.allInTo?' · all-in':''):a.kind==='call'?'Call '+G.bb(l.callCost)+' bb'+(l.callCost===h.stacks[h.actor]?' · all-in':''):a.kind==='check'?'Check':'Fold';return action;});
    node.key=historyKey(h);}
    const A=node.actions.length,fold=node.actions.findIndex(a=>a.kind==='fold');node.foldRow=node.actions.map((_,i)=>i===fold?1:0);
    // Compact packs list one row per class in PokerPreflop.classes order (NLH) or hand group
@@ -84,11 +84,11 @@
  }
  function offPath(pack,node){
   if(node.offPath!==undefined)return node.offPath;if(node.reach!==undefined&&node.reach<OFF_PATH)return node.offPath=true;const steps=pathOf(pack,node);node.offPath=false;if(!steps)return false;
-  if(!pack.prior){const L=pack.groups?pack.groups.labels.length:classes.length,prior=pack.prior=new Float64Array(L);if(pack.groups){const pc=ploClasses();for(let i=0;i<pc.counts.length;i++)prior[pack.groups.of[i]]+=pc.counts[i];}else classes.forEach((c,i)=>prior[i]=c.length===2?6:c[2]==='s'?4:12);}
-  const prior=pack.prior,L=prior.length,ranges=new Map();
+  const prior=priorOf(pack),L=prior.length,ranges=new Map();
   for(const [anc,k] of steps){if(anc.seat===node.seat)continue;let r=ranges.get(anc.seat);if(!r)ranges.set(anc.seat,r=new Float64Array(L).fill(1));const A=anc.actions.length,t=anc.table;let m=0;for(let c=0;c<L;c++){r[c]*=t[c*A+k]/1000;m+=prior[c]*r[c];}if(!(m>0))return node.offPath=true;}
   return false;
  }
+ function priorOf(pack){if(!pack.prior){const L=pack.groups?pack.groups.labels.length:classes.length,prior=pack.prior=new Float64Array(L);if(pack.groups){const pc=ploClasses();for(let i=0;i<pc.counts.length;i++)prior[pack.groups.of[i]]+=pc.counts[i];}else classes.forEach((c,i)=>prior[i]=c.length===2?6:c[2]==='s'?4:12);}return pack.prior;}
  function ownReach(pack,node,i){const steps=pathOf(pack,node);let r=1;if(steps)for(const [anc,k] of steps)if(anc.seat===node.seat)r*=anc.table[i*anc.actions.length+k]/1000;return r;}
  // forStorage keeps compact rows as typed arrays for IndexedDB; otherwise the output is plain JSON.
  function serialize(pack,forStorage=false){return{format:FORMAT,name:pack.name,...pack.chipEV?{chipEV:true}:{},...pack.groups?{handGroups:{labels:pack.groups.labels,classes:pack.groups.classes}}:{},source:pack.source,config:pack.config,nodes:pack.nodes.map(n=>({seat:n.seat,history:n.history,actions:n.actions.map(a=>({kind:a.kind,...a.kind==='raise'?{to:G.bb(a.target)}:{}})),...forStorage?{key:n.key,actions:n.actions.map(a=>({kind:a.kind,id:a.id,...a.kind==='raise'?{target:a.target}:{},label:a.label}))}:{},...n.table?forStorage?{table:n.table}:{strategy:compactRows(n)}:{strategy:n.strategy,defaultFold:n.defaultFold},...n.reach!==undefined?{reach:n.reach}:{}}))};}
@@ -119,6 +119,18 @@
   // A pack's shape never changes; the table's two shapes are computed once per lookup.
   const packShapes=new WeakMap();function packShape(pack){let s=packShapes.get(pack);if(s===undefined){s=shape(pack.config,pack.chipEV);packShapes.set(pack,s);}return s;}
  const topRaise=l=>Math.min(l.allInTo,l.maxRaiseTo);
+ // Facing a bigger raise than the node's, the defence shrinks toward the price: k = MDF(actual)/MDF(node),
+ // MDF = pot/(pot+risk). The node's continue weight (combos x own reach x 1-fold) is filled in equity
+ // order (G.preflopOrder; PLO groups by the node's continue share), each hand at most at its chart
+ // frequency, until k of it is used; the rest fold and continuing hands keep their call/raise mix.
+ // Returns the hand's continue scale (0-1), or null when the node has no fold.
+ function tighten(pack,node,cards,k){
+  if(!node)return null;const f=node.actions.findIndex(a=>a.kind==='fold');if(f<0)return null;const L=pack.groups?pack.groups.labels.length:classes.length;
+  if(!node.cut){const prior=priorOf(pack),mass=new Float64Array(L);for(let i=0;i<L;i++){const r=rowAt(pack,node,i);mass[i]=r?prior[i]*ownReach(pack,node,i)*(1-r[f]):0;}
+   const order=pack.groups?Array.from(mass.keys()).sort((a,b)=>mass[b]/prior[b]-mass[a]/prior[a]):G.preflopOrder.map(c=>classIndex.get(c)),before=new Float64Array(L);let acc=0;for(const i of order){before[i]=acc;acc+=mass[i];}node.cut={mass,before,total:acc};}
+  const {mass,before,total}=node.cut,i=pack.groups?pack.groups.of[ploClasses().classOf(cards)]:classIndex.get(G.Core.handClass(cards));
+  return mass[i]>0?Math.min(1,Math.max(0,(k*total-before[i])/mass[i])):1;
+ }
  function nearest(packs,hand,controlActions=[],tolerance=1.6){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
   const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
@@ -127,20 +139,31 @@
   // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
   // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
   const eff=Math.min(hand.initial[hero],Math.max(...others));
-  // A raise size the chart does not have at that node is replayed as the chart's closest raise
-  // below its top size (within the same factor of 1.6), and the substitution is reported.
-  const sizeMatch=[];
-  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal();if(a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff||a.target===rl.allInTo&&real.initial[real.actor]>=eff))target=top;else{const node=best.pack.index.get(historyKey(proxy)),sizes=node?node.actions.filter(x=>x.kind==='raise'&&x.target<top):[];if(sizes.length&&!sizes.some(x=>x.target===target)){const near=sizes.reduce((m,x)=>Math.abs(Math.log(x.target/target))<Math.abs(Math.log(m.target/target))?x:m);if(Math.abs(Math.log(near.target/target))<=Math.log(tolerance)+1e-9){sizeMatch.push({actual:G.bb(a.target),chart:G.bb(near.target)});target=near.target;}}}}real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
+  // A size between two of the node's raises maps by pseudo-harmonic action translation (Ganzfried &
+  // Sandholm 2013, sizes as raise over the pot after calling, to the lower size when f(A) >= 1/2); one
+  // above its largest raise below the top maps to that raise, and one below its smallest to the smallest.
+  // An all-in with no all-in at the node maps to its largest raise. Mapped sizes are reported.
+  const sizeMatch=[],frac=(h,t)=>(t-h.currentBet)/(h.pot+h.currentBet-h.streetPaid[h.actor]),mdf=(h,t)=>h.pot/(h.pot+t-h.streetPaid[h.actor]);let last=null,far=false;
+  try{for(const a of hand.actionLog){let target=a.target;if(['raise','bet'].includes(a.kind)){const top=topRaise(proxy.legal()),rl=real.legal(),node=best.pack.index.get(historyKey(proxy)),all=node?node.actions.filter(x=>x.kind==='raise').map(x=>x.target).sort((x,y)=>x-y):[],sizes=all.filter(x=>x<top);
+    const jam=a.target>=top||a.target>=topRaise(rl)&&(rl.maxRaiseTo<rl.allInTo||a.target>=eff||a.target===rl.allInTo&&real.initial[real.actor]>=eff);
+    if(jam)target=!all.length||all.includes(top)?top:all[all.length-1];
+    else if(sizes.length&&!sizes.includes(target)){const x=frac(real,a.target),hi=sizes.findIndex(t=>frac(proxy,t)>x);if(hi<0)target=sizes[sizes.length-1];else if(!hi)target=sizes[0];else{const A=frac(proxy,sizes[hi-1]),B=frac(proxy,sizes[hi]);target=(B-x)*(1+A)/((B-A)*(1+x))>=.5?sizes[hi-1]:sizes[hi];}}
+    last=null;if(target!==a.target&&!(jam&&target===top)){const r=G.bb(a.target)/G.bb(target);if(Math.abs(Math.log(r))>Math.log(tolerance)+1e-9)far=true;sizeMatch.push({actual:G.bb(a.target),chart:G.bb(target)});last={seat:a.seat,k:mdf(real,a.target)/mdf(proxy,target)};}}
+   real.act({kind:a.kind,target:a.target});proxy.act({kind:a.kind,target});}}catch{return null;}
   proxy.holes[relative(hero)]=hand.holes[hero].slice();const result=query(best.pack,proxy,[]);if(!result)return null;
+  const cut=last&&last.seat!==hero&&last.k<1-1e-9?tighten(best.pack,best.pack.index.get(historyKey(proxy)),proxy.holes[proxy.actor],last.k):null;
+  if(cut!==null){const f=result.actions.findIndex(a=>a.kind==='fold');result.reference=result.reference.map((p,i)=>i===f?1-(1-p)*cut:p*cut);result.probs=result.reference;}
   // The chart's largest raise stands for this hand's; other sizes are kept within this hand's
   // legal range, and actions that become the same are merged.
   // After a mapped size, the chart's own raises keep their ratio to the bet the player faces.
   const l=hand.legal(),chartTop=topRaise(proxy.legal()),top=topRaise(l),scale=sizeMatch.length?hand.currentBet/proxy.currentBet:1,actions=[],reference=[];
   result.actions.forEach((a,i)=>{const x={...a};if(x.kind==='raise'){if(!l.canRaise){x.kind=l.toCall?'call':'check';delete x.target;}else x.target=x.target>=chartTop?top:Math.min(top,Math.max(Math.round(x.target*scale),l.minRaiseTo));}
-   x.label=x.kind==='raise'?'Raise to '+G.bb(x.target)+' bb'+(x.target===l.allInTo?' · all-in':''):x.kind==='call'?'Call '+G.bb(l.callCost)+' bb':x.kind==='check'?'Check':x.label;
+   x.label=x.kind==='raise'?'Raise to '+G.bb(x.target)+' bb'+(x.target===l.allInTo?' · all-in':''):x.kind==='call'?'Call '+G.bb(l.callCost)+' bb'+(l.callCost===hand.stacks[hand.actor]?' · all-in':''):x.kind==='check'?'Check':x.label;
    try{hand.clone().act(x);}catch{return;}const j=actions.findIndex(b=>b.kind===x.kind&&b.target===x.target);if(j>=0)reference[j]+=result.reference[i];else{actions.push(x);reference.push(result.reference[i]);}});
   const total=sum(reference);if(!(total>0)||actions.length<2)return null;result.actions=actions;result.reference=reference.map(p=>p/total);
   [result.actions,result.reference]=ordered(result.actions,result.reference);result.probs=result.reference;
+  // Sizes mapped beyond the 1.6x tolerance or a tightened range are approximate: shown with that label, never graded as mistakes.
+  if(far||last&&last.seat!==hero&&last.k<1-1e-9){result.offTree=true;result.referenceSource.name+=' · approximate: off-tree size';}
   if(sizeMatch.length){result.sizeMatch=sizeMatch;result.referenceSource.name+=' · earlier raise sizes mapped to the chart\'s: '+sizeMatch.map(m=>m.actual+' → '+m.chart+' bb').join(', ');result.referenceKey+='|sizes:'+sizeMatch.map(m=>m.actual+'>'+m.chart).join(',');}
   const standIn=(best.pack.chipEV||best.tourney)&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.tourney&&(deadMoney(best.pack.config)!==deadMoney(table)||table.ante>0&&best.pack.config.anteMode!==table.anteMode)){result.anteStandIn=true;result.referenceSource.name+=' · chart ante differs from this table\'s';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;

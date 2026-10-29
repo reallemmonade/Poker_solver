@@ -14,7 +14,7 @@ function leakClass(g){if(leakDrill.classes.has(g.id))return leakDrill.classes.ge
 // Your graded table decisions (of the given hands' facts), newest first. Only grades with a measured cost or a chart frequency count.
 function leakDecisions(facts=factsOf(state.histories)){const out=[];
  for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
-  const chart=!!g.referenceSource&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
+  const chart=!!g.referenceSource&&!g.approximate&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
   out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
  return out;}
@@ -22,14 +22,17 @@ async function leakSolves(){if(leakDrill.solves)return leakDrill.solves;const in
  try{for(const row of await dbAll('solves')){try{const k=JSON.parse(row.key)[1];if(typeof k!=='string'||!row.result?.supported||!row.result.actions?.length)continue;if(!PokerPreflop.isResult(row.result)&&!T.assessmentEvidence(row.result).usable)continue;if(!index.has(k))index.set(k,row);}catch{}}}catch{}
  return leakDrill.solves=index;}
 function leakPacks(l){return preflopLibrary.packs.filter(p=>p.config.seats===l.seats&&p.config.variant===l.variant&&p.config.mode===l.mode);}
-function leakPack(l){const depth=p=>{const s=p.config.stacks.slice().sort((a,b)=>a-b);return s[s.length>>1];};let best=null,gap=Infinity;for(const p of leakPacks(l)){const d=Math.abs(Math.log(depth(p)/l.depth));if(d<gap){gap=d;best=p;}}return gap<Math.log(1.6)?best:null;}
+const leakPackDepth=p=>{const s=p.config.stacks.slice().sort((a,b)=>a-b);return s[s.length>>1];};
+function leakPack(l){let best=null,gap=Infinity;for(const p of leakPacks(l)){const d=Math.abs(Math.log(leakPackDepth(p)/l.depth));if(d<gap){gap=d;best=p;}}return gap<Math.log(1.6)?best:null;}
 function leakDrillable(l){if(l.held||leakDrill.stuck.has(l.key))return false;if(l.street===0&&quizChartTopics.includes(l.topic)&&leakPack(l))return true;return(leakDrill.refs.get(l.key)||[]).some(r=>leakReplay(r));}
 async function refreshLeaks(){
  if(!leakDrill.loaded)leakDrill.loaded=dbAll('meta').then(rows=>{const v=rows.find(r=>r.id==='drillLeaks-v1')?.value;if(PokerDrills.validDeck(v))leakDrill.deck=v;}).catch(()=>{});
  leakDrill.solves=null;leakDrill.live=null;await Promise.all([leakDrill.loaded,leakSolves()]);
  const decisions=leakDecisions();leakDrill.refs=new Map();for(const d of decisions){const k=PokerDrills.keyOf(d);if(!leakDrill.refs.has(k))leakDrill.refs.set(k,[]);leakDrill.refs.get(k).push(d);}
- leakDrill.list=PokerDrills.leaks(decisions);PokerDrills.sync(leakDrill.deck,leakDrill.list);leakDrill.graded=decisions.length;renderLeaks();}
+ // A preflop leak drilled on the nearest chart is labelled with that chart's depth, the stack its drills deal.
+ leakDrill.list=PokerDrills.leaks(decisions).map(l=>{const p=l.street===0&&quizChartTopics.includes(l.topic)?leakPack(l):null;return p?{...l,label:PokerDrills.label({...l,depth:leakPackDepth(p)})}:l;});PokerDrills.sync(leakDrill.deck,leakDrill.list);leakDrill.graded=decisions.length;renderLeaks();}
 function saveLeakDeck(){leakDrill.deck.updatedAt=new Date().toISOString();dbPut('meta',{id:'drillLeaks-v1',value:leakDrill.deck}).catch(()=>{});}
+addEventListener('citrus-synced',e=>{if(!e.detail?.meta)return;leakDrill.loaded=null;if($('uiLeaks')?.dataset.ready)refreshLeaks();});
 function leakPick(list,total){let r=Math.random()*total;for(let i=0;i<list.length;i++)if((r-=list[i].w)<=0)return list[i];return list[list.length-1];}
 // Hold'em classes on a chart node's range edge: the main action differs from a neighbour one kicker
 // (or one pair rank) away. Charts are mostly pure, so these are the hands worth drilling.
@@ -49,7 +52,7 @@ async function leakChartSpot(l){const pack=leakPack(l);if(!pack)return null;if(!
 function leakReplay(ref){const row=leakDrill.solves?.get(ref.publicKey);
  if(row){try{const {hand}=savedSpotContext(row);return{hand,result:row.result};}catch{}}
  if(!leakDrill.live)leakDrill.live=new Map();if(leakDrill.live.has(ref.publicKey))return leakDrill.live.get(ref.publicKey);let out=null;
- try{const g=ref.grade,observed=leakObserved(g),holes=Array(g.config.seats).fill(null);holes[g.hero]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(1)),result=hand.street===0?preflopReference(hand):hand.street===1?postflopLibraryReference(hand):null;if(result?.supported&&result.actions.length>1)out={hand,result};}catch{}
+ try{const g=ref.grade,observed=leakObserved(g),holes=Array(g.config.seats).fill(null);holes[g.hero]=observed.heroCards;const hand=PokerSpot.reconstruct(observed,holes,G.rng(1)),result=hand.street===0?preflopReference(hand):hand.street===1?postflopLibraryReference(hand):null;if(result?.supported&&!result.offTree&&result.actions.length>1)out={hand,result};}catch{}
  leakDrill.live.set(ref.publicKey,out);return out;}
 // Mistakes come up three times as often as decisions you got right. Each saved decision comes up once per sitting,
 // so a leak is not passed by remembering one answer.
