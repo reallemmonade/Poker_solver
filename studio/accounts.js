@@ -86,7 +86,7 @@ const citrusAccount=(()=>{
   account={token:res.token,user:res.user};write(ACCOUNT,account);location.reload();
  }
  async function signOut(){const old=account;if(old){try{await push()}catch{}api('POST','/api/auth/logout',{},old.token).catch(()=>{});}account=null;write(ACCOUNT,null);location.reload();}
- async function deleteAccount(password){await api('POST','/api/account/delete',{password});for(const n of ['citrus-sync-queue-v1','citrus-sync-cursor-v1','citrus-sync-seeded-v1','citrus-sync-at-v1','citrus-prefs-seen-v1'])write(key(n),null);account=null;write(ACCOUNT,null);location.reload();}
+ async function deleteAccount(password){await api('POST','/api/account/delete',{password});for(const n of ['citrus-sync-queue-v1','citrus-sync-cursor-v1','citrus-sync-seeded-v1','citrus-sync-at-v1','citrus-prefs-seen-v1'])write(key(n),null);if(read(OWNER,null)===uid())write(OWNER,null);account=null;write(ACCOUNT,null);location.reload();}
  // Interface: a round account button beside Settings and one dialog.
  const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
  let dialog=null,button=null,mode='login',resetLogin='';
