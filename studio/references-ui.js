@@ -10,8 +10,8 @@ function actionTones(actions,hand=null){
  else{const by={1:['bet2'],2:['bet1','bet3'],3:['bet1','bet2','bet3']}[sized.length];sized.forEach(({i},k)=>{tones[i]=by?by[k]:['bet1','bet2','bet3'][Math.min(2,Math.floor(3*k/sized.length))];});}
  return tones;
 }
-// An action's label in the all-in tone reads All-in, with its amount ("Bet 99 bb" → "All-in 99 bb").
-function toneLabel(a,tone){return tone==='allin'&&!/all-in/i.test(a.label||'')?String(a.label||'').replace(/^(Bet|Raise to|Raise)\b/i,'All-in'):a.label;}
+// An action's short label: anything all-in reads All-in with its amount ("Bet 57.25 bb · puts the opponent all-in" → "All-in 57.3 bb"), sizes to one decimal.
+function toneLabel(a,tone){let s=String(a.label||'');const jam=tone==='allin'||/·\s*(puts the opponent )?all-in/i.test(s);s=s.replace(/\s*·\s*(puts the opponent )?all-in\b/i,'');if(jam)s=s.replace(/^(Bet|Raise to|Raise)\b/i,'All-in');return s.replace(/(\d+\.\d+)(?= bb)/g,n=>String(+(+n).toFixed(1)));}
 // A frequency mix as left-to-right color bands, for one range-grid cell.
 function actionMixStyle(mix,tones){let at=0;const stops=[];mix.forEach((p,i)=>{if(!(p>0))return;const end=Math.min(100,at+p*100);stops.push('var(--act-'+tones[i]+') '+at.toFixed(1)+'% '+end.toFixed(1)+'%');at=end;});return stops.length?'background:linear-gradient(to right,'+stops.join(',')+')':'';}
 function actionKeyHTML(actions,tones){return'<div class="action-key">'+actions.map((a,i)=>'<span><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':a.label.replace(/ · .*/,''))+'</span>').join('')+'</div>';}
