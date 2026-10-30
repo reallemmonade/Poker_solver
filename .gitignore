@@ -90,6 +90,9 @@
 !/studio/drill-plan.js
 !/studio/leak-drills.js
 !/studio/verify-drills.cjs
+!/studio/rating.js
+!/studio/performance.js
+!/studio/verify-rating.cjs
 !/studio/index.html
 !/studio/apple-touch-icon.png
 !/studio/icon-192.png

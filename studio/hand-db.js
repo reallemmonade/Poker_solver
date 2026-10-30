@@ -19,7 +19,7 @@ function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).le
   line=[0,1,2,3].map(s=>mine.filter(a=>a.street===s).map(a=>({fold:'F',check:'X',call:'C',bet:'B',raise:'R'})[a.kind]).join('')).filter(Boolean).join('/'),
   grades=(rec.grading||[]).filter(g=>g.hero===undefined||g.hero===hero),mistakes=grades.filter(gradeMistake),combo=comboOf(rec.holes?.[hero]||''),pos=G.positions(c.seats,c.button)[hero]||'Seat '+(hero+1),
   net=base.net?Math.round(base.net[hero]*100)/100:null;
- f={key,id:row.id,at:row.createdAt,assisted:rec.assisted!==false,hero,pos,combo,group:rec.holes?.[hero]?.length===4?handGroup(combo):'Other',seats:c.seats,depth:c.stacks[hero],pot,ended,line,net,showdown:atShowdown,
+ f={key,id:row.id,at:row.createdAt,assisted:rec.assisted!==false,hero,pos,combo,group:rec.holes?.[hero]?.length===4?handGroup(combo):'Other',seats:c.seats,mode:c.mode,depth:c.stacks[hero],pot,ended,line,net,showdown:atShowdown,
   mistakes:mistakes.length,cost:mistakes.reduce((s,g)=>s+gradeCost(g),0),grades,base,tally:PokerStats.tally(base)};
  f.tags=[pos,combo,pot.replace(/[\s-]/g,''),ended,net===null?'':net>0?'won':net<0?'lost':'even',atShowdown?'showdown':'',f.mistakes?'mistake mistakes':'',f.group,c.seats===2?'hu headsup':c.seats+'max',line].join(' ').toLowerCase();
  handDB.cache.set(row.id,f);return f;}
