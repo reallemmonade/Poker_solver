@@ -7,7 +7,8 @@
 //   node tools/postflop/library.cjs solve --charts preflop-library.json.gz --spots btn-bb --flops 100 --out postflop-work
 //   node tools/postflop/library.cjs bundle --out postflop-work
 //   node tools/postflop/library.cjs list
-// --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration.
+// --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration,
+// per-spot-6max for its 6-max lines only.
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
 // --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
@@ -76,7 +77,7 @@ const SPOTS={
  SPOTS['hu-4bet']={label:'Heads-up 100bb · button opens, BB 3-bets, button 4-bets, BB calls',chart:'NLH cash 2-handed 100bb',...line(2,['raise','raise','raise','call'])};
  SPOTS['hu-limp-raise']={label:'Heads-up 100bb · button limps, BB raises, button calls',chart:'NLH cash 2-handed 100bb',...line(2,['call','raise','call'])};
 }
-const PER_SPOT=Object.keys(SPOTS).filter(id=>/^(utg|hj|co|btn|sb)-|^hu-/.test(id));
+const PER_SPOT=Object.keys(SPOTS).filter(id=>/^(utg|hj|co|btn|sb)-|^hu-/.test(id)),PER_SPOT_6MAX=PER_SPOT.filter(id=>!/^hu-/.test(id));
 // The same lines at other depths, for tools/preflop/calibrate.cjs: "<id>-<depth>bb" on that
 // depth's chart (btn-bb-50bb). A line that does not reach the flop at a depth (a 3-bet that
 // is all-in) fails in prepare.
@@ -117,9 +118,23 @@ function prepare(id,packs){
   if(!node)throw Error('Line leaves the chart at '+kind+'.');const second=kind==='raise2';if(second)kind='raise';const options=node.actions.filter(a=>a.kind===kind).sort((a,b)=>(a.target||0)-(b.target||0));if(!options[second?1:0])throw Error('The chart has no '+(second?'second ':'')+kind+' here.');const a={seat:h.actor,street:0,kind,target:options[second?1:0].target};actions.push(a);h.act({kind,target:a.target});}
  if(h.street!==1)throw Error('The line does not reach the flop.');
  const range=P.postflopRanges([pack],pack.config,actions);if(!range||range.key!==P.historyKey(h))throw Error('Could not derive ranges for '+id+'.');
+ // --floor x (tools/preflop/level2.cjs) gives each class this seat takes to any per-spot flop line of
+ // the chart (5% of its combos or more) at least x of its combos (TexasSolver drops weights under
+ // 0.005), so the solve also prices hands the chart plays another way here, such as a flat it
+ // could 3-bet instead.
+ const floor=Number(args.floor)||0,seen=floor?plays(packs,def.chart):null;
+ const classes=(w,seat)=>{const o={};P.classes.forEach((c,i)=>{const x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];if(x>=.005)o[c]=seen?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));
- const classes=w=>{const o={};P.classes.forEach((c,i)=>{if(w[i]>=.005)o[c]=Math.round(w[i]*1000)/1000;});return o;};
- return{id,label:def.label,pack,range,pot:h.pot,stack:Math.min(h.stacks[ip],h.stacks[oop]),ip,oop,rangeIp:classes(range.seats[ip]),rangeOop:classes(range.seats[oop])};
+ return{id,label:def.label,pack,range,pot:h.pot,stack:Math.min(h.stacks[ip],h.stacks[oop]),ip,oop,rangeIp:classes(range.seats[ip],ip),rangeOop:classes(range.seats[oop],oop)};
+}
+// The classes each seat takes to a flop on some per-spot line of a chart, with 5% of its combos or more.
+const playsCache=new Map();
+function plays(packs,chart){
+ if(playsCache.has(chart))return playsCache.get(chart);const out={},floor=args.floor;args.floor='';playsCache.set(chart,out);
+ try{for(const id of PER_SPOT){if(SPOTS[id].chart!==chart)continue;let s;try{s=prepare(id,packs);}catch{continue;}
+  for(const seat of [s.ip,s.oop]){out[seat]=out[seat]||new Set();P.classes.forEach((c,i)=>{if(s.range.seats[seat][i]>=.05)out[seat].add(c);});}}}
+ finally{args.floor=floor;}
+ return out;
 }
 
 function spec(spot,board){
@@ -180,7 +195,7 @@ function classEvs(tree){
 
 async function solve(){
  const treeFile=path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
- const packs=loadCharts(args.charts),auto=new Set(args.spots.split(',').includes('per-spot')?PER_SPOT:[]),ids=args.spots.split(',').flatMap(id=>id==='per-spot'?PER_SPOT:[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
+ const packs=loadCharts(args.charts),alias={'per-spot':PER_SPOT,'per-spot-6max':PER_SPOT_6MAX},auto=new Set(args.spots.split(',').flatMap(id=>alias[id]||[])),ids=args.spots.split(',').flatMap(id=>alias[id]||[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   // A per-spot line the chart never reaches (a 4-bet that is jam or fold) is skipped.
   let spot;try{spot=prepare(id,packs);}catch(e){if(!auto.has(id))throw e;console.log(`${id}: skipped (${e.message})`);continue;}
@@ -246,5 +261,5 @@ if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1]');}
-module.exports={SPOTS,TREE,prepare,spec,nodes,turnNodes};
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x]');}
+module.exports={SPOTS,TREE,PER_SPOT,PER_SPOT_6MAX,prepare,spec,nodes,turnNodes,args};

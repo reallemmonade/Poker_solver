@@ -19,8 +19,9 @@ function defaults(raw={}){
   // reraised: {realization, initiative, sharpness, playTable} for flop pots after a 3-bet or more,
   // which play shallower than single-raised pots; null uses the settings above for every pot.
   reraised:null,
-  // spots: {line key: {realization, initiative, sharpness, playTable}} for single flop lines
-  // (calibrate.cjs --per-spot), which win over reraised and the settings above.
+  // spots: {line key: {realization, initiative, sharpness, playTable, measured}} for single flop lines
+  // (calibrate.cjs --per-spot), which win over reraised and the settings above; measured holds
+  // pot shares solved on that line (level2.cjs), which the line's matrices are rescaled to match.
   spots:null,
   // Flop pots pay all-in equity below allInSPR (stack behind / pot), the realization share above
   // flopSPR, and a blend in between: with that little behind the money goes in on most flops.
