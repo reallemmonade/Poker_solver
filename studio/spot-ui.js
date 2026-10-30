@@ -136,8 +136,18 @@ function spotPlan(hand){
    else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
   else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
  }
+ // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
+ // can't be sent, so it isn't offered (the solve would only stop with that error).
+ if(!pre&&(plan.route==='mac'||plan.route==='texas')&&noChartRanges(hand))return{route:'none',street:hand.street,reason:'No chart covers how this hand got here, so it can\'t be solved.'};
  plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
+// True only when charts are loaded, you typed no ranges and none of them covers this hand's preflop line.
+const chartLineMemo=new WeakMap();
+function noChartRanges(hand){
+ if(($('spotRangeMode')?.value||'auto')!=='auto'||spotUI.rangeValues.some(x=>String(x||'').trim())||!preflopLibrary.packs.length||typeof chartsLoading==='function'&&chartsLoading())return false;
+ const pre=hand.actionLog.filter(a=>a.street===0).length,m=chartLineMemo.get(hand);if(m&&m.pre===pre)return m.none;
+ let none=true;try{none=!PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,observedData(hand).actions);}catch{}
+ chartLineMemo.set(hand,{pre,none});return none;}
 // How many players you can see the flop with from a preflop spot. In the solver's tree nobody else joins a raised pot
 // by calling, so a raised pot you call has the players already in it plus you; an unraised one also the big blind.
 function preflopFlopPlayers(hand){const n=hand.n,bb=(hand.button+(n===2?1:2))%n,pre=hand.actionLog.filter(a=>a.street===0),raised=pre.some(a=>a.kind==='raise'||a.kind==='bet'),vol=new Set(pre.filter(a=>['call','raise','bet'].includes(a.kind)&&!hand.folded[a.seat]&&a.seat!==hand.actor).map(a=>a.seat));return vol.size+1+(!raised&&!hand.folded[bb]&&bb!==hand.actor&&!vol.has(bb)?1:0);}
@@ -169,7 +179,7 @@ function solveSpotClick(skipReference=false){
 }
 // The solve choice shown straight in the analysis panel when the spot has no stored answer and the solve isn't instant:
 // where it runs and how long, with one button per effort.
-function solvePromptHTML(plan){return'<div class="solve-inline"><p><strong>Solve '+planPlace(plan)+'</strong>'+(plan.efforts?'':' · '+planTimeText(plan))+'</p>'+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">May stop without an answer.</p>':'')+'<div class="row">'+(plan.efforts?Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+(state.busy?' disabled':'')+'>'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join(''):'<button type="button" class="btn" data-inline-solve="standard"'+(state.busy?' disabled':'')+'>Solve</button>')+'</div></div>';}
+function solvePromptHTML(plan){const off=state.busy?' disabled':'',time=f=>planTimeText(plan,f).replace(/^about /,'');return'<div class="solve-inline">'+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+'</div>';}
 document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve});});
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
