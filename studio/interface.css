@@ -134,3 +134,18 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .action-key{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;margin:0 0 6px;color:var(--muted)}
 .action-key span{display:inline-flex;align-items:center;gap:4px}.action-key i{width:10px;height:10px;border-radius:2px;display:inline-block}
 .ui-jump{border:0;background:transparent;color:var(--accent,inherit);padding:0;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}.ui-jump-flash{animation:ui-jump-flash 1.6s ease-out}@keyframes ui-jump-flash{0%,30%{box-shadow:0 0 0 2px var(--accent,#c8e64c)}100%{box-shadow:0 0 0 2px transparent}}@media (prefers-reduced-motion:reduce){.ui-jump-flash{animation:none}}
+/* Main activity icons: beside the label on wide screens, above it in the phone tab bar. */
+.ui-primary [data-area]{display:inline-flex;align-items:center;gap:7px}.ui-nav-icon{width:18px;height:18px;flex:none}
+.ui-mobile-nav [data-area]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:11px;line-height:1.1;padding:2px;min-height:44px;white-space:nowrap}.ui-mobile-nav .ui-nav-icon{width:22px;height:22px}
+/* Performance: one card per format, then the selected format's rating over time. */
+.perf-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.perf-card{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:2px 6px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:var(--ui-radius,12px);background:var(--panel);color:var(--ink);cursor:pointer;font:inherit}
+.perf-card small{grid-column:1/-1;font-size:11px;color:var(--muted);letter-spacing:.03em}.perf-card b{font-size:24px;font-variant-numeric:tabular-nums;line-height:1.1}
+.perf-card.active{border-color:var(--accent-edge,#43634e);background:var(--accent-soft,#233b31)}.perf-card.empty b{color:var(--muted)}
+.perf-delta{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}.perf-delta.up{color:var(--green)}.perf-delta.down{color:var(--red)}
+.perf-spark{grid-column:1/-1;width:100%;height:24px;margin-top:4px}.perf-spark path,.perf-chart path{fill:none;stroke:var(--green);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+.perf-detail{position:relative;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:var(--ui-radius,12px);background:var(--panel)}
+.perf-chart{display:block;width:100%;height:180px}.perf-chart line{stroke:var(--line);stroke-dasharray:4 4;vector-effect:non-scaling-stroke}
+.perf-axis{position:absolute;top:14px;right:16px;height:176px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none;font-variant-numeric:tabular-nums}
+.perf-stats{margin-top:12px;grid-template-columns:repeat(6,1fr)}.perf-empty{text-align:center;padding:40px 12px}.perf-empty b{font-size:16px}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){.perf-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.perf-chart{height:150px}.perf-axis{height:146px}.perf-stats{grid-template-columns:repeat(3,1fr)}}
