@@ -261,7 +261,7 @@ function rangeClassWeights(text){
 // colors left to right, and fades with the hand's weight in the range.
 function rangeGridHTML(text,mix=null,tones=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),x=Math.min(1,w.get(k)||0),m=mix&&x>0&&mix[k];cells+='<span '+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':'style="--w:'+x.toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
 function spotRangesHTML(result){
- const all=result?.solve?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&h.n===all.length?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
+ const all=result?.solve?.rangeAssumptions||result?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&all.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
  const mix=result.handMix&&result.handMix.classes&&typeof result.handMix.classes==='object'?result.handMix:null,tones=mix?actionTones(result.actions,h):null;
  // The acting player, whose strategy colors the grid, comes first.

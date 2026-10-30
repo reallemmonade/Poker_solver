@@ -156,17 +156,28 @@
   // The chart's largest raise stands for this hand's; other sizes are kept within this hand's
   // legal range, and actions that become the same are merged.
   // After a mapped size, the chart's own raises keep their ratio to the bet the player faces.
-  const l=hand.legal(),chartTop=topRaise(proxy.legal()),top=topRaise(l),scale=sizeMatch.length?hand.currentBet/proxy.currentBet:1,actions=[],reference=[];
-  result.actions.forEach((a,i)=>{const x={...a};if(x.kind==='raise'){if(!l.canRaise){x.kind=l.toCall?'call':'check';delete x.target;}else x.target=x.target>=chartTop?top:Math.min(top,Math.max(Math.round(x.target*scale),l.minRaiseTo));}
+  const l=hand.legal(),chartTop=topRaise(proxy.legal()),top=topRaise(l),scale=sizeMatch.length?hand.currentBet/proxy.currentBet:1,actions=[],reference=[],node=best.pack.index.get(historyKey(proxy)),into=node.actions.map(()=>null);
+  result.actions.forEach((a,i)=>{const x={...a},at=node.actions.findIndex(n=>n.kind===a.kind&&n.target===a.target);if(x.kind==='raise'){if(!l.canRaise){x.kind=l.toCall?'call':'check';delete x.target;}else x.target=x.target>=chartTop?top:Math.min(top,Math.max(Math.round(x.target*scale),l.minRaiseTo));}
    x.label=x.kind==='raise'?'Raise to '+G.bb(x.target)+' bb'+(x.target===l.allInTo?' · all-in':''):x.kind==='call'?'Call '+G.bb(l.callCost)+' bb'+(l.callCost===hand.stacks[hand.actor]?' · all-in':''):x.kind==='check'?'Check':x.label;
-   try{hand.clone().act(x);}catch{return;}const j=actions.findIndex(b=>b.kind===x.kind&&b.target===x.target);if(j>=0)reference[j]+=result.reference[i];else{actions.push(x);reference.push(result.reference[i]);}});
+   try{hand.clone().act(x);}catch{return;}const j=actions.findIndex(b=>b.kind===x.kind&&b.target===x.target);if(at>=0)into[at]=j>=0?actions[j]:x;if(j>=0)reference[j]+=result.reference[i];else{actions.push(x);reference.push(result.reference[i]);}});
   const total=sum(reference);if(!(total>0)||actions.length<2)return null;result.actions=actions;result.reference=reference.map(p=>p/total);
   [result.actions,result.reference]=ordered(result.actions,result.reference);result.probs=result.reference;
+  if(!best.pack.groups)Object.assign(result,chartRanges(best.pack,node,hand,relative,into.map(x=>result.actions.indexOf(x)),result.actions.length,best.pack.name));
   // Sizes mapped beyond the 1.6x tolerance or a tightened range are approximate: shown with that label, never graded as mistakes.
   if(far||last&&last.seat!==hero&&last.k<1-1e-9){result.offTree=true;result.referenceSource.name+=' · approximate: off-tree size';}
   if(sizeMatch.length){result.sizeMatch=sizeMatch;result.referenceSource.name+=' · earlier raise sizes mapped to the chart\'s: '+sizeMatch.map(m=>m.actual+' → '+m.chart+' bb').join(', ');result.referenceKey+='|sizes:'+sizeMatch.map(m=>m.actual+'>'+m.chart).join(',');}
   const standIn=(best.pack.chipEV||best.tourney)&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.tourney&&(deadMoney(best.pack.config)!==deadMoney(table)||table.ante>0&&best.pack.config.anteMode!==table.anteMode)){result.anteStandIn=true;result.referenceSource.name+=' · chart ante differs from this table\'s';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
+ }
+ // NLH: each live player's range at this node (the chart's frequency of every action they took on the
+ // way, by hand class, scaled so the widest class is 1) and the actor's whole strategy by hand class,
+ // with the node's actions folded into this hand's (index[k] is node action k's place, -1 when dropped),
+ // for the analysis range grids. Empty when the chart has no path to the node.
+ function chartRanges(pack,node,hand,relative,index,size,name){
+  const steps=pathOf(pack,node);if(!steps)return{};const live=hand.living(),source='Imported preflop chart: '+name,rangeAssumptions=[];
+  for(const seat of live){const w=classes.map((_,i)=>{let r=1;for(const [anc,k]of steps)if(anc.seat===relative(seat)){const row=rowAt(pack,anc,i);r*=row?row[k]:0;}return r;}),peak=Math.max(...w);if(peak>0)rangeAssumptions.push({seat,range:classRangeText(w.map(x=>x/peak)),source});}
+  const classMix={};classes.forEach((c,i)=>{const row=rowAt(pack,node,i);if(!row)return;const m=Array(size).fill(0);row.forEach((p,k)=>{if(index[k]>=0)m[index[k]]+=p;});const t=m.reduce((a,b)=>a+b,0);if(t>0)classMix[c]=m.map(x=>Math.round(x/t*1000)/1000);});
+  return{rangeAssumptions,handMix:{seat:hand.actor,classes:classMix}};
  }
  // Postflop starting ranges from a chart: replays the preflop line in the
  // closest-depth chart of the same game and multiplies, for every hand class
