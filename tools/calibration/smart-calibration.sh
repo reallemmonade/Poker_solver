@@ -14,7 +14,8 @@
 # Every step resumes: solved flops, fits and charts already written are kept.
 #   CAL_WORK=~/cal JOBS=12 THREADS=4 [DEPTH_FLOPS=100|50] bash tools/calibration/smart-calibration.sh
 # EXTRA_FLOPS: flops per spot for the other 6-max 100bb lines in step 4 (default 50, which gives 56).
-# SPOT_FLOPS: flops per line for the per-spot fits in pass 2 (default 60; library.cjs --spots per-spot).
+# SPOT_FLOPS: flops per line for the per-spot fits in pass 2 (default 60; library.cjs --spots per-spot);
+# SPOT_FLOPS_SRP: the same for its single-raised lines (default SPOT_FLOPS).
 # DEPTH_FLOPS: flops per spot at 20, 50 and 200bb in step 4 (100 gives 104 flops, 50 gives 56);
 # 100bb always gets 104. TABLE_FLOPS: the same for the 4- and 9-handed spots (default 100).
 # TURN=1 also keeps the turn's first decisions for the 6-max and heads-up 100bb spots (bigger solver
@@ -23,7 +24,7 @@
 set -u
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/cal}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; SPOT_FLOPS=${SPOT_FLOPS:-60}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
+JOBS=${JOBS:-12}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; SPOT_FLOPS=${SPOT_FLOPS:-60}; SPOT_FLOPS_SRP=${SPOT_FLOPS_SRP:-$SPOT_FLOPS}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; CHART_JOBS=${CHART_JOBS:-$(nproc)}
 V4=$W/preflop-library-v4.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 export NODE_OPTIONS=--max-old-space-size=65536
 cd "$R" || exit 1
@@ -36,14 +37,17 @@ SINGLE=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp
 THREE=btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hj-btn-3bet,co-btn-3bet,hu-3bet
 SRP=$SINGLE,$THREE
 LIMP=sb-bb-limp,hu-limp
+# The single-raised per-spot lines solve far slower than the 3-bet, 4-bet and limped ones, so they
+# can take fewer flops (SPOT_FLOPS_SRP, default SPOT_FLOPS).
+PS_SRP=btn-bb,co-bb,utg-bb,sb-bb,hu-srp,co-btn,hj-btn,utg-btn,hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj
 # The other heads-up 6-max lines, in the 100bb flop library only (no calibration), at EXTRA_FLOPS.
 EXTRA=hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj,hj-co-3bet,co-sb-3bet,utg-hj-3bet,utg-co-3bet,hj-sb-3bet,utg-btn-3bet
 at(){ # spots depth: ids at that depth (100bb ids carry no suffix)
   local out=() id; for id in ${1//,/ }; do
     if [ "$2" = 100 ]; then out+=($id); elif [ "$2" = 20 ] && [[ $id == *3bet ]]; then :; else out+=($id-$2bb); fi
-  done; (IFS=,; echo "${out[*]}")
+  done; (IFS=,; echo "${out[*]-}")
 }
-all(){ local d s=""; for d in 20 50 100 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+all(){ local d x s=""; for d in 20 50 100 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve(){ # charts out spots flops iterations [more args]
   node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $4 --accuracy 1 --iterations $5 --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:6}" || say "FAILED solve into $2"
 }
@@ -51,7 +55,7 @@ evs(){ # charts out
   solve $1 $2 $(all $SINGLE) 24 150
   solve $1 $2 $(all $THREE) 72 150
   # Pass 2 only (charts on the current tree): every 6-max and heads-up 100bb line for the per-spot fits.
-  [ "${3:-}" = per-spot ] && solve $1 $2 per-spot $SPOT_FLOPS 150
+  [ "${3:-}" = per-spot ] && { solve $1 $2 $PS_SRP $SPOT_FLOPS_SRP 150; solve $1 $2 per-spot $SPOT_FLOPS 150 --except $PS_SRP; }
   solve $1 $2 $(all $LIMP) 24 200
 }
 fit(){ # work out
@@ -85,7 +89,7 @@ say "CALIBRATION DONE"
 # above 1.2% of the pot again at 400; limped pots at 400. 100bb first.
 say "FLOP LIBRARY on v6 (20-200bb at $DEPTH_FLOPS flops, 100bb at 100)"
 F=$W/flop-v6; mkdir -p $F
-other(){ local d s=""; for d in 20 50 200; do s+=,$(at $1 $d); done; echo ${s#,}; }
+other(){ local d x s=""; for d in 20 50 200; do x=$(at $1 $d); [ -n "$x" ] && s+=,$x; done; echo ${s#,}; }
 solve $V6 $F $SRP 100 150 --turn $TURN
 solve $V6 $F $LIMP 100 400 --turn $TURN
 solve $V6 $F $EXTRA $EXTRA_FLOPS 150

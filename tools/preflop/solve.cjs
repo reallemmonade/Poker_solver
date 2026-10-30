@@ -75,6 +75,66 @@ class Solver{
   const K=this.K,w=this.m.weight;this.mass=v=>{let s=0;for(let i=0;i<K;i++)s+=w[i]*v[i];return s;};
   for(const node of this.tree.nodes){const A=node.actions.length,K=this.K;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
   this.ones=new Float64Array(this.K).fill(1);
+  // Forced lines (tree.cjs force) can reach the flop three-way or more: see terminal3 and terminalMany.
+  this.three=new Map();
+ }
+ // Three-way equity of every ordered class triple (equity3.cpp), raised to the sharpness g, in two layouts for the
+ // inner loop: P[(i*K+j)*K+k] = E(i;j,k)^g and Q[(i*K+j)*K+k] = E(k;i,j)^g. NLH only.
+ powers(g){
+  g=Math.round(g*100)/100;let x=this.three.get(g);if(x)return x;const K=this.K,N=K*K*K;
+  if(!this.E3){const file=this.o.equity3||path.join(__dirname,'equity3.bin');if(this.m.variant!=='NLH'||!fs.existsSync(file))throw Error('Three-way pots need the three-way equity table (tools/preflop/equity3.cpp), and NLH.');const b=fs.readFileSync(file);if(b.length!==2*N)throw Error('The three-way equity table has the wrong size.');const u=new Uint16Array(b.buffer.slice(b.byteOffset,b.byteOffset+b.length));this.E3=new Float32Array(N);for(let i=0;i<N;i++)this.E3[i]=u[i]/65535;}
+  const E=this.E3,P=new Float32Array(N),Q=new Float32Array(N);for(let i=0;i<N;i++)P[i]=g===1?E[i]:E[i]**g;
+  for(let k=0;k<K;k++)for(let i=0;i<K;i++)for(let j=0;j<K;j++)Q[(i*K+j)*K+k]=P[(k*K+i)*K+j];
+  x={P,Q};this.three.set(g,x);return x;
+ }
+ // A three-way flop pot's realization: a fit for this line (spot.cjs, from 3-way solver flops: sharpness g, a
+ // factor per postflop slot R and an extra factor ini for the last preflop raiser), else the heads-up settings
+ // (out of position 1-realization, middle 1, last 1+realization).
+ fit3(node){
+  const f=this.o.threeFits?.[node.key];if(f)return f;const r=node.raises>=2&&this.o.reraised?this.o.reraised:this.o;
+  return{g:r.sharpness??1,R:[1-r.realization,1,1+r.realization],ini:1+(r.initiative||0)};
+ }
+ // Player p's value at a three-way terminal: the pot share of each class against every pair of opposing classes,
+ // share_s = W_s/(W_a+W_b+W_c) with W = E(class; the other two)^g * R_slot * playability (* ini for the last
+ // raiser), blended toward all-in equity by commit. The two opponents' cards are independent of each other.
+ terminal3(node,p,reach){
+  const K=this.K,out=new Float64Array(K),pl=node.players,s=pl.indexOf(p);let f=1;
+  for(let k=0;k<this.n;k++)if(!pl.includes(k)&&k!==p&&reach[k]!==this.ones)f*=this.mass(reach[k]);
+  if(s<0){let joint=f;for(const k of pl)if(reach[k]!==this.ones)joint*=this.mass(reach[k]);out.fill(-node.inv[p]*joint);return out;}
+  const t=(s+1)%3,v=(s+2)%3,A=reach[pl[t]],B=reach[pl[v]],C=this.M.C,play=this.m.play,pot=node.net??node.pot,inv=node.inv[p];
+  const allin=node.type==='allin3',commit=allin?1:node.commit||0,fit=this.fit3(node),agg=pl.indexOf(node.aggressor);
+  const wt=slot=>fit.R[slot]*(slot===agg?fit.ini:1),cs=wt(s),ct=wt(t),cv=wt(v),{P,Q}=this.powers(fit.g),E=commit>0?this.powers(1):null;
+  const bk=new Float64Array(K),pv=new Float64Array(K);for(let k=0;k<K;k++)pv[k]=cv*play[k];
+  for(let i=0;i<K;i++){
+   let sum=0,seenA=0,seenB=0;const ri=i*K,ai=cs*play[i];
+   for(let k=0;k<K;k++){bk[k]=B[k]*C[ri+k];seenB+=bk[k];}
+   if(!(seenB>0))continue;
+   for(let j=0;j<K;j++){
+    const aj=A[j]*C[ri+j];if(!(aj>0))continue;seenA+=aj;
+    const base=(ri+j)*K,jb=(j*K+i)*K,tj=ct*play[j];let acc=0;
+    if(!allin)for(let k=0;k<K;k++){const b=bk[k];if(!b)continue;const ws=P[base+k]*ai,w=ws+P[jb+k]*tj+Q[base+k]*pv[k];acc+=b*(w>0?ws/w:0);}
+    if(commit>0){let all=0;for(let k=0;k<K;k++){const b=bk[k];if(!b)continue;const es=E.P[base+k],w=es+E.P[jb+k]+E.Q[base+k];all+=b*(w>0?es/w:0);}acc+=commit*(all-acc);}
+    sum+=aj*acc;
+   }
+   out[i]=f*(pot*sum-inv*seenA*seenB);
+  }
+  return out;
+ }
+ // Four or more players to the flop: a rough mean-field model, labelled approximate by spot.cjs. Class i's pot
+ // share is 1/(1+sum over opponents of the average odds ratio (e(j,i)/e(i,j))^g * realization against i).
+ terminalMany(node,p,reach){
+  const K=this.K,out=new Float64Array(K),pl=node.players,s=pl.indexOf(p),C=this.M.C,play=this.m.play,g=this.o.sharpness??1,allin=node.type!=='many'||false;let f=1;
+  for(let k=0;k<this.n;k++)if(!pl.includes(k)&&k!==p&&reach[k]!==this.ones)f*=this.mass(reach[k]);
+  if(s<0){let joint=f;for(const k of pl)if(reach[k]!==this.ones)joint*=this.mass(reach[k]);out.fill(-node.inv[p]*joint);return out;}
+  const r=this.o.realization,R=slot=>1-r+2*r*slot/(pl.length-1),pot=node.net??node.pot;
+  for(let i=0;i<K;i++){
+   let odds=0,seen=1;const ri=i*K;
+   for(const [slot,q]of pl.entries()){if(q===p)continue;const Rq=reach[q];let m=0,o=0;
+    for(let j=0;j<K;j++){const w=Rq[j]*C[ri+j];if(!(w>0))continue;m+=w;const e=this.m.equity(i,j);o+=w*((1-e)/Math.max(1e-6,e))**g*R(slot)*play[j];}
+    seen*=m;odds+=m>0?o/m:0;}
+   odds/=R(s)*play[i];out[i]=f*seen*(pot/(1+odds)-node.inv[p]);
+  }
+  return out;
  }
  // Level 2 (tools/preflop/level2.cjs): each class's row of the flop share matrices this line uses is
  // scaled so the model's pot share against the solved opponent range equals the share TexasSolver
@@ -109,6 +169,8 @@ class Solver{
  terminal(node,p,reach){
   const K=this.K;
   const out=new Float64Array(K);
+  if(node.players?.length>3||node.type==='many')return this.terminalMany(node,p,reach);
+  if(node.players?.length===3)return this.terminal3(node,p,reach);
   const [ipSeat,oopSeat]=node.players||[];
   if(!this.o.foldRemoval&&(node.type==='fold'||p!==ipSeat&&p!==oopSeat)){
    // Zero-sum variant: folded hands are independent of everything; only the two
@@ -171,11 +233,23 @@ class Solver{
    if(!(m>0))nf.set(reach[a]);for(let i=0;i<K;i++)nf[i]*=this.o.tremble;}
   for(let k=0;k<A;k++){
    const next=reach.slice(),r=new Float64Array(K);let any=false;
-   for(let i=0;i<K;i++){r[i]=reach[a][i]*sigma[k*K+i]+(nf?nf[i]:0);if(r[i]>0)any=true;}
+   if(node.added?.k===k)this.addedReach(node,reach[a],sigma,r);
+   else for(let i=0;i<K;i++)r[i]=reach[a][i]*sigma[k*K+i]+(nf?nf[i]:0);
+   for(let i=0;i<K;i++)if(r[i]>0){any=true;break;}
    if(!any)continue;next[a]=r;
    const v=this.walk(node.children[k],p,next,mode);for(let i=0;i<K;i++)out[i]+=v[i];
   }
   return out;
+ }
+ // The range behind a forced action outside the trimmed tree (tree.cjs added): a sliver (tremble) of the range of
+ // its proxy action, or of the hands that continue at the node, whatever the strategy gives the action itself. The
+ // line is then played against hands that would make a comparable play, not the few that CFR left on an action
+ // it never takes.
+ addedReach(node,own,sigma,out){
+  const K=this.K,A=node.actions.length,{k,proxy}=node.added,f=node.actions.findIndex(x=>x.kind==='fold');let m=0;
+  for(let i=0;i<K;i++){let c=0;if(proxy>=0)c=sigma[proxy*K+i];else for(let j=0;j<A;j++)if(j!==f&&j!==k)c+=sigma[j*K+i];out[i]=own[i]*c;m+=out[i];}
+  if(!(m>0))out.set(own);
+  for(let i=0;i<K;i++)out[i]*=this.o.tremble;return out;
  }
  iterate(count=1){
   for(let c=0;c<count;c++){

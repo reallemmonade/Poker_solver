@@ -8,13 +8,16 @@
 //   node tools/postflop/library.cjs bundle --out postflop-work
 //   node tools/postflop/library.cjs list
 // --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration,
-// per-spot-6max for its 6-max lines only.
+// per-spot-6max for its 6-max lines only; --except a,b leaves those ids out of the list (to solve
+// them separately at another flop count).
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
 // --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
 // --reverse 1 works from the last one back, so helper computers can share a run going forward.
 // A tree.json in the --out folder ({flop:{bet:[33,75],raise:[66]},turn:...}) replaces the default bet
 // sizes below (TREE) street by street, so one library can use more sizes than the calibration solves.
+// --tree <file> reads the sizes from that file instead, for example a fuller tree for 3-bet pots.
+// It may also give one player its own sizes per street: {ip:{turn:{bet:[33,66,150],raise:[]}},oop:{...}}.
 // --turn 1 also saves the turn's first decisions (<flop>.turn.json.gz) on the main lines: check-check,
 // bet-call and check-bet-call; `bundle-turn` packs them into one turn-<spot>.ctl per spot.
 const fs=require('fs'),os=require('os'),path=require('path'),zlib=require('zlib'),{spawn}=require('child_process');
@@ -138,7 +141,7 @@ function plays(packs,chart){
 }
 
 function spec(spot,board){
- const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(const s of ['flop','turn','river'])sizes[who][s]={bet:TREE[s].bet.slice(),raise:TREE[s].raise.slice(),donk:[]};}
+ const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(const s of ['flop','turn','river']){const t=TREE[who]?.[s]||TREE[s];sizes[who][s]={bet:t.bet.slice(),raise:t.raise.slice(),donk:[]};}}
  return L.validate({version:1,board,pot:spot.pot,stack:spot.stack,sizes,allinThreshold:TREE.allinThreshold,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop,path:[],hero:'2c2d',heroSeat:spot.oop,heroIsIp:false,accuracy:Number(args.accuracy),maxIterations:Number(args.iterations)});
 }
 
@@ -194,8 +197,8 @@ function classEvs(tree){
 }
 
 async function solve(){
- const treeFile=path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
- const packs=loadCharts(args.charts),alias={'per-spot':PER_SPOT,'per-spot-6max':PER_SPOT_6MAX},auto=new Set(args.spots.split(',').flatMap(id=>alias[id]||[])),ids=args.spots.split(',').flatMap(id=>alias[id]||[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
+ const treeFile=args.tree||path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
+ const packs=loadCharts(args.charts),alias={'per-spot':PER_SPOT,'per-spot-6max':PER_SPOT_6MAX},auto=new Set(args.spots.split(',').flatMap(id=>alias[id]||[])),except=new Set((args.except||'').split(',')),ids=args.spots.split(',').flatMap(id=>alias[id]||[id]).filter(id=>!except.has(id)),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   // A per-spot line the chart never reaches (a 4-bet that is jam or fold) is skipped.
   let spot;try{spot=prepare(id,packs);}catch(e){if(!auto.has(id))throw e;console.log(`${id}: skipped (${e.message})`);continue;}

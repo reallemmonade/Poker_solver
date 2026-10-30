@@ -8,7 +8,7 @@ function linkLocalBridge(url,health){const link=typeof citrusAccount!=='undefine
 // to be down, the solve button is not offered for spots that need it.
 const localBridge={up:null,checked:0};
 async function checkLocalBridge(){const el=$('spotLocalStatus'),url=$('spotLocalSolver')?.value;if(!url){localBridge.up=null;if(el)el.textContent='';return null;}
- try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3000),h=await fetch(url.replace(/\/$/,'')+'/health',{signal:ctl.signal}).then(r=>r.json()).finally(()=>clearTimeout(t));localBridge.up=!!h.solver;localBridge.spot=!!h.spot;localBridge.threads=Number(h.threads)||0;localBridge.load=Number(h.load)||0;linkLocalBridge(url,h);loadLearnedFlops(url,h);if(el)el.textContent=h.solver?'TexasSolver is running on this computer'+(h.threads?' with '+h.threads+' threads':'')+'. Big heads-up flop, turn and river spots go to it.':'The bridge is running, but TexasSolver is not built. Run tools/local-solver/install-mac.sh.';}
+ try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3000),h=await fetch(url.replace(/\/$/,'')+'/health',{signal:ctl.signal}).then(r=>r.json()).finally(()=>clearTimeout(t));localBridge.up=!!h.solver;localBridge.spot=!!h.spot;localBridge.preflop=!!h.preflop;localBridge.update=!!h.update;localBridge.threads=Number(h.threads)||0;localBridge.load=Number(h.load)||0;linkLocalBridge(url,h);loadLearnedFlops(url,h);if(el)el.textContent=h.solver?'TexasSolver is running on this computer'+(h.threads?' with '+h.threads+' threads':'')+'. Big heads-up flop, turn and river spots go to it.':'The bridge is running, but TexasSolver is not built. Run tools/local-solver/install-mac.sh.';}
  catch{localBridge.up=false;if(el)el.textContent='TexasSolver is not running on this computer. Start it with tools/local-solver/start.command.';}
  localBridge.checked=Date.now();spotUI.last=null;return localBridge.up;}
 // Flops the library is missing: a heads-up flop whose preflop line has a library spot but whose flop was never solved
@@ -26,6 +26,30 @@ function noteMissingFlop(hand){
  if(!hand||hand.street!==1||noted.get(hand)===hand.board.join()||typeof citrusAccount==='undefined'||!citrusAccount.user)return;
  const want=missingFlopWant(hand);if(!want)return;noted.set(hand,hand.board.join());if(spotUI.wants?.has(want.id))return;
  const value={...want.value,at:Date.now(),status:'wanted'};(spotUI.wants||(spotUI.wants=new Map())).set(want.id,value);dbPut('meta',{id:want.id,value}).catch(()=>{});
+}
+// Preflop lines no chart covers go on a wanted list in your account too ('preflopwant-' rows, the line without your
+// cards). Your Mac solves them while it is idle (tools/local-solver/queue.cjs), and the answer comes back on the row
+// for every hand class, so the next time the line comes up it shows at once on any device. The key is the line
+// relative to the button and the effective stack to two significant figures, so the same line at about the same
+// depth counts once. The list also shows which lines the next chart build should cover.
+function preflopWant(hand){
+ if(!hand||hand.done||hand.street!==0||hand.config.variant!=='NLH'||hand.config.rules?.low||hand.config.bounties?.some(x=>x>0))return null;
+ const c=hand.config,n=hand.n,rel=i=>(i-hand.button+n)%n,others=hand.living().filter(i=>i!==hand.actor).map(i=>hand.initial[i]);if(!others.length)return null;
+ const depth=Number((G.bb(Math.min(hand.initial[hand.actor],Math.max(...others)))/c.bb).toPrecision(2)),pre=hand.actionLog.filter(a=>a.street===0);
+ const key=JSON.stringify([n,depth,c.sb/c.bb,c.ante/c.bb,c.anteMode,c.mode==='cash'?[c.rakePct,c.rakeCap/c.bb]:'chips',pre.map(a=>[rel(a.seat),a.kind,a.target?G.bb(a.target)/c.bb:0])]);
+ return{id:'preflopwant-'+hash(key),value:{key,depth,label:n+'-handed '+depth+'bb: '+pre.filter(a=>a.kind!=='fold').map(a=>G.positions(n,hand.button)[a.seat]+' '+(a.kind==='call'?'calls':'raises to '+G.bb(a.target)/c.bb)).join(', ')+', '+G.positions(n,hand.button)[hand.actor]+' to act',
+  spot:{config:c,actions:pre.map(a=>({seat:a.seat,street:0,kind:a.kind,...a.target?{target:a.target}:{}})),actor:hand.actor,heroCards:[51,47]}}};
+}
+const notedPreflop=new WeakMap();
+function noteMissingPreflop(hand){
+ if(!hand||hand.street!==0||notedPreflop.get(hand)===hand.actionLog.length||typeof citrusAccount==='undefined'||!citrusAccount.user||chartsLoading()||!preflopLibrary.packs.length)return;
+ const want=preflopWant(hand);if(!want)return;notedPreflop.set(hand,hand.actionLog.length);if(spotUI.preflopWants?.has(want.id))return;
+ const value={...want.value,at:Date.now(),status:'wanted'};(spotUI.preflopWants||(spotUI.preflopWants=new Map())).set(want.id,value);dbPut('meta',{id:want.id,value}).catch(()=>{});
+}
+// Your Mac's answer for this preflop line, for your hand class, or null.
+function learnedPreflop(hand){
+ const want=preflopWant(hand),row=want&&spotUI.preflopWants?.get(want.id);if(row?.status!=='done'||!row.result?.classes)return null;
+ try{const r=PokerLocalSolver.preflopResult(hand,{...row.result,hero:row.result.classes[G.Core.handClass(hand.holes[hand.actor])]});r.solve.learned=true;r.solve.warning='Your Mac solved this line earlier. '+r.solve.warning;return r;}catch{return null;}
 }
 // The flop of this spot was learned by your Mac since the library was built.
 function learnedFlopReady(hand){const want=missingFlopWant(hand);return !!want&&spotUI.wants?.get(want.id)?.status==='done';}
@@ -48,9 +72,9 @@ function renderSpotRangeEditors(){
 function spotSettings(hand,pending={}){
  const isQuiz=pending.kind==='quiz'||pending.kind==='quizPrepare',same=hand===state.hand,small=typeof smallMemoryDevice==='function'&&smallMemoryDevice(),plan=pending.plan||(isQuiz?null:spotPlan(hand)),texas=plan?.route==='texas'||plan?.route==='mac';
  const pinned=isQuiz?pending.quizQuestion?.solveOptions:null;const rangedPinned=pinned&&pending.quizQuestion?.rangeAnchor!==undefined&&hand.actionLog.length>pending.quizQuestion.rangeAnchor?{...pinned,ranges:Array(hand.n).fill('')}:pinned;
- const effort=SOLVE_EFFORTS[pending.effort]?pending.effort:'standard',url=$('spotLocalSolver')?.value||'';
+ const effort=SOLVE_EFFORTS[pending.effort]?pending.effort:'standard',url=$('spotLocalSolver')?.value||'',preflopEffort=hand.street===0?{preflopEffort:effort}:{};
  return PokerSpot.options(rangedPinned||{rangeMode:$('spotRangeMode')?.value||'auto',ranges:same?spotUI.rangeValues.slice():Array(hand.n).fill(''),iterations:200000,milliseconds:180000,maxInfos:150000,maxJointDeals:small?100000:500000,exactMemoryMB:small?256:1024,preparationMilliseconds:60000,approximate:false,
-  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6}:{},
+  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6,...preflopEffort}:{},
   samples:Math.max(2000,Number(pending.samples)||2000),tolerance:.001,rootSizes:same?String($('spotRootSizes')?.value||'').split(/[\s,;]+/).filter(Boolean).map(Number):[],abstraction:{...(pending.referenceModel?.abstraction||state.abstraction),...(state.spotSizing||{})}});
 }
 // Which solver answers this spot, where it runs and roughly how long it takes (measured 2026-10-28):
@@ -67,7 +91,10 @@ function spotSettings(hand,pending={}){
 //   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer, except
 //   three-way NLH pots, which go to the 3-way solver (tools/multiway-solver): MW3_SECONDS are Mac estimates from
 //   its 4-core Linux measurements (README there), flop, turn and river.
-// - Preflop answers come only from charts, so a line no chart covers has no solve.
+// - Preflop answers come from charts. A no-limit hold'em line no chart covers goes to the preflop spot solver on the
+//   Mac (tools/preflop/spot.cjs): the chart solver again with this line in its tree, about 0.075 s per iteration per
+//   seat on the Mac (1,100 iterations, 0.01 s heads-up), plus, when the spot can reach the flop three-way, 40 sample
+//   flops of the 3-way solver at about 150 s each (Quick 12, Deep 80).
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
@@ -88,28 +115,53 @@ function onDeviceRoute(plan){return plan?.route==='river'||plan?.route==='plo-ri
 function spotPlan(hand){
  if(!hand||hand.done)return null;
  const c=hand.config,live=hand.living(),simple=!c.rules.low&&!c.bounties.some(x=>x>0),small=typeof smallMemoryDevice==='function'&&smallMemoryDevice();
- if(hand.street===0)return{route:'none',street:0,reason:'No chart covers this preflop line yet.'};
+ const pre=hand.street===0;
+ if(pre&&(!simple||c.variant!=='NLH'))return{route:'none',street:0,reason:'No chart covers this preflop line yet, and only no-limit hold\'em preflop lines can be solved.'};
+ if(pre&&preflopFlopPlayers(hand)>3)return{route:'none',street:0,reason:'No chart covers this preflop line, and it can reach the flop four or more ways, which can\'t be solved yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
- const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
+ const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
  if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
-  const base=kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const three=pre&&preflopFlopPlayers(hand)===3?1:0,base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
-  plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
-  if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user)plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on. Your Mac picks up solves from then on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when your Mac is back.';else if(load>.5)plan.note='Your Mac is busy with other work, so this is slower.';}
+  plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
+  // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.
+  // A bridge that can update itself does it from a tap, here or on your phone; an older one shows the setup command
+  // on the Mac, and the phone sends you there.
+  if(pre&&(bridge?!localBridge.preflop:mac?.seen&&!(mac.features||[]).includes('preflop'))){const u=spotUI.macUpdate,self=bridge?localBridge.update:(mac.features||[]).includes('update');
+   if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
+   else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
+   else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
+  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
  }
+ // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
+ // can't be sent, so it isn't offered (the solve would only stop with that error).
+ if(!pre&&(plan.route==='mac'||plan.route==='texas')&&noChartRanges(hand))return{route:'none',street:hand.street,reason:'No chart covers how this hand got here, so it can\'t be solved.'};
  plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
+// True only when charts are loaded, you typed no ranges and none of them covers this hand's preflop line.
+const chartLineMemo=new WeakMap();
+function noChartRanges(hand){
+ if(($('spotRangeMode')?.value||'auto')!=='auto'||spotUI.rangeValues.some(x=>String(x||'').trim())||!preflopLibrary.packs.length||typeof chartsLoading==='function'&&chartsLoading())return false;
+ const pre=hand.actionLog.filter(a=>a.street===0).length,m=chartLineMemo.get(hand);if(m&&m.pre===pre)return m.none;
+ let none=true;try{none=!PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,observedData(hand).actions);}catch{}
+ chartLineMemo.set(hand,{pre,none});return none;}
+// How many players you can see the flop with from a preflop spot. In the solver's tree nobody else joins a raised pot
+// by calling, so a raised pot you call has the players already in it plus you; an unraised one also the big blind.
+function preflopFlopPlayers(hand){const n=hand.n,bb=(hand.button+(n===2?1:2))%n,pre=hand.actionLog.filter(a=>a.street===0),raised=pre.some(a=>a.kind==='raise'||a.kind==='bet'),vol=new Set(pre.filter(a=>['call','raise','bet'].includes(a.kind)&&!hand.folded[a.seat]&&a.seat!==hand.actor).map(a=>a.seat));return vol.size+1+(!raised&&!hand.folded[bb]&&bb!==hand.actor&&!vol.has(bb)?1:0);}
+// Mac seconds before thread scaling (see the notes above spotPlan); the effort factor scales the flops.
+function preflopSeconds(hand,three){const n=hand.n,its=three?1100:800;return its*(n===2?.01:.075*n)+three*40*150;}
 // One line for a spot with no solve: what the solve button says instead.
 function unsolvableReason(hand){const plan=spotPlan(hand);return plan?.route==='none'?plan.reason:plan?.blocked||'';}
-function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+' s':seconds<5400?'about '+Math.round(seconds/60)+' min':seconds<172800?'about '+Math.round(seconds/3600)+' h':'about '+Math.round(seconds/86400)+' days';}
+// The number and its unit never split across lines.
+function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+'\u00a0sec':seconds<5400?'about '+Math.round(seconds/60)+'\u00a0min':seconds<172800?'about '+Math.round(seconds/3600)+'\u00a0h':'about '+Math.round(seconds/86400)+'\u00a0days';}
 function planTimeText(plan,factor=1){const text=solveTimeText(plan.solve*factor+plan.wait);return plan.mayStop?text.replace('about','up to'):text;}
 function planPlace(plan){return onDeviceRoute(plan)?'on this device':'on your Mac';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
 // A stand-in flop does not count once your Mac has learned the real one.
-function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand))return true;const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
+function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand)||hand.street===0&&learnedPreflop(hand))return true;if(hand.street===0){noteMissingPreflop(hand);return false;}const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
 // The solve button, offered on every live spot: references show at once and a short solve starts; otherwise it
 // says where the solve runs and how long it takes (with an effort choice on heads-up NLH flops, where the extra
 // time buys a measurably closer solution), or in one line why this spot can't be solved.
@@ -122,16 +174,29 @@ function solveSpotClick(skipReference=false){
  const block=job&&(jobPending(job)||job.status==='done')?jobText(job):plan.route==='none'?plan.reason:plan.blocked;
  if(block){box.innerHTML='<p>'+esc(block)+'</p><div class="row"><button type="button" class="btn secondary" data-solve-cancel>OK</button></div>';show();return;}
  if(!plan.efforts&&plan.seconds<=10&&!plan.note){analyzeSpot(h,{kind:'inspect',plan});return;}
- const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">Very wide pots can stop without an answer.</p>':'');
- box.innerHTML=plan.efforts?'<p><strong>Solve this flop '+planPlace(plan)+'?</strong> Deeper is closer to the exact strategy.</p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor)+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve this spot '+planPlace(plan)+'?</strong> '+planTimeText(plan).replace(/^./,x=>x.toUpperCase())+'.</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
+ const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">May stop without an answer.</p>':'');
+ box.innerHTML=plan.efforts?'<p><strong>Solve '+planPlace(plan)+'</strong></p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve '+planPlace(plan)+'</strong> · '+planTimeText(plan)+'</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
  show();
 }
+// The solve choice shown straight in the analysis panel when the spot has no stored answer and the solve isn't instant:
+// where it runs and how long, with one button per effort.
+function solvePromptHTML(plan){const off=state.busy?' disabled':'',time=f=>planTimeText(plan,f).replace(/^about /,'');return'<div class="solve-inline">'+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+'</div>';}
+document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve});});
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
 // bridge's heartbeat: when it was last seen, its threads and how busy the Mac is.
-spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;
-async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;}catch{}watchSolveJobs();}
+spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;spotUI.macUpdate=null;
+// Updating the Mac's solver: straight to the bridge on the Mac itself, else a 'macupdate' row it picks up within the sync time.
+const UPDATE_MS=10*60e3;
+async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.value;
+ if(localBridge.up&&url){try{const r=await fetch(url.replace(/\/$/,'')+'/update',{method:'POST'}),b=await r.json().catch(()=>({}));spotUI.macUpdate=r.ok?{status:'updating',at}:{status:'failed',at,message:b.error||'Error '+r.status+'.'};}catch(e){spotUI.macUpdate={status:'failed',at,message:e.message};}
+  if(spotUI.macUpdate.status==='updating')setTimeout(()=>checkLocalBridge().then(()=>{if(localBridge.preflop)spotUI.macUpdate=null;if(state.hand)renderPlay();}),90e3);}
+ else{spotUI.macUpdate={status:'wanted',at};try{await dbPut('meta',{id:'macupdate',value:spotUI.macUpdate});}catch{}citrusAccount.run();watchSolveJobs();}
+ spotUI.last=null;if(state.hand)renderPlay();}
+async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;const up=rows.find(r=>r.id==='macupdate')?.value;if(up&&typeof up==='object'&&(up.at||0)>=(spotUI.macUpdate?.at||0))spotUI.macUpdate=up;
+  // Done once the Mac's heartbeat shows the new solver.
+  if(spotUI.macUpdate&&(spotUI.mac?.features||[]).includes('preflop')&&(spotUI.mac.seen||0)>(spotUI.macUpdate.at||0))spotUI.macUpdate=null;}catch{}watchSolveJobs();}
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
 // This device's id, so it cancels only the solves it sent.
@@ -145,23 +210,27 @@ document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-j
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
 // the Mac every 10 seconds (tools/local-solver/queue.cjs, progressOf); between reports it counts down locally.
-function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+' min ago':Math.round(m/60)+' h ago';}
+function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+'\u00a0min ago':Math.round(m/60)+'\u00a0h ago';}
 // Two minutes without a report (or, before the first one, since the Mac marked it running) reads as stopped.
 // Between reports the bar keeps moving at the reported rate, and it never steps back when a new report is lower.
 spotUI.shownProgress=new Map();
 function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left,stale:j.startedAt>0&&now-j.startedAt>120000,at:j.startedAt};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,run=j.rowId+' '+j.startedAt,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(run)||0));spotUI.shownProgress.set(run,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
 function jobState(j){
- if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
+ if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved.'};
  if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
-  return{text:g.phase==='preparing'?'Your Mac is preparing the ranges…':'Solving on your Mac · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),p:g.p};}
- const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac,solve=solveTimeText(j.seconds||60);
+  return g.phase==='preparing'?{text:'Preparing ranges…',label:'Preparing',time:'',p:g.p}:{text:'Solving · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),label:'Solving '+Math.floor(g.p*100)+'%',time:g.left>=5?solveTimeText(g.left).replace('about ',''):'almost done',p:g.p};}
+ const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac;
  if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
- if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac (last seen '+agoText(Date.now()-mac.seen)+'). Then '+solve+' to solve.'};
- const ahead=queuedSeconds()-Math.max(0,j.seconds||0);return{text:'Queued on your Mac. Starts '+(ahead>30?'in '+solveTimeText(ahead):'within 30 s')+', then '+solve+' to solve.',p:0};
+ if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
+ const wait=solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60));return{text:'Queued · '+wait,label:'Queued',time:wait.replace('about ','~'),p:0,queued:true};
 }
 function jobText(j){return jobState(j).text;}
-function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key);return'<div class="notice" id="solveJobNotice">'+(jobPending(j)?'<button type="button" class="ui-text-button solve-cancel" data-cancel-job="'+esc(id)+'">Cancel</button>':'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
+// A pending solve takes the Solve button's place (.solve-job hides #analyze): the bar fills as it runs, ✕ cancels,
+// striped while queued. Anything that needs words (waiting for the Mac, no progress reports) stays a notice.
+function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
+ if(jobPending(j)&&st.label)return'<div class="solve-job'+(st.queued?' queued':'')+'" id="solveJobNotice" role="progressbar" aria-label="'+esc(st.text)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div class="solve-job-fill" style="width:'+(st.queued?100:Math.max(2,Math.min(100,st.p*100))).toFixed(1)+'%"></div><span>'+esc(st.label)+'</span><span>'+esc(st.time)+'</span>'+cancel()+'</div>';
+ return'<div class="notice'+(jobPending(j)?' solve-job-wait':'')+'" id="solveJobNotice">'+(jobPending(j)?cancel('Cancel'):'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
 setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
 async function sendToMac(task,observed,opts,extraAction){
  if(!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
@@ -171,7 +240,7 @@ async function sendToMac(task,observed,opts,extraAction){
 }
 // While a solve is out on the Mac, sync every 20 seconds, and every 10 while it runs, so its progress stays
 // current and its answer shows soon after it lands.
-function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()];if(!jobs.some(jobPending))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
+function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()],u=spotUI.macUpdate;if(!jobs.some(jobPending)&&!(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
 // A finished Mac solve for the live spot shows as soon as it syncs in.
 async function deliverSolveJob(force=false){
  const h=state.hand,j=spotJob(h);if(!j||j.status!=='done'||state.busy||activeSpotResult(h))return;if(!force&&spotUI.delivered===j.rowId)return;spotUI.delivered=j.rowId;
@@ -204,7 +273,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   let cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot),task={...pending,hand:hand.clone(),referenceModel:reference.model,referenceSnapshot:reference.snapshot,cacheKey,baseKey,solveOptions:opts};state.pending=task;lock('spotSolve');status('Preparing player ranges and the continuation betting tree…');
   if(!['quiz','quizPrepare'].includes(pending.kind))$(pending.kind==='review'?'reviewFeedback':'playFeedback').innerHTML='<h3>Solving this position…</h3><p id="spotInlineProgress" role="status">Preparing player ranges and legal bet sizes.</p><p class="help">The calculation uses the public history and your cards. You can cancel without changing the hand.</p>';
   if(bundleManifest&&smallMemoryDevice()){await ensurePhoneLibraries(state.hand===hand?hand:task.hand);if(state.pending!==task)return;}
-  const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
+  const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack)||(hand.street===0&&!pending.quizQuestion?learnedPreflop(hand):null);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
   const libraryReference=!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?postflopLibraryReference(hand):null;if(libraryReference&&!(extraAction&&T.matchAction(libraryReference.actions,extraAction)<0&&!libraryReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:libraryReference};state.pending=null;lock();finishAnalysis(libraryReference,task);return;}
   const turnReference=!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?await turnLibraryReference(hand):null;if(state.pending!==task)return;if(turnReference&&!(extraAction&&T.matchAction(turnReference.actions,extraAction)<0&&!turnReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:turnReference};state.pending=null;lock();finishAnalysis(turnReference,task);return;}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const context=await requestSolvedPolicy(hand);if(state.pending!==task)return;if(context?.conditionedRanges?.every(Boolean)){opts.ranges=context.conditionedRanges;opts.rangeOrigin='Conditioned on the preceding exact strategy and public actions';cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
@@ -226,7 +295,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
 function endSolveFeedback(task,message,failed){const progress=$('spotInlineProgress'),el=$(task?.kind==='review'?'reviewFeedback':'playFeedback');if(!progress)return;if(['quiz','quizPrepare'].includes(task?.kind)||!el?.contains(progress)){progress.textContent=message;return;}el.innerHTML='<h3>'+(failed?'The solve failed':'The solve was stopped')+'</h3><p role="status"'+(failed?' class="error"':'')+'>'+esc(message)+'</p>';}
 function handleSpotWorkerMessage(message){
  if(message.type==='spotProgress'){
-  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'s'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the exact river tree':'Solving the current continuation',text=phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
+  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'\u00a0sec'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the exact river tree':'Solving the current continuation',text=phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
   status(text);if($('spotInlineProgress'))$('spotInlineProgress').textContent=text;$('progress').style.width=p.phase==='preparing'?'2%':p.phase==='local'?Math.min(95,5+p.done/6)+'%':Math.min(99,100*p.done/p.total)+'%';
   if(['quiz','quizPrepare'].includes(state.pending?.kind))$('quizStatus').textContent=(state.pending.kind==='quizPrepare'?'Preparing your next decision · ': 'Reviewing your hand · ')+text;
   return true;
@@ -237,16 +306,16 @@ function handleSpotWorkerMessage(message){
 }
 function activeSpotResult(hand){return spotUI.last&&PokerSpot.publicKey(observedData(hand))===spotUI.last.baseKey?spotUI.last.result:null;}
 // Frequencies with no EVs: a solve on the Mac (TexasSolver or the PLO solver) or a precomputed flop library.
-function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','local-multiway','postflop-library'].includes(q?.method));}
+function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','local-multiway','postflop-library','local-preflop'].includes(q?.method));}
 function spotApproximate(result){const q=result?.solve;return !!(result?.supported&&q?.approximate&&q.method==='sampled-subgame'&&!spotCertified(result));}
 function spotCertified(result){const q=result?.solve;return !!(result?.supported&&q?.exact&&['exact-river','exact-postflop','exact-multiway'].includes(q.method)&&Number.isFinite(q.gap)&&Number.isFinite(q.tolerance)&&q.gap<=q.tolerance&&Number.isFinite(q.handRegret)&&q.handRegret<=(q.handTolerance??q.tolerance));}
 function spotFrequencyHTML(result){
  if(!result.supported)return '<div class="notice"><strong>No matching reliable solution</strong><br>'+esc(result.message)+'</div>';if(PokerPreflop.isResult(result))return preflopFrequencyHTML(result);
  const tones=actionTones(result.actions,state.hand);
- if(spotFrequenciesOnly(result))return (result.offTree?'<p class="help">Approximate</p>':'')+'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
- if(spotApproximate(result))return '<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
+ if(spotFrequenciesOnly(result))return (result.offTree?'<p class="help">Approximate</p>':'')+'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(toneLabel(a,tones[i]))+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
+ if(spotApproximate(result))return '<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(toneLabel(a,tones[i]))+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
  if(!spotCertified(result))return '<div class="notice"><strong>No solver answer for this spot.</strong> The solve did not reach its accuracy target.</div>';
- const solve=result.solve;return'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(a.label)+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
+ const solve=result.solve;return'<div class="frequency-grid">'+result.actions.map((a,i)=>'<div class="policyRow"><div class="row between"><span>'+esc(toneLabel(a,tones[i]))+'</span><strong>'+fmt(result.reference[i]*100,1)+'%</strong></div><div class="bar"><i style="width:'+result.reference[i]*100+'%;background:var(--act-'+tones[i]+')"></i></div></div>').join('')+'</div>';
 }
 // Each live player's range as a 13x13 grid: pairs on the diagonal, suited above it, offsuit below, each cell
 // shaded by how much of that hand is in the range, read with the solver's own parser so typed shorthand (QQ+,
@@ -259,19 +328,23 @@ function rangeClassWeights(text){
 }
 // With mix (hand class -> action frequencies, the acting player's whole strategy), each cell splits into the action
 // colors left to right, and fades with the hand's weight in the range.
-function rangeGridHTML(text,mix=null,tones=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),x=Math.min(1,w.get(k)||0),m=mix&&x>0&&mix[k];cells+='<span '+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':'style="--w:'+x.toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
+// Without an action to color, a cell fills from the left by how often the player holds the hand, like the action bars.
+const RANGE_KEY='<div class="action-key"><span><i class="range-always"></i>Always</span><span><i class="range-sometimes"></i>Sometimes</span></div>';
+function rangeGridHTML(text,mix=null,tones=null,mark=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),x=Math.min(1,w.get(k)||0),m=mix&&x>0&&mix[k];cells+='<span '+(k===mark?'data-hand ':'')+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':(x>0?'':'class="none" ')+'style="--w:'+x.toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
 function spotRangesHTML(result){
- const all=result?.solve?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&h.n===all.length?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=(52-nb)*(51-nb)/2;
+ const all=result?.solve?.rangeAssumptions||result?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&all.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
+ // Weighted share of the hands left in the deck: a combo held a tenth of the time counts a tenth, so a capped range does not read as wide.
+ const share=r=>{let rows=null;try{rows=PokerSpot.parseRange(r.range,{hole:h?.rules?.hole||2},live?h.board:[]);}catch{}const n=rows?rows.reduce((s,x)=>s+x.weight,0):r.combinations;return n>0?100*n/legal:0;};
  const mix=result.handMix&&result.handMix.classes&&typeof result.handMix.classes==='object'?result.handMix:null,tones=mix?actionTones(result.actions,h):null;
  // The acting player, whose strategy colors the grid, comes first.
  ranges.sort((p,q)=>(mix&&q.seat===mix.seat)-(mix&&p.seat===mix.seat));
- return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(r.combinations>0?' · '+Math.round(100*r.combinations/legal)+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones):'')+(/^All legal hands/.test(r.range)?'<p class="help">Any two cards</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
+ return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(share(r)>0?' · '+(share(r)<.5?'<1':Math.round(share(r)))+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones):rangeClassWeights(r.range).size?RANGE_KEY:'')+(/^All legal hands/.test(r.range)?'<p class="help">Any '+(h?.rules?.hole>2?'hand':'two cards')+'</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones,h&&r.seat===state.hero&&h.holes[r.seat]?.length===2?G.Core.handClass(h.holes[r.seat]):null):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
 }
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));
- const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':method==='local-multiway'?'Solved with the 3-way solver':local?'Solved with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
+ const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-preflop'?'Solved preflop on your Mac':method==='local-plo'?'Solved with the PLO solver':method==='local-multiway'?'Solved with the 3-way solver':local?'Solved with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
  const actionValues=approximate?'<h3>Estimated action values</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>Estimated EV</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest estimate':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' ± '+fmt(1.96*result.se[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':converged?'<h3>Action values from this decision</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>EV</th><th>Estimated cost</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest EV':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' '+esc(result.units)+'</td><td>'+fmt(result.loss[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':'';
  return'<section class="spot-solution"><div class="eyebrow">Analysis of the current position</div><h3>'+title+'</h3>'+(converged?'<p><strong>Highest-EV action: '+esc(best.label)+'</strong>'+(frequent!==result.best?' · most frequent: '+esc(result.actions[frequent].label)+' ('+fmt(result.reference[frequent]*100,1)+'%)':'')+'</p>':approximate||local?'<p><strong>Most frequent action: '+esc(result.actions[frequent].label)+'</strong></p>':'')+spotFrequencyHTML(result)+spotRangesHTML(result)+actionValues+(converged&&grade?'<p><strong>Your action cost: '+fmt(grade.estimatedLoss??grade.loss,3)+' '+esc(result.units)+'</strong></p>':'')+'</section>';
 }
@@ -292,7 +365,8 @@ function finishQuizPreparation(result,pending){
  const question=pending.quizQuestion;if(state.quiz!==question)return;question.preparing=false;question.answered=false;if(!result.supported){question.prepared=null;question.continuationError=false;showQuizQuestion();$('quizStatus').textContent='Practice only — '+result.message;return;}question.prepared=result;question.continuationError=false;showQuizQuestion();$('quizStatus').textContent='Decision '+question.decisionNumber+(result.referenceOnly?' · source reference matched':' · finite-game solve completed')+' · choose your action. Feedback appears after the hand.';
 }
 function initSpotSolving(){
- $('spotStop').onclick=()=>{if(state.job!=='spotSolve')return;const task=state.pending;if(task?.dispatched){state.worker?.postMessage({type:'stop'});status('Stopping the current solve…');}else{state.pending=null;lock();quizAnalysisError('Preparation was canceled.',task);endSolveFeedback(task,'Preparation was canceled.',false);status('Preparation was canceled.');}};
+ // Range preparation can't hear a stop, so an in-browser solve ends with its worker; a TexasSolver job is stopped so it cancels.
+ $('spotStop').onclick=()=>{if(state.job!=='spotSolve')return;const task=state.pending;if(task?.dispatched){if(task.solveOptions?.localSolver){state.worker?.postMessage({type:'stop'});status('Stopping the current solve…');}else{dropSpotWorker();handleSpotWorkerMessage({type:'spotResult',result:{supported:false,canceled:true,message:'The spot solve was stopped. You can solve this position again.'}});}}else{state.pending=null;lock();quizAnalysisError('Preparation was canceled.',task);endSolveFeedback(task,'Preparation was canceled.',false);status('Preparation was canceled.');}};
  $('quizStopSolve').onclick=()=>$('spotStop').onclick();
  $('spotExport').onclick=exportPortableSpot;
  ['spotRangeMode','spotRootSizes'].forEach(id=>$(id).onchange=()=>{spotUI.last=null;renderPlay();});$('spotLocalSolver').onchange=()=>{spotUI.last=null;dbPut('meta',{id:'spotLocalSolver',value:$('spotLocalSolver').value}).catch(()=>{});checkLocalBridge().then(()=>renderPlay());renderPlay();};addEventListener('focus',()=>{if($('spotLocalSolver').value&&Date.now()-localBridge.checked>10000)checkLocalBridge();});$('spotResetRanges').onclick=()=>{spotUI.rangeValues=Array(state.hand?.n||2).fill('');$('spotRangeInputs').innerHTML='';spotUI.last=null;renderSpotRangeEditors();renderPlay();};

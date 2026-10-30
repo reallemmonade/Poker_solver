@@ -1,5 +1,5 @@
 'use strict';
-const liveSession={rootConfig:null,rootHero:0,rootBots:null,round:1,handNumber:0,timer:null,ready:false,message:'',passive:false,elsewhere:'',hold:false,holdTimer:0,stamp:{at:0,device:''}};
+const liveSession={rootConfig:null,rootHero:0,rootBots:null,rootSeats:null,round:1,handNumber:0,timer:null,ready:false,message:'',passive:false,elsewhere:'',hold:false,holdTimer:0,stamp:{at:0,device:''}};
 // Tabs share one saved session: the tab that saved last owns it, and any other open tab turns read-only (playBusy) until the
 // player takes the session over there, which reloads the latest saved state first, so two tabs never fork one session.
 const studioTab=Math.random().toString(36).slice(2),studioChannel=(()=>{try{return typeof BroadcastChannel==='function'?new BroadcastChannel('range-lab-poker-studio'):null}catch{return null}})();
@@ -20,7 +20,9 @@ async function takeOverSession(){if(!liveSession.passive)return;try{if(citrusAcc
 async function refreshSharedHands(){try{const [hands,grades]=await Promise.all([dbAll('hands'),dbAll('grades')]);state.histories=newestRows(hands,validHandRow).rows;state.grades=newestRows(grades.map(r=>{try{return scrubSavedGrade(r)}catch{return null}}),validGradeRow).rows;renderSavedHands();renderProgress();}catch{}}
 if(studioChannel)studioChannel.onmessage=event=>{const m=event.data||{};if(m.tab===studioTab)return;if(m.type==='session'&&liveSession.ready)sessionElsewhere('tab');if(m.type==='hands')refreshSharedHands();};
 function cancelSessionNext(){clearTimeout(liveSession.timer);liveSession.timer=null;}
-function beginLiveSession(config=state.config,hero=state.hero){cancelSessionNext();liveSession.rootConfig=G.normalize(config);liveSession.rootHero=hero;liveSession.rootBots=botSettings.seats.slice();liveSession.handNumber=0;state.sessionHands=0;liveSession.message='';liveSession.level='';}
+// The original seat of each seat at the table now, so a style chosen mid-session is kept when the session restarts.
+function seatRange(n){return Array.from({length:n},(_,i)=>i);}
+function beginLiveSession(config=state.config,hero=state.hero){cancelSessionNext();liveSession.rootConfig=G.normalize(config);liveSession.rootHero=hero;liveSession.rootBots=botSettings.seats.slice();liveSession.rootSeats=seatRange(liveSession.rootConfig.seats);liveSession.handNumber=0;state.sessionHands=0;liveSession.message='';liveSession.level='';}
 // Blind levels shrink every stack by the same factor in whole chips (0.01 bb), keeping the scaled total exact by largest remainder; no stack drops to zero.
 function scaleChips(stacks,factor){const chips=stacks.map(x=>Math.round(x*100)),raw=chips.map(v=>v/factor),out=raw.map(Math.floor);let left=Math.round(chips.reduce((s,v)=>s+v,0)/factor)-out.reduce((s,v)=>s+v,0);for(const i of raw.map((_,i)=>i).sort((a,b)=>(raw[b]-out[b])-(raw[a]-out[a])))if(left-->0)out[i]++;for(let i=0;i<out.length;i++)if(!out[i]){const j=out.indexOf(Math.max(...out));if(out[j]>1)out[j]--;out[i]++;}return out.map(v=>v/100);}
 // Tournament finish for the hero after a completed hand: bust (place and prize), every remaining prize equal (a satellite's
@@ -30,28 +32,31 @@ function tournamentFinish(h){
  const before=[...h.initial.map(x=>G.bb(x)+c.pot/h.n),...c.otherStacks],prize=G.terminalICM([...h.stacks.map(G.bb),...c.otherStacks],before,pay)[state.hero],place=busted?left+1+h.stacks.filter((x,p)=>x===0&&p!==state.hero&&h.initial[p]>h.initial[state.hero]).length:null,nth=n=>n+(n%100>10&&n%100<14?'th':['th','st','nd','rd'][n%10]||'th');
  return{over:true,message:busted?'You finished '+nth(place)+(prize>0?' · prize '+fmt(prize,2):' · no prize')+'. The next hand restarts the original setup.':decided?'Seats decided: '+(left===2?'both':'all '+left)+' remaining players win '+fmt(pay[0],2)+', including you. The next hand restarts the original setup.':'Every opponent at this table is out; '+c.otherStacks.length+' player'+(c.otherStacks.length>1?'s':'')+' remain at other tables. Your tournament equity: '+fmt(prize,2)+'. The next hand restarts the original setup.'};
 }
+// Cash tables keep their size: a bot that busts or drops below half its starting stack rebuys to that stack.
+function botRebuyStacks(h){const root=liveSession.rootConfig,rebuy=h.config.mode==='cash'&&$('botRebuy')?.checked!==false&&root?.stacks?.length===h.n&&h.stacks[state.hero]>0;return h.stacks.map((amount,seat)=>rebuy&&seat!==state.hero&&root.stacks[seat]>0&&G.bb(amount)<root.stacks[seat]/2?G.units(root.stacks[seat]):amount)}
 function nextPersistentSessionConfig(){
  const h=state.hand;if(!h?.done)return state.config;
- // Cash tables keep their size: a bot that busts or drops below half its starting stack rebuys to that stack.
- const root=liveSession.rootConfig,rebuy=h.config.mode==='cash'&&$('botRebuy')?.checked!==false&&root?.stacks?.length===h.n&&h.stacks[state.hero]>0,stacks=h.stacks.map((amount,seat)=>rebuy&&seat!==state.hero&&root.stacks[seat]>0&&G.bb(amount)<root.stacks[seat]/2?G.units(root.stacks[seat]):amount),reloaded=stacks.filter((amount,seat)=>amount!==h.stacks[seat]).length;
+ const stacks=botRebuyStacks(h);
  const alive=stacks.map((amount,seat)=>amount>0?seat:-1).filter(seat=>seat>=0),finish=tournamentFinish(h);
  if(!alive.includes(state.hero)||alive.length<2||finish){
-  const busted=!alive.includes(state.hero);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';saveBotSettings();liveSession.round++;liveSession.handNumber=0;liveSession.level='';state.sessionHands=0;liveSession.message=finish?'Tournament finished · restarting with the original setup.':busted?'You busted · restarting with the original setup.':'You won the table · starting a new session.';return G.normalize(liveSession.rootConfig);
+  const busted=!alive.includes(state.hero);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();liveSession.rootSeats=seatRange(liveSession.rootConfig.seats);botSettings.renderKey='';saveBotSettings();liveSession.round++;liveSession.handNumber=0;liveSession.level='';state.sessionHands=0;liveSession.message=finish?'Tournament finished · restarting with the original setup.':busted?'You busted · restarting with the original setup.':'You won the table · starting a new session.';return G.normalize(liveSession.rootConfig);
  }
  let nextButton=(h.button+1)%h.n;while(!alive.includes(nextButton))nextButton=(nextButton+1)%h.n;
  const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
- state.hero=alive.indexOf(state.hero);remapBotSeats(alive);
+ state.hero=alive.indexOf(state.hero);remapBotSeats(alive);liveSession.rootSeats=liveSession.rootSeats&&alive.map(i=>liveSession.rootSeats[i]);
  let level='';if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1);if(factor>1)level='Blinds up ×'+fmt(factor,2)+' · level '+(1+state.sessionHands/Math.max(1,+$('levelHands').value));const scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
- liveSession.level=level;liveSession.message=[level,h.n-alive.length?h.n-alive.length+' opponent(s) eliminated':'',reloaded?reloaded+' bot'+(reloaded>1?'s':'')+' rebought to the starting stack':''].filter(Boolean).join(' · ');return G.normalize(config);
+ liveSession.level=level;liveSession.message=[level,h.n-alive.length?h.n-alive.length+' opponent(s) eliminated':''].filter(Boolean).join(' · ');
+ // Rebuys show on the seats as the next hand is dealt (table.js playSeatRebuys), not as a line of text.
+ const next=G.normalize(config);liveSession.rebuys={config:next,seats:stacks.map((amount,seat)=>amount!==h.stacks[seat]?{seat:alive.indexOf(seat),from:G.bb(h.stacks[seat]),to:G.bb(amount)}:null).filter(Boolean)};return next;
 }
 function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootConfig)beginLiveSession();liveSession.handNumber++;}
-function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
+function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),rootSeats:liveSession.rootSeats?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
 function rollbackSessionTransition(saved){state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();renderAll();}
 function renderSessionStatus(){
  if(liveSession.passive&&!$('sessionElsewhere')){const line=$('sessionStatus').closest('.ui-session-line')||$('sessionStatus');line.insertAdjacentHTML('afterend','<div id="sessionElsewhere" class="result" role="status"><span id="sessionElsewhereText"></span> <button class="btn secondary" id="takeOverSession">Continue here</button></div>');$('takeOverSession').onclick=takeOverSession;}
  if($('sessionElsewhereText'))$('sessionElsewhereText').textContent=liveSession.elsewhere==='device'?'Playing on your other device.':'Playing in another tab.';
  $('sessionElsewhere')?.classList.toggle('hide',!liveSession.passive);const h=state.hand;if(!h){$('deal').textContent='Deal hand';$('deal').disabled=playBusy()||tableView.playing;return;}
- $('sessionStatus').textContent=h.done&&tableView.playing?'':liveSession.message;// only news (busts, rebuys, eliminations); the result waits for the end-of-hand animation
+ $('sessionStatus').textContent=h.done&&tableView.playing?'':liveSession.message;// only news (eliminations, blind levels); rebuys show on the seats; the result waits for the end-of-hand animation
  $('deal').textContent=h.done?'Next hand':'Hand in progress';$('deal').hidden=!h.done;$('deal').disabled=playBusy()||tableView.playing||!h.done;
  $('restartSession').disabled=state.busy||liveSession.passive;renderCapacityActions();
 }
@@ -67,7 +72,7 @@ function sessionHandEnded(){
 function saveLiveSession(){
  if(!liveSession.ready||liveSession.passive||liveSession.hold||!state.hand||!liveSession.rootConfig)return;
  const h=state.hand;liveSession.stamp={at:Date.now(),device:studioDevice};
- const value={version:1,at:liveSession.stamp.at,device:studioDevice,rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots,round:liveSession.round,handNumber:liveSession.handNumber,completedHands:state.sessionHands,hero:state.hero,bots:botSettings.seats.slice(),autoNext:$('autoNextHand').checked,blindLevels:$('sessionBlindLevels').checked,levelHands:+$('levelHands').value,levelFactor:+$('levelFactor').value,hand:{config:h.config,holes:h.holes.map(cards=>cards.slice()),board:h.board.slice(),actions:h.actionLog.map(a=>({...a})),deck:h.deck.slice(),plannedBoard:h.plannedBoard.slice(),burns:h.burns.slice(),endingStacks:h.stacks.slice(),dealId:h.dealId,assisted:!!h.assisted,grades:state.currentGrades,done:h.done,saved:state.handSaved}};
+ const value={version:1,at:liveSession.stamp.at,device:studioDevice,rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots,rootSeats:liveSession.rootSeats,round:liveSession.round,handNumber:liveSession.handNumber,completedHands:state.sessionHands,hero:state.hero,bots:botSettings.seats.slice(),autoNext:$('autoNextHand').checked,blindLevels:$('sessionBlindLevels').checked,levelHands:+$('levelHands').value,levelFactor:+$('levelFactor').value,hand:{config:h.config,holes:h.holes.map(cards=>cards.slice()),board:h.board.slice(),actions:h.actionLog.map(a=>({...a})),deck:h.deck.slice(),plannedBoard:h.plannedBoard.slice(),burns:h.burns.slice(),endingStacks:h.stacks.slice(),dealId:h.dealId,assisted:!!h.assisted,peeks:(h.peeks||[]).slice(),grades:state.currentGrades,done:h.done,saved:state.handSaved}};
  dbPut('meta',{id:'liveSession',value}).catch(saveFailed);postStudio({type:'session'});
 }
 // adopt: continue a session saved elsewhere (another tab or device) and take it over; otherwise this is the load-time restore.
@@ -79,9 +84,9 @@ function restoreLiveSession(value,adopt=false){
    const hand=new G.Hand(c,{holes:value.hand.holes,runout:value.hand.board.slice(c.boardCards.length),rng:G.rng(7311)});for(const action of value.hand.actions)hand.act(action);
    if(hand.stacks.some((chips,seat)=>chips!==value.hand.endingStacks[seat]))throw Error('Saved session stacks differ from its action history.');
    const deck=value.hand.deck,planned=value.hand.plannedBoard,burns=value.hand.burns,all=[...hand.holes.flat(),...hand.board,...deck,...planned,...burns];if(all.length!==52||all.some(card=>!Number.isInteger(card)||card<0||card>51)||new Set(all).size!==52)throw Error('Saved card order is invalid.');
-   cancelSessionNext();stopTableMotion();hand.deck=deck.slice();hand.dealId=typeof value.hand.dealId==='string'&&/^h[a-z0-9]{1,40}$/.test(value.hand.dealId)?value.hand.dealId:id('h');liveSession.stamp={at:+value.at||0,device:String(value.device||'')};liveSession.passive=false;liveSession.elsewhere='';hand.plannedBoard=planned.slice();hand.burns=burns.slice();if(value.hand.assisted)hand.assisted=true;
+   cancelSessionNext();stopTableMotion();hand.deck=deck.slice();hand.dealId=typeof value.hand.dealId==='string'&&/^h[a-z0-9]{1,40}$/.test(value.hand.dealId)?value.hand.dealId:id('h');liveSession.stamp={at:+value.at||0,device:String(value.device||'')};liveSession.passive=false;liveSession.elsewhere='';hand.plannedBoard=planned.slice();hand.burns=burns.slice();if(value.hand.assisted)hand.assisted=true;if(Array.isArray(value.hand.peeks))hand.peeks=value.hand.peeks.filter(Number.isInteger);
    state.hand=hand;state.config=c;state.hero=value.hero;state.handSaved=hand.done&&value.hand.saved!==false;state.currentGrades=(value.hand.grades||[]).map(scrubSavedGrade);state.sessionHands=value.completedHands||0;
-   liveSession.rootConfig=root;liveSession.rootHero=value.rootHero;liveSession.rootBots=value.rootBots.slice();liveSession.round=value.round||1;liveSession.handNumber=value.handNumber||1;liveSession.message=adopt?'':'Saved session restored · stacks and dealer position preserved.';
+   liveSession.rootConfig=root;liveSession.rootHero=value.rootHero;liveSession.rootBots=value.rootBots.slice();liveSession.rootSeats=Array.isArray(value.rootSeats)&&value.rootSeats.length===c.seats?value.rootSeats.slice():c.seats===root.seats?seatRange(c.seats):null;liveSession.round=value.round||1;liveSession.handNumber=value.handNumber||1;liveSession.message='';
    if(Array.isArray(value.bots))botSettings.seats=value.bots.map(p=>PokerBots.personas[p]?p:'balanced');botSettings.renderKey='';$('autoNextHand').checked=value.autoNext!==false;$('sessionBlindLevels').checked=!!value.blindLevels;$('levelHands').value=value.levelHands||10;$('levelFactor').value=value.levelFactor||1.5;
    writeForm(c,state.abstraction);$('hero').value=state.hero;liveSession.ready=true;
    // Signed in, the load-time restore waits for the first sync before bots act or the hand saves, in case another device played on.
@@ -92,7 +97,7 @@ function restoreLiveSession(value,adopt=false){
 }
 function restartLiveSession(){
  if(state.busy||liveSession.passive)return;cancelSessionNext();stopTableMotion();if(!liveSession.rootConfig)beginLiveSession();
- state.config=G.normalize(liveSession.rootConfig);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();botSettings.renderKey='';state.dirty=false;liveSession.round++;writeForm(state.config,state.abstraction);$('hero').value=state.hero;deal(false);
+ state.config=G.normalize(liveSession.rootConfig);state.hero=liveSession.rootHero;botSettings.seats=liveSession.rootBots.slice();liveSession.rootSeats=seatRange(liveSession.rootConfig.seats);botSettings.renderKey='';state.dirty=false;liveSession.round++;writeForm(state.config,state.abstraction);$('hero').value=state.hero;deal(false);
 }
 function renderCapacityActions(){
  if(!$('capacityReached')||!state.model)return;const max=state.model.abstraction.maxInfos,size=state.model.table.entries.size,reached=/capacity/i.test(state.snapshot?.halted||'')||size>=max-1;

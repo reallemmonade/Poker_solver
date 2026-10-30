@@ -4,7 +4,7 @@
 # this computer's work folders, and this computer's solved flops and charts out to them.
 #   bash tools/calibration/helpers.sh setup  <ip>          copy the repo and the v4 charts, build TexasSolver-ev
 #   bash tools/calibration/helpers.sh start  <ip> <K> <N> [jobs threads]   start shard K of N in tmux
-#        (DEPTH_FLOPS, TABLE_FLOPS, EXTRA_FLOPS and TURN=1 in the environment pass through)
+#        (DEPTH_FLOPS, TABLE_FLOPS, EXTRA_FLOPS, SPOT_FLOPS, SPOT_FLOPS_SRP and TURN=1 in the environment pass through)
 #   bash tools/calibration/helpers.sh sync   <ip>...       every 2 minutes until stopped
 #   bash tools/calibration/helpers.sh status <ip>          recent solves, load and memory
 # CAL_WORK (default ~/cal) is this computer's smart-calibration.sh work folder.
@@ -33,7 +33,7 @@ setup) ip=$2
 start) ip=$2; k=$3; n=$4; jobs=${5:-4}; threads=${6:-4}
   code $ip; push $ip
   ssh $ip "tmux has-session -t help 2>/dev/null && { echo 'Already running'; exit 0; }
-    tmux new -d -s help \"CAL_WORK=$work JOBS=$jobs THREADS=$threads DEPTH_FLOPS=${DEPTH_FLOPS:-100} TABLE_FLOPS=${TABLE_FLOPS:-100} EXTRA_FLOPS=${EXTRA_FLOPS:-50} TURN=${TURN:-0} bash $repo/tools/calibration/smart-helper.sh $k $n 2>&1 | tee -a $work/helper.log\" && echo Started shard $k/$n: $jobs solves at once, $threads threads each" ;;
+    tmux new -d -s help \"CAL_WORK=$work JOBS=$jobs THREADS=$threads DEPTH_FLOPS=${DEPTH_FLOPS:-100} TABLE_FLOPS=${TABLE_FLOPS:-100} EXTRA_FLOPS=${EXTRA_FLOPS:-50} SPOT_FLOPS=${SPOT_FLOPS:-60} SPOT_FLOPS_SRP=${SPOT_FLOPS_SRP:-${SPOT_FLOPS:-60}} TURN=${TURN:-0} bash $repo/tools/calibration/smart-helper.sh $k $n 2>&1 | tee -a $work/helper.log\" && echo Started shard $k/$n: $jobs solves at once, $threads threads each" ;;
 sync) shift
   while :; do for ip in "$@"; do pull $ip; push $ip; done; sleep 120; done ;;
 status) ip=$2

@@ -12,7 +12,7 @@ const citrusAccount=(()=>{
  let account=read(ACCOUNT,null);if(!account?.token||!account?.user?.id)account=null;
  const uid=()=>account?.user.id,key=name=>name+':'+uid();
  const sync={status:account?'waiting':'signedOut',at:read(account?key('citrus-sync-at-v1'):'',0),timer:0,running:null,again:false,note:''};
- const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-)/.test(id)||id==='macsolver'||id==='liveSession');
+ const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-|preflopwant-)/.test(id)||id==='macsolver'||id==='macupdate'||id==='liveSession');
  function dbName(){const owner=read(OWNER,null);if(account)return owner===account.user.id?LEGACY_DB:LEGACY_DB+'-'+account.user.id;return owner?LEGACY_DB+'-guest':LEGACY_DB;}
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){
@@ -62,7 +62,8 @@ const citrusAccount=(()=>{
   return got;
  }
  async function run(){
-  if(!account)return;if(sync.running){sync.again=true;return sync.running;}
+  // A session the server ended stays ended until a sign-in (which reloads) or another tab's fresh token: retrying would only redraw the sign-in form empty.
+  if(!account)return;if(sync.status==='expired'){dispatchEvent(new CustomEvent('citrus-sync-done',{detail:{session:null}}));return;}if(sync.running){sync.again=true;return sync.running;}
   sync.running=(async()=>{let session=null;
    const first=!read(key('citrus-sync-seeded-v1'),false);sync.status='syncing';render();
    try{if(first)await seed();let full=null;await push().catch(e=>{if(e.status!==507)throw e;full=e;});const got=await pull();session=got.session;if(full){sync.status='full';sync.note=full.message;}else{sync.status='synced';sync.at=Date.now();write(key('citrus-sync-at-v1'),sync.at);sync.note='';}

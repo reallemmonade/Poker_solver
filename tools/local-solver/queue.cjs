@@ -17,6 +17,8 @@ const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker
 // target, so they count time against the estimate. Time left extrapolates the rate so far once there is one.
 function progressOf(job,s,first){
  if(!s)return{phase:'preparing',p:0,remaining:Math.max(1,job.seconds||60)};
+ // Preflop spot solves report their own share done and time left.
+ if(Number.isFinite(s.fraction)){const p=Math.min(.99,Math.max(0,s.fraction)),est=Math.max(1,job.seconds||60);return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(s.remaining>0?s.remaining:p>=.05?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1))),iterations:0,exploitability:null,target:null};}
  const target=Number(job.options?.localAccuracy)||0,cap=Number(job.options?.localIterations)||0,e=Number(s.exploitability),est=Math.max(1,job.seconds||60);let p=0;
  if(target>0&&e>0){if(!(first.e>0))first.e=e;if(first.e>target*1.01)p=Math.log(first.e/e)/Math.log(first.e/target);}
  if(cap>0&&s.iterations>0)p=Math.max(p,s.iterations/cap);
@@ -26,8 +28,8 @@ function progressOf(job,s,first){
  const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
  return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
 }
-function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=async()=>{},log=console.log}){
- let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null;const jobs=new Map(),wants=new Map();
+function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log}){
+ let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null,updateWant=null;const jobs=new Map(),wants=new Map();
  // Open jobs and wanted flops are kept with the cursor: a restart pulls only what changed since, so they would be lost.
  const open=(m,...states)=>[...m].filter(([,v])=>states.includes(v.status));
  try{const {jobs:j,wants:w,...saved}=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;for(const [id,v]of Array.isArray(j)?j:[])jobs.set(id,v);for(const [id,v]of Array.isArray(w)?w:[])wants.set(id,v);}}catch{}
@@ -37,10 +39,10 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta('macsolver',{seen:Date.now(),threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta('macsolver',{seen:Date.now(),features:update?['preflop','update']:['preflop'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
-   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^flopwant-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
+   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
    cursor=page.cursor;if(!page.more)break;}
   save();
  }
@@ -75,7 +77,10 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=
   if(!link||running)return;
   running=(async()=>{try{
    if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[heartbeat()]});}
-   await pull();if(!busy())await runNext();
+   await pull();
+   // An update asked for from your phone runs once nothing is solving; this bridge restarts with it.
+   if(updateWant?.status==='wanted'&&!busy()){const {t,...w}=updateWant;updateWant=null;let row={...w,status:'updating',startedAt:Date.now()};try{if(!update)throw Error('This computer can\'t update from the app.');update();log('Updating, as asked from your account.');}catch(e){row={...w,status:'failed',message:e.message};}await api('POST','/api/sync',{rows:[meta('macupdate',row,(t||Date.now())+1)]});if(row.status==='updating')return;}
+   if(!busy())await runNext();
    if(!busy()&&!learning&&![...jobs.values()].some(j=>j.status==='queued'||j.status==='running'))learnNext();
   }catch(e){if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
@@ -83,10 +88,22 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,stopLearning=
  }
  // The newest wanted flop not learned yet, solved in the background while this computer is idle (other work, like a
  // long calibration, keeps it waiting). A solve from the app or the queue stops it; it is tried again later.
+ // Preflop lines no chart covers ('preflopwant-' rows) come after wanted flops: the answer, every hand class's
+ // strategy at that spot, goes back on the row itself (about 10 KB).
  function learnNext(){
   if(!learn||os.loadavg()[0]/os.cpus().length>IDLE_LOAD)return;const L=require('./learn.cjs'),now=Date.now();
-  const open=[...wants.entries()].filter(([,w])=>(w.status==='wanted'||w.status==='learning')&&now-(w.at||0)<WANT_DAYS*864e5).sort((a,b)=>(b[1].at||0)-(a[1].at||0));
+  const open=[...wants.entries()].filter(([,w])=>(w.status==='wanted'||w.status==='learning')&&now-(w.at||0)<WANT_DAYS*864e5).sort((a,b)=>/^preflopwant-/.test(a[0])-/^preflopwant-/.test(b[0])||(b[1].at||0)-(a[1].at||0));
   for(const [id,want]of open){
+   if(/^preflopwant-/.test(id)){
+    if(!learnPreflop)continue;if(!want?.spot||typeof want.spot!=='object'){wants.set(id,{...want,status:'failed',message:'Malformed.'});continue;}
+    const started={...want,status:'learning',startedAt:now};wants.set(id,started);
+    learning=(async()=>{let row={...want,status:'wanted'};try{
+      await api('POST','/api/sync',{rows:[meta(id,started)]}).catch(()=>{});log('Solving preflop line '+(want.label||id)+'.');const t0=Date.now();
+      const result=await learnPreflop(want);row={...want,status:'done',learnedAt:Date.now(),seconds:Math.round((Date.now()-t0)/1000),result};log('Solved preflop line '+(want.label||id)+' in '+row.seconds+' s.');
+     }catch(e){if(!/cancelled|already running/.test(e.message)){row={...want,status:'failed',message:e.message};log('Could not solve preflop line '+(want.label||id)+': '+e.message);}}
+     finally{wants.set(id,row);learning=null;await api('POST','/api/sync',{rows:[meta(id,row)]}).catch(()=>{});}})();
+    learning.id=id;return;
+   }
    try{L.check(want);}catch{wants.set(id,{...want,status:'failed',message:'Malformed.'});continue;}
    if(L.has(want)){const done={...want,status:'done'};wants.set(id,done);api('POST','/api/sync',{rows:[meta(id,done)]}).catch(()=>{});continue;}
    const started={...want,status:'learning',startedAt:now};wants.set(id,started);

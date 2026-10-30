@@ -26,8 +26,21 @@ let job=null,finished=null;
 const busy=()=>!!job&&!job.learning;
 const learnedCount=()=>{try{return (learn.library()?.spots||[]).reduce((n,s)=>n+Object.keys(s.flops).length,0);}catch{return 0;}};
 async function stopLearning(){const j=job;if(!j?.learning)return;j.cancelled=true;j.child.kill('SIGKILL');await j.closed;}
-const queue=createQueue({port:args.port,threads:args.threads,busy,status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000},
- learn:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),stopLearning});
+// Updating from the app (POST /update here, or a 'macupdate' row from your phone): the same setup-mac.sh as the first
+// install, in its own process group so it outlives the restart it ends with. Its output goes to
+// ~/Library/Logs/citrus-poker-update.log.
+const UPDATE_CMD='curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash',canUpdate=process.platform==='darwin';let updating=0;
+function selfUpdate(){
+ if(!canUpdate)throw Error('Updating from the app works on a Mac only.');
+ if(busy())throw Error('A solve is running on this computer. Update once it ends.');
+ if(Date.now()-updating<15*60e3)return;updating=Date.now();
+ const log=path.join(os.homedir(),'Library','Logs','citrus-poker-update.log'),fd=fs.openSync(log,'a');
+ try{spawn('/bin/bash',['-c',UPDATE_CMD],{detached:true,stdio:['ignore',fd,fd],env:{...process.env,PATH:'/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'}}).unref();}finally{fs.closeSync(fd);}
+ console.log('Updating the solver. Log: '+log);
+}
+const queue=createQueue({port:args.port,threads:args.threads,busy,status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
+ learn:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),
+ learnPreflop:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning,update:canUpdate&&selfUpdate});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
@@ -85,29 +98,56 @@ function solveSpot(spec){
  });
 }
 
+// Preflop lines no chart covers (POST /preflop-async): tools/preflop/spot.cjs in its own process group, so a cancel
+// also stops the 3-way solves it runs. These take minutes to hours, so they get PREFLOP_HOURS, not the usual limit.
+const PREFLOP_HOURS=12;
+function validatePreflop(body){
+ const ok=(v,m)=>{if(!v)throw Error(m)},s=body?.spot;
+ ok(s&&typeof s==='object'&&s.config&&typeof s.config==='object'&&Array.isArray(s.actions)&&s.actions.length<=60&&Number.isInteger(s.actor)&&Array.isArray(s.heroCards)&&s.heroCards.length===2&&s.heroCards.every(c=>Number.isInteger(c)&&c>=0&&c<52),'The preflop spot is malformed.');
+ ok(s.actions.every(a=>a&&Number.isInteger(a.seat)&&a.street===0&&['fold','check','call','raise','bet'].includes(a.kind)&&(a.target===undefined||a.target===null||Number.isFinite(a.target))),'The preflop actions are malformed.');
+ return{spot:{config:s.config,actions:s.actions.map(a=>({seat:a.seat,street:0,kind:a.kind,...Number.isFinite(a.target)?{target:a.target}:{}})),actor:s.actor,heroCards:s.heroCards},effort:['quick','standard','deep'].includes(body.effort)?body.effort:'standard'};
+}
+function solvePreflop(spec,learning=false){
+ return new Promise((resolve,reject)=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'citrus-preflop-')),input=path.join(dir,'spot.json'),out=path.join(dir,'result.json');fs.writeFileSync(input,JSON.stringify(spec.spot));
+  const started=Date.now(),child=spawn(process.execPath,[path.join(__dirname,'..','preflop','spot.cjs'),input,out,'--mw-solver',args['mw-solver'],'--threads',String(args.threads),'--effort',spec.effort],{detached:true,stdio:['ignore','pipe','pipe']});
+  const kill=()=>{try{process.kill(-child.pid,'SIGKILL');}catch{try{child.kill('SIGKILL');}catch{}}};
+  const mine=job={child:{kill},started,iterations:0,exploitability:null,fraction:0,remaining:null,cancelled:false,closed:null,learning};let tail='';mine.closed=new Promise(r=>child.on('close',r));
+  const timer=setTimeout(kill,PREFLOP_HOURS*3600e3);
+  child.stdout.on('data',d=>{for(const line of String(d).split(/[\r\n]+/)){const m=line.match(/^Progress: ([\d.]+) (-?\d+)/);if(m){mine.fraction=+m[1];mine.remaining=+m[2]>=0?+m[2]:null;}else if(line.trim())console.log('Preflop solve: '+line.trim());}});
+  child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
+  child.on('error',error=>{clearTimeout(timer);if(job===mine)job=null;reject(error);});
+  child.on('close',code=>{clearTimeout(timer);if(job===mine)job=null;
+   try{if(mine.cancelled)throw Error('The solve was cancelled.');if(code!==0||!fs.existsSync(out))throw Error((tail.match(/Error: (.*)/)||[])[1]||'The preflop solve stopped (exit '+code+').');resolve(JSON.parse(fs.readFileSync(out,'utf8')));}
+   catch(error){reject(error);}finally{fs.rmSync(dir,{recursive:true,force:true});}});
+ });
+}
+
 const server=http.createServer((req,res)=>{
  if(req.headers.origin&&!originOK(req.headers.origin))return send(req,res,403,{error:'This page is not allowed to use the local solver. Add its origin to RANGE_LAB_ORIGINS.'});
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
- if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),mwSolver:fs.existsSync(args['mw-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy(),learning:!!job?.learning,learnedFlops:learnedCount(),spot:true,linkedUser:queue.user,version:1});
+ if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,update:canUpdate,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),mwSolver:fs.existsSync(args['mw-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy(),learning:!!job?.learning,learnedFlops:learnedCount(),spot:true,preflop:true,linkedUser:queue.user,version:1});
  // The app on this computer links the bridge to the signed-in account, so solves queued from other devices run here.
  if(req.method==='POST'&&req.url==='/link'){let body='';req.on('data',d=>{body+=d;if(body.length>4000)req.destroy();});req.on('end',()=>{try{queue.link(JSON.parse(body));send(req,res,200,{ok:true});}catch(error){send(req,res,400,{error:error.message});}});return;}
- if(req.method==='GET'&&req.url==='/status')return send(req,res,200,busy()?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000}:{busy:false});
+ if(req.method==='GET'&&req.url==='/status')return send(req,res,200,busy()?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}}:{busy:false});
+ if(req.method==='POST'&&req.url==='/update'){try{selfUpdate();send(req,res,202,{updating:true});}catch(error){send(req,res,409,{error:error.message});}return;}
  if(req.method==='POST'&&req.url==='/cancel'){if(!busy())return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
  // A background solve's outcome, collected once: 202 while it runs.
  // The flops this computer learned, as one postflop library for the app here.
  if(req.method==='GET'&&req.url==='/learned'){let lib=null;try{learn.refresh();lib=learn.library();}catch(error){return send(req,res,500,{error:error.message});}return send(req,res,200,lib||{none:true});}
  if(req.method==='GET'&&req.url==='/result'){if(busy())return send(req,res,202,{busy:true});if(!finished)return send(req,res,404,{error:'No finished solve to collect.'});const f=finished;finished=null;return f.error?send(req,res,500,{error:f.error}):send(req,res,200,f.result);}
- if(req.method==='POST'&&(req.url==='/solve'||req.url==='/solve-async'||req.url==='/spot-async')){
+ if(req.method==='POST'&&(req.url==='/solve'||req.url==='/solve-async'||req.url==='/spot-async'||req.url==='/preflop-async')){
   if(busy())return send(req,res,409,{error:'Another solve is already running on this computer.'});
   const multiway=req.url==='/spot-async';let body='';req.on('data',d=>{body+=d;if(body.length>(multiway?2e7:2e6))req.destroy();});
   req.on('end',async()=>{
-   let spec;try{spec=multiway?validateSpot(JSON.parse(body)):L.validate(JSON.parse(body));}catch(error){return send(req,res,400,{error:error.message});}
+   const preflop=req.url==='/preflop-async';let spec;try{spec=preflop?validatePreflop(JSON.parse(body)):multiway?validateSpot(JSON.parse(body)):L.validate(JSON.parse(body));}catch(error){return send(req,res,400,{error:error.message});}
    // Checked again here: two requests can both pass the check above before
    // either body has arrived. A flop being learned gives way.
    await stopLearning();
    if(job)return send(req,res,409,{error:'Another solve is already running on this computer.'});
    // /solve-async answers at once and keeps the outcome for GET /result, so a
    // solve of many minutes needs no long-open request.
+   if(preflop){finished=null;solvePreflop(spec).then(result=>{finished={result};},error=>{finished={error:error.message};});return send(req,res,202,{started:true});}
    if(multiway){finished=null;solveSpot(spec).then(result=>{finished={result};},error=>{finished={error:error.message};});return send(req,res,202,{started:true});}
    if(req.url==='/solve-async'){finished=null;solve(spec).then(result=>{finished={result};},error=>{finished={error:error.message};});return send(req,res,202,{started:true});}
    try{send(req,res,200,await solve(spec));}catch(error){send(req,res,500,{error:error.message});}
