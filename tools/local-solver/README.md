@@ -161,6 +161,14 @@ The flop library holds about 100 of the 1,755 distinct flops for each preflop li
 - The app on this computer loads them from `GET /learned`, so they answer like any library flop. A phone that sends one of these flops to the Mac gets its answer from the learned flop straight away, without a solve, within the sync time.
 - To add them to the site's library for everyone, run `node tools/postflop/library.cjs bundle --out learned` in the bridge folder, then `tools/split-libraries.cjs` as usual.
 
+## Preflop lines no chart covers
+
+The preflop charts only play lines that reach the flop heads-up: at most one call of an open, no open limps except the small blind's, nobody cold-calling or cold 4-betting a 3-bet. A no-limit hold'em line outside them goes to `POST /preflop-async`, which runs [tools/preflop/spot.cjs](../preflop/spot.cjs) in its own process group, with up to 12 hours instead of the usual limit. It replays the whole preflop game with your line forced into the chart solver's tree, plays the three-way flop pots you can reach out on sample flops with `mw_solver` to fit how those pots pay, and answers for every hand class at the spot. `/status` reports its share done and time left.
+
+- **Time:** a heads-up line takes seconds, and a 6-max line a few minutes. A line that can reach the flop three-way adds 40 sample flops per three-way pot (Quick 20, Deep 80), about 2 to 3 minutes each on a Mac, so about 2 hours. A line where you can see the flop four or more ways (for example overlimping behind two limpers) is refused: those pots only have a rough model.
+- **First use:** the three-way equity table (`tools/preflop/equity3.bin`, 9.7 MB) is built on the first preflop solve, in about 2 minutes. `install-mac.sh` builds the tool that makes it.
+- **Wanted lines:** an uncovered line you play goes on a wanted list in your account (`preflopwant-…` rows, the line without your cards). After wanted flops, the idle bridge solves these too and writes the answer, every hand class's strategy, back on the row (about 10 KB), so the line answers at once on any device next time.
+
 ## Licence
 
 TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO and 3-way solvers are part of this project.

@@ -372,6 +372,43 @@
   }
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ // Preflop lines no chart covers: the bridge solves the whole preflop game with this line in its tree
+ // (tools/preflop/spot.cjs), playing three-way flop pots out with the 3-way solver, and answers by hand class.
+ class PreflopEngine extends Engine{
+  constructor(data,opt,fetcher){
+   super(data,null,{...opt},null,fetcher,true);this.hand=G.replay(data.config,data.actions,{holes:{[data.actor]:data.heroCards}});this.asyncPath='/preflop-async';
+   this.spec={spot:{config:data.config,actions:data.actions.map(a=>({seat:a.seat,street:a.street,kind:a.kind,target:a.target})),actor:data.actor,heroCards:data.heroCards.slice()},effort:opt.preflopEffort||'standard'};
+  }
+  progress(){if(this.complete)clearInterval(this.poll);const s=this.status||{};return{phase:'local',done:Math.round((Date.now()-this.started)/1000),total:0,iterations:s.iterations||0,exploitability:null,fraction:s.fraction??null,remaining:s.remaining??null};}
+  result(){
+   if(this.error)return{supported:false,message:'Local solver: '+this.error};
+   try{return preflopResult(this.hand,this.body);}catch(error){return{supported:false,message:'Local solver: '+error.message};}
+  }
+ }
+ // The spot solver's answer in the app's terms: its actions at this table's legal sizes (merged where two land on
+ // the same size), your hand class's frequencies, every class's mix and each live player's range at this spot.
+ function preflopResult(hand,body){
+  assert(body&&Array.isArray(body.actions)&&Array.isArray(body.hero)&&body.classes&&typeof body.classes==='object','The preflop solver sent an unreadable answer.');
+  const legal=hand.legal(),c=hand.config,n=hand.n,top=Math.min(legal.maxRaiseTo,legal.allInTo),actions=[],probs=[],index=[];
+  body.actions.forEach((x,i)=>{
+   let a;if(x.kind==='fold')a={kind:'fold',label:'Fold'};else if(x.kind==='check'||x.kind==='call'&&!legal.callCost)a={kind:'check',label:'Check'};else if(x.kind==='call')a={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'+(legal.callCost>=hand.stacks[hand.actor]?' · all-in':'')};
+   else{const k=hand.currentBet?'raise':'bet',jam=x.to>=body.stack-1e-6,target=jam?top:Math.min(top,Math.max(legal.minRaiseTo,Math.round(x.to*c.bb*100)));a={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   a.id=a.kind+':'+(a.target||0);const same=actions.findIndex(b=>b.id===a.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=body.hero[i];else{actions.push(a);probs.push(body.hero[i]);}
+  });
+  const total=probs.reduce((s,x)=>s+x,0);assert(total>0,'The preflop solver has no strategy for your hand.');
+  const classes={};for(const [name,row]of Object.entries(body.classes)){const m=actions.map(()=>0);row.forEach((p,k)=>{m[index[k]]+=p;});const t=m.reduce((s,x)=>s+x,0);if(t>0)classes[name]=m.map(x=>Math.round(x/t*1000)/1000);}
+  const order=body.classOrder,combos=k=>k.length===2?6:k[2]==='s'?4:12,source='Solved on your Mac from this preflop line',rangeAssumptions=[];
+  for(const [rel,w]of Object.entries(body.ranges||{})){const seat=(+rel+hand.button)%n,peak=Math.max(...w);if(!(peak>0)||hand.folded[seat])continue;
+   const text=order.map((k,i)=>[k,w[i]/peak]).filter(([,x])=>x>=.002).map(([k,x])=>x>=.9995?k:k+':'+(Math.round(x*1000)/1000)).join(',');
+   rangeAssumptions.push({seat,range:text,combinations:Math.round(order.reduce((s,k,i)=>s+combos(k)*w[i]/peak,0)),source});}
+  const zeros=actions.map(()=>0),reference=probs.map(p=>p/total),best=reference.indexOf(Math.max(...reference)),three=(body.threeWay||[]).filter(t=>t.fit);
+  const notes=['Solved by the preflop solver on your Mac for this exact line, with the chart model (flop pots are paid by an equity-realization model, not played out)'+(three.length?'; '+three.length+' three-way flop pot'+(three.length>1?'s were':' was')+' played out on '+three.map(t=>t.flops).join('/')+' sample flops by the 3-way solver to fit that model':'')+'.',
+   body.unequalStacks?'Everyone plays the effective stack of '+Math.round(body.stack*10)/10+' bb.':null,
+   'Players\' earlier actions that the usual charts leave out are played by the same ranges that continue there.',chipCaveat(c).trim()||null].filter(Boolean);
+  return{supported:true,actions,reference,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:c.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix:{seat:hand.actor,classes},
+   solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
+ }
+
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

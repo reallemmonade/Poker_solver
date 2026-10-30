@@ -51,6 +51,9 @@ echo "Building the 3-way solver..."
 printf '%s\n' 'game NLH3' 'board KsQd7h4c2s' 'pot 300' 'stack 1000' 'range0 QQ,JTs,A7o' 'range1 KK,99,65s' 'range2 AA,KQs,T9s' 'threads 2' 'accuracy 0.1' 'max_iterations 300' "output $smoke/mw.json" > "$smoke/mw.txt"
 "$mw/mw_solver" "$smoke/mw.txt" >/dev/null
 test -s "$smoke/mw.json" && echo "The 3-way solver is ready: $mw/mw_solver"
+# The three-way equity table for preflop spot solves (tools/preflop/spot.cjs builds the table on first use).
+pf="$(cd "$here/../preflop" && pwd)"
+"${cxx[@]}" -O3 -std=c++17 -pthread ${tune[@]+"${tune[@]}"} -o "$pf/equity3" "$pf/equity3.cpp" && echo "The preflop three-way equity builder is ready: $pf/equity3"
 rm -rf "$smoke"
 if [ "${1:-}" = --plo-only ]; then exit 0; fi
 

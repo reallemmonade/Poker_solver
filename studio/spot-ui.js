@@ -27,6 +27,30 @@ function noteMissingFlop(hand){
  const want=missingFlopWant(hand);if(!want)return;noted.set(hand,hand.board.join());if(spotUI.wants?.has(want.id))return;
  const value={...want.value,at:Date.now(),status:'wanted'};(spotUI.wants||(spotUI.wants=new Map())).set(want.id,value);dbPut('meta',{id:want.id,value}).catch(()=>{});
 }
+// Preflop lines no chart covers go on a wanted list in your account too ('preflopwant-' rows, the line without your
+// cards). Your Mac solves them while it is idle (tools/local-solver/queue.cjs), and the answer comes back on the row
+// for every hand class, so the next time the line comes up it shows at once on any device. The key is the line
+// relative to the button and the effective stack to two significant figures, so the same line at about the same
+// depth counts once. The list also shows which lines the next chart build should cover.
+function preflopWant(hand){
+ if(!hand||hand.done||hand.street!==0||hand.config.variant!=='NLH'||hand.config.rules?.low||hand.config.bounties?.some(x=>x>0))return null;
+ const c=hand.config,n=hand.n,rel=i=>(i-hand.button+n)%n,others=hand.living().filter(i=>i!==hand.actor).map(i=>hand.initial[i]);if(!others.length)return null;
+ const depth=Number((G.bb(Math.min(hand.initial[hand.actor],Math.max(...others)))/c.bb).toPrecision(2)),pre=hand.actionLog.filter(a=>a.street===0);
+ const key=JSON.stringify([n,depth,c.sb/c.bb,c.ante/c.bb,c.anteMode,c.mode==='cash'?[c.rakePct,c.rakeCap/c.bb]:'chips',pre.map(a=>[rel(a.seat),a.kind,a.target?G.bb(a.target)/c.bb:0])]);
+ return{id:'preflopwant-'+hash(key),value:{key,depth,label:n+'-handed '+depth+'bb: '+pre.filter(a=>a.kind!=='fold').map(a=>G.positions(n,hand.button)[a.seat]+' '+(a.kind==='call'?'calls':'raises to '+G.bb(a.target)/c.bb)).join(', ')+', '+G.positions(n,hand.button)[hand.actor]+' to act',
+  spot:{config:c,actions:pre.map(a=>({seat:a.seat,street:0,kind:a.kind,...a.target?{target:a.target}:{}})),actor:hand.actor,heroCards:[51,47]}}};
+}
+const notedPreflop=new WeakMap();
+function noteMissingPreflop(hand){
+ if(!hand||hand.street!==0||notedPreflop.get(hand)===hand.actionLog.length||typeof citrusAccount==='undefined'||!citrusAccount.user||chartsLoading()||!preflopLibrary.packs.length)return;
+ const want=preflopWant(hand);if(!want)return;notedPreflop.set(hand,hand.actionLog.length);if(spotUI.preflopWants?.has(want.id))return;
+ const value={...want.value,at:Date.now(),status:'wanted'};(spotUI.preflopWants||(spotUI.preflopWants=new Map())).set(want.id,value);dbPut('meta',{id:want.id,value}).catch(()=>{});
+}
+// Your Mac's answer for this preflop line, for your hand class, or null.
+function learnedPreflop(hand){
+ const want=preflopWant(hand),row=want&&spotUI.preflopWants?.get(want.id);if(row?.status!=='done'||!row.result?.classes)return null;
+ try{const r=PokerLocalSolver.preflopResult(hand,{...row.result,hero:row.result.classes[G.Core.handClass(hand.holes[hand.actor])]});r.solve.learned=true;r.solve.warning='Your Mac solved this line earlier. '+r.solve.warning;return r;}catch{return null;}
+}
 // The flop of this spot was learned by your Mac since the library was built.
 function learnedFlopReady(hand){const want=missingFlopWant(hand);return !!want&&spotUI.wants?.get(want.id)?.status==='done';}
 // On the Mac: the bridge's learned flops, as one more flop library kept in memory and refreshed when the count changes.
@@ -48,9 +72,9 @@ function renderSpotRangeEditors(){
 function spotSettings(hand,pending={}){
  const isQuiz=pending.kind==='quiz'||pending.kind==='quizPrepare',same=hand===state.hand,small=typeof smallMemoryDevice==='function'&&smallMemoryDevice(),plan=pending.plan||(isQuiz?null:spotPlan(hand)),texas=plan?.route==='texas'||plan?.route==='mac';
  const pinned=isQuiz?pending.quizQuestion?.solveOptions:null;const rangedPinned=pinned&&pending.quizQuestion?.rangeAnchor!==undefined&&hand.actionLog.length>pending.quizQuestion.rangeAnchor?{...pinned,ranges:Array(hand.n).fill('')}:pinned;
- const effort=SOLVE_EFFORTS[pending.effort]?pending.effort:'standard',url=$('spotLocalSolver')?.value||'';
+ const effort=SOLVE_EFFORTS[pending.effort]?pending.effort:'standard',url=$('spotLocalSolver')?.value||'',preflopEffort=hand.street===0?{preflopEffort:effort}:{};
  return PokerSpot.options(rangedPinned||{rangeMode:$('spotRangeMode')?.value||'auto',ranges:same?spotUI.rangeValues.slice():Array(hand.n).fill(''),iterations:200000,milliseconds:180000,maxInfos:150000,maxJointDeals:small?100000:500000,exactMemoryMB:small?256:1024,preparationMilliseconds:60000,approximate:false,
-  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6}:{},
+  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6,...preflopEffort}:{},
   samples:Math.max(2000,Number(pending.samples)||2000),tolerance:.001,rootSizes:same?String($('spotRootSizes')?.value||'').split(/[\s,;]+/).filter(Boolean).map(Number):[],abstraction:{...(pending.referenceModel?.abstraction||state.abstraction),...(state.spotSizing||{})}});
 }
 // Which solver answers this spot, where it runs and roughly how long it takes (measured 2026-10-28):
@@ -67,7 +91,10 @@ function spotSettings(hand,pending={}){
 //   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer, except
 //   three-way NLH pots, which go to the 3-way solver (tools/multiway-solver): MW3_SECONDS are Mac estimates from
 //   its 4-core Linux measurements (README there), flop, turn and river.
-// - Preflop answers come only from charts, so a line no chart covers has no solve.
+// - Preflop answers come from charts. A no-limit hold'em line no chart covers goes to the preflop spot solver on the
+//   Mac (tools/preflop/spot.cjs): the chart solver again with this line in its tree, about 0.075 s per iteration per
+//   seat on the Mac (1,100 iterations, 0.01 s heads-up), plus, when the spot can reach the flop three-way, 40 sample
+//   flops of the 3-way solver at about 150 s each (Quick 12, Deep 80).
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
@@ -88,20 +115,27 @@ function onDeviceRoute(plan){return plan?.route==='river'||plan?.route==='plo-ri
 function spotPlan(hand){
  if(!hand||hand.done)return null;
  const c=hand.config,live=hand.living(),simple=!c.rules.low&&!c.bounties.some(x=>x>0),small=typeof smallMemoryDevice==='function'&&smallMemoryDevice();
- if(hand.street===0)return{route:'none',street:0,reason:'No chart covers this preflop line yet.'};
+ const pre=hand.street===0;
+ if(pre&&(!simple||c.variant!=='NLH'))return{route:'none',street:0,reason:'No chart covers this preflop line yet, and only no-limit hold\'em preflop lines can be solved.'};
+ if(pre&&preflopFlopPlayers(hand)>3)return{route:'none',street:0,reason:'No chart covers this preflop line, and it can reach the flop four or more ways, which can\'t be solved yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
- const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
+ const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
  if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
-  const base=kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const three=pre&&preflopFlopPlayers(hand)===3?1:0,base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
-  plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
+  plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
   if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user)plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on. Your Mac picks up solves from then on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when your Mac is back.';else if(load>.5)plan.note='Your Mac is busy with other work, so this is slower.';}
  }
  plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
+// How many players you can see the flop with from a preflop spot. In the solver's tree nobody else joins a raised pot
+// by calling, so a raised pot you call has the players already in it plus you; an unraised one also the big blind.
+function preflopFlopPlayers(hand){const n=hand.n,bb=(hand.button+(n===2?1:2))%n,pre=hand.actionLog.filter(a=>a.street===0),raised=pre.some(a=>a.kind==='raise'||a.kind==='bet'),vol=new Set(pre.filter(a=>['call','raise','bet'].includes(a.kind)&&!hand.folded[a.seat]&&a.seat!==hand.actor).map(a=>a.seat));return vol.size+1+(!raised&&!hand.folded[bb]&&bb!==hand.actor&&!vol.has(bb)?1:0);}
+// Mac seconds before thread scaling (see the notes above spotPlan); the effort factor scales the flops.
+function preflopSeconds(hand,three){const n=hand.n,its=three?1100:800;return its*(n===2?.01:.075*n)+three*40*150;}
 // One line for a spot with no solve: what the solve button says instead.
 function unsolvableReason(hand){const plan=spotPlan(hand);return plan?.route==='none'?plan.reason:plan?.blocked||'';}
 function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+' s':seconds<5400?'about '+Math.round(seconds/60)+' min':seconds<172800?'about '+Math.round(seconds/3600)+' h':'about '+Math.round(seconds/86400)+' days';}
@@ -109,7 +143,7 @@ function planTimeText(plan,factor=1){const text=solveTimeText(plan.solve*factor+
 function planPlace(plan){return onDeviceRoute(plan)?'on this device':'on your Mac';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
 // A stand-in flop does not count once your Mac has learned the real one.
-function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand))return true;const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
+function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand)||hand.street===0&&learnedPreflop(hand))return true;if(hand.street===0){noteMissingPreflop(hand);return false;}const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
 // The solve button, offered on every live spot: references show at once and a short solve starts; otherwise it
 // says where the solve runs and how long it takes (with an effort choice on heads-up NLH flops, where the extra
 // time buys a measurably closer solution), or in one line why this spot can't be solved.
@@ -123,7 +157,7 @@ function solveSpotClick(skipReference=false){
  if(block){box.innerHTML='<p>'+esc(block)+'</p><div class="row"><button type="button" class="btn secondary" data-solve-cancel>OK</button></div>';show();return;}
  if(!plan.efforts&&plan.seconds<=10&&!plan.note){analyzeSpot(h,{kind:'inspect',plan});return;}
  const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">Very wide pots can stop without an answer.</p>':'');
- box.innerHTML=plan.efforts?'<p><strong>Solve this flop '+planPlace(plan)+'?</strong> Deeper is closer to the exact strategy.</p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor)+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve this spot '+planPlace(plan)+'?</strong> '+planTimeText(plan).replace(/^./,x=>x.toUpperCase())+'.</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
+ box.innerHTML=plan.efforts?'<p><strong>Solve this '+(plan.kind==='preflop'?'preflop spot':'flop')+' '+planPlace(plan)+'?</strong> '+(plan.kind==='preflop'?'Deeper plays out more sample flops for the three-way pots.':'Deeper is closer to the exact strategy.')+'</p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor)+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve this spot '+planPlace(plan)+'?</strong> '+planTimeText(plan).replace(/^./,x=>x.toUpperCase())+'.</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
  show();
 }
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
@@ -131,7 +165,7 @@ function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
 // bridge's heartbeat: when it was last seen, its threads and how busy the Mac is.
 spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;
-async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;}catch{}watchSolveJobs();}
+async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;}catch{}watchSolveJobs();}
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
 // This device's id, so it cancels only the solves it sent.
@@ -204,7 +238,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   let cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot),task={...pending,hand:hand.clone(),referenceModel:reference.model,referenceSnapshot:reference.snapshot,cacheKey,baseKey,solveOptions:opts};state.pending=task;lock('spotSolve');status('Preparing player ranges and the continuation betting tree…');
   if(!['quiz','quizPrepare'].includes(pending.kind))$(pending.kind==='review'?'reviewFeedback':'playFeedback').innerHTML='<h3>Solving this position…</h3><p id="spotInlineProgress" role="status">Preparing player ranges and legal bet sizes.</p><p class="help">The calculation uses the public history and your cards. You can cancel without changing the hand.</p>';
   if(bundleManifest&&smallMemoryDevice()){await ensurePhoneLibraries(state.hand===hand?hand:task.hand);if(state.pending!==task)return;}
-  const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
+  const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack)||(hand.street===0&&!pending.quizQuestion?learnedPreflop(hand):null);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
   const libraryReference=!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?postflopLibraryReference(hand):null;if(libraryReference&&!(extraAction&&T.matchAction(libraryReference.actions,extraAction)<0&&!libraryReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:libraryReference};state.pending=null;lock();finishAnalysis(libraryReference,task);return;}
   const turnReference=!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?await turnLibraryReference(hand):null;if(state.pending!==task)return;if(turnReference&&!(extraAction&&T.matchAction(turnReference.actions,extraAction)<0&&!turnReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:turnReference};state.pending=null;lock();finishAnalysis(turnReference,task);return;}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const context=await requestSolvedPolicy(hand);if(state.pending!==task)return;if(context?.conditionedRanges?.every(Boolean)){opts.ranges=context.conditionedRanges;opts.rangeOrigin='Conditioned on the preceding exact strategy and public actions';cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
@@ -237,7 +271,7 @@ function handleSpotWorkerMessage(message){
 }
 function activeSpotResult(hand){return spotUI.last&&PokerSpot.publicKey(observedData(hand))===spotUI.last.baseKey?spotUI.last.result:null;}
 // Frequencies with no EVs: a solve on the Mac (TexasSolver or the PLO solver) or a precomputed flop library.
-function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','local-multiway','postflop-library'].includes(q?.method));}
+function spotFrequenciesOnly(result){const q=result?.solve;return !!(result?.supported&&['local-texassolver','local-plo','local-multiway','postflop-library','local-preflop'].includes(q?.method));}
 function spotApproximate(result){const q=result?.solve;return !!(result?.supported&&q?.approximate&&q.method==='sampled-subgame'&&!spotCertified(result));}
 function spotCertified(result){const q=result?.solve;return !!(result?.supported&&q?.exact&&['exact-river','exact-postflop','exact-multiway'].includes(q.method)&&Number.isFinite(q.gap)&&Number.isFinite(q.tolerance)&&q.gap<=q.tolerance&&Number.isFinite(q.handRegret)&&q.handRegret<=(q.handTolerance??q.tolerance));}
 function spotFrequencyHTML(result){
@@ -271,7 +305,7 @@ function spotRangesHTML(result){
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));
- const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-plo'?'Solved with the PLO solver':method==='local-multiway'?'Solved with the 3-way solver':local?'Solved with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
+ const local=spotFrequenciesOnly(result),method=solve?.method,title=method==='postflop-library'?'Precomputed flop strategy':method==='local-preflop'?'Solved preflop on your Mac':method==='local-plo'?'Solved with the PLO solver':method==='local-multiway'?'Solved with the 3-way solver':local?'Solved with TexasSolver':converged?'Finite-game solution reached the accuracy target':approximate?'Approximate solution':'No reliable recommendation available';
  const actionValues=approximate?'<h3>Estimated action values</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>Estimated EV</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest estimate':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' ± '+fmt(1.96*result.se[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':converged?'<h3>Action values from this decision</h3><div class="tableWrap"><table><thead><tr><th>Action</th><th>Frequency</th><th>EV</th><th>Estimated cost</th></tr></thead><tbody>'+result.actions.map((a,i)=>'<tr><td>'+esc(a.label)+(i===result.best?' · highest EV':'')+'</td><td>'+fmt(result.reference[i]*100,1)+'%</td><td>'+signed(result.mean[i],3)+' '+esc(result.units)+'</td><td>'+fmt(result.loss[i],3)+' '+esc(result.units)+'</td></tr>').join('')+'</tbody></table></div>':'';
  return'<section class="spot-solution"><div class="eyebrow">Analysis of the current position</div><h3>'+title+'</h3>'+(converged?'<p><strong>Highest-EV action: '+esc(best.label)+'</strong>'+(frequent!==result.best?' · most frequent: '+esc(result.actions[frequent].label)+' ('+fmt(result.reference[frequent]*100,1)+'%)':'')+'</p>':approximate||local?'<p><strong>Most frequent action: '+esc(result.actions[frequent].label)+'</strong></p>':'')+spotFrequencyHTML(result)+spotRangesHTML(result)+actionValues+(converged&&grade?'<p><strong>Your action cost: '+fmt(grade.estimatedLoss??grade.loss,3)+' '+esc(result.units)+'</strong></p>':'')+'</section>';
 }

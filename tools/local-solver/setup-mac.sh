@@ -37,7 +37,7 @@ curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$BRANCH" -o "$tmp/src.tgz"
 # Only the app's code and the solver folders; built solvers already in $dir stay.
 tar -xzf "$tmp/src.tgz" -C "$tmp"
 src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
-for part in studio river tools/local-solver tools/plo-solver tools/multiway-solver tools/postflop; do mkdir -p "$dir/$part"; cp -R "$src/$part/." "$dir/$part/"; done
+for part in studio river tools/local-solver tools/plo-solver tools/multiway-solver tools/postflop tools/preflop; do mkdir -p "$dir/$part"; cp -R "$src/$part/." "$dir/$part/"; done
 
 say "3/4 Building the solvers"
 if [ -x "$dir/tools/local-solver/TexasSolver/install/console_solver" ] && [ -x "$dir/tools/plo-solver/plo_solver" ]; then
