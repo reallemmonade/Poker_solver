@@ -11,17 +11,19 @@ const ActionBar=(()=>{
   // The most anyone can lose here: your stack or the biggest stack still in against you, whichever is smaller.
   const cover=r=>Math.min(r.allIn,r.effective>0?r.effective:r.allIn);
   const solvedList=r=>[...new Set((Array.isArray(r.solved)?r.solved:[]).map(t=>clamp(t,r)))].sort((a,b)=>a-b);
+  // Postflop sizes as a share of the pot after calling; the solver tree's sizes (1/3, 2/3, 1.5x) read as the tree names them.
+  const share=f=>{const pc=Math.round(f*100);return pc===33?'1/3':pc===66||pc===67?'2/3':pc===150?'1.5x':pc+'%';};
   function presets(r){
     // The sizes the solver has an answer for at this decision, when it has two or more; the slider covers the rest.
     // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
     // big blind or of the bet you face (7.5 vs 2.5 is 3x), postflop a share of the pot.
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
     // Sizes that share a label (two at or above the effective stack, or two that round to the same share) show once, the smaller kept.
-    const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':Math.round(100*(t-r.currentBet)/(r.pot+r.toCall))+'%',target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
+    const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':share((t-r.currentBet)/(r.pot+r.toCall)),target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
     if(sl.length>1)return sl;
-    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop shares of the pot after calling), and All-in
+    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop the solver tree's 1/3, 2/3 and 1.5x pot), and All-in
     // (Pot when a pot limit caps the bet below the all-in).
-    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.25,.4,.66,.88].map(p=>[r.currentBet+p*(r.pot+r.toCall),Math.round(p*100)+'%'])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
+    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
     return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
