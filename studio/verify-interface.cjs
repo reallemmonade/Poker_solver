@@ -77,6 +77,17 @@ function pass(text){console.log('PASS '+text);count++;}
  const fold=a=>{const w=at(a),r=PL.aggregate(spot,flop,w.path,w.k,w.wide);return r.freq[0];},small=[33,30,20,10,5,1],fs=small.map(fold),alpha=b=>b/(b+100);
  assert.ok(fs.every((x,i)=>x>=0&&(!i||x<fs[i-1]))&&small.every((b,i)=>Math.abs(fs[i]-fs[0]*alpha(b)/alpha(33))<1e-6),'Smaller flop bets fold less, by the bluff break-even ratio: '+fs);
  pass('Off-tree flop sizes map pseudo-harmonically between solved sizes, clamp at the ends, jams take the all-in, bigger prices tighten toward MDF and smaller ones widen as an approximate answer');}
+// A flop library answer carries both players' ranges at the node as range text, so the analysis draws their grids:
+// the bettor keeps only the hands that bet (pairs here) and the caller keeps the chart's weights.
+{const PL=require('./postflop-library.js'),PF=require('./preflop.js'),S=require('./spot-solver.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
+ const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),pair=i=>G.Core.handClass(PL.COMBOS[i]).length===2,half=c=>/s$/.test(c)?.5:1;
+ const flop={nodes:[{path:'',player:'oop',actions:['CHECK','BET 66'],table:table(()=>[1,0],2)},{path:'CHECK',player:'ip',actions:['CHECK','BET 66'],table:table(i=>pair(i)?[0,1]:[1,0],2)},{path:'CHECK/BET 66',player:'oop',actions:['FOLD','CALL'],table:table(()=>[.5,.5],2)}]};
+ const lib=PL.validate({format:PL.FORMAT,spots:[{id:'t',label:'Test',chart:{name:'t',key:'t'},pot:200,stack:2000,rangeIp:Object.fromEntries(PF.classes.map(c=>[c,1])),rangeOop:Object.fromEntries(PF.classes.map(c=>[c,half(c)])),flops:{[key]:flop}}]});
+ const h=new G.Hand(G.normalize({variant:'NLH',seats:2,button:0,stacks:[21,21]}),{rng:G.rng(1)});h.act({kind:'call'});h.act({kind:'check'});h.board=board.slice();h.act({kind:'check'});h.act({kind:'bet',target:132});h.holes[1]=G.Core.cards('AsAh');
+ const r=PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h),[ip,oop]=r.solve.rangeAssumptions;
+ assert.deepEqual(S.parseRange(ip.range,{hole:2},[]).map(x=>G.Core.handClass(x.cards)).filter((c,i,a)=>a.indexOf(c)===i).sort(),PF.classes.filter(c=>c.length===2).sort(),'The bettor\'s grid is not their betting range: '+ip.range);
+ assert.ok(/(^|,)AKo(,|$)/.test(oop.range)&&/(^|,)AKs:0\.5(,|$)/.test(oop.range),'The caller\'s grid misses the chart weights: '+oop.range);
+ pass('A flop library answer gives both players\' ranges at the decision, so the analysis draws their grids');}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
 await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');
