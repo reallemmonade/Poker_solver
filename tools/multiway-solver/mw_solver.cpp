@@ -688,7 +688,13 @@ int main(int argc, char** argv) {
     }
     if (it > cfg.maxIt) it = cfg.maxIt;
     if (!cfg.maxIt) ex = exploitability(br, ev);
-    for (int p = 0; p < 3; p++) { vector<float> v(N[p]); walkRoot({p, EV, 0, true}, v.data()); ev[p] = total(p, v.data()); }
+    // Each combo's own value from the start (rootEV): its counterfactual value over the opponents' compatible weight.
+    vector<double> rootEV[3];
+    for (int p = 0; p < 3; p++) {
+      vector<float> v(N[p]); walkRoot({p, EV, 0, true}, v.data()); ev[p] = total(p, v.data());
+      vector<double> ca(N[p]), cb(N[p]); compat(p, (p + 1) % 3, W[(p + 1) % 3].data(), ca.data()); compat(p, (p + 2) % 3, W[(p + 2) % 3].data(), cb.data());
+      rootEV[p].resize(N[p]); for (int h = 0; h < N[p]; h++) { double z = ca[h] * cb[h]; rootEV[p][h] = z > 1e-12 ? v[h] / z : NAN; }
+    }
     struct rusage ru; getrusage(RUSAGE_SELF, &ru);
 #ifdef __APPLE__
     double rss = ru.ru_maxrss / 1048576.;
@@ -704,6 +710,8 @@ int main(int argc, char** argv) {
     for (int p = 0; p < 3; p++) { fprintf(f, "%s[", p ? "," : ""); for (int h = 0; h < N[p]; h++) fprintf(f, "%s\"%s\"", h ? "," : "", comboName(CB[p][h]).c_str()); fprintf(f, "]"); }
     fprintf(f, "],\"weights\":[");
     for (int p = 0; p < 3; p++) { fprintf(f, "%s[", p ? "," : ""); for (int h = 0; h < N[p]; h++) fprintf(f, "%s%.4g", h ? "," : "", W[p][h]); fprintf(f, "]"); }
+    fprintf(f, "],\"rootEV\":[");
+    for (int p = 0; p < 3; p++) { fprintf(f, "%s[", p ? "," : ""); for (int h = 0; h < N[p]; h++) { if (h) fprintf(f, ","); if (isnan(rootEV[p][h])) fprintf(f, "null"); else fprintf(f, "%.2f", rootEV[p][h]); } fprintf(f, "]"); }
     vector<float> reach[3] = {vector<float>(N[0], 1.f), vector<float>(N[1], 1.f), vector<float>(N[2], 1.f)};
     fprintf(f, "],\"tree\":"); writeNode(f, 0, reach); fprintf(f, "}\n"); fclose(f);
     printf("Done: %d iterations, %.4f%% exploitability, %.1f s, peak RSS %.0f MB\n", it, ex, seconds(t0), rss);

@@ -41,6 +41,20 @@ A table matches a raked chart only with the same rake and cap. Any other raked t
 
 **Untrained rows:** packs carry no reach, so the app rebuilds it from the rows. It does not serve a node that the other players reach with zero chart probability, or a hand class that reaches the node under 0.1% of the time; those rows are left at the solver's uniform start or an early iterate.
 
+## One spot no chart covers (spot.cjs)
+
+```
+c++ -O3 -std=c++17 -pthread -o tools/preflop/equity3 tools/preflop/equity3.cpp
+node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--effort quick|standard|deep]
+```
+
+`spot.json` is the app's hand: `{config, actions, actor, heroCards}`. The bridge runs this for **Solve this spot** on a preflop line outside the charts' trimmed tree.
+
+- **Forced line (`tree.cjs force`):** the whole preflop game is solved again with this hand's actions added to the tree where the trimmed rules leave them out. The player to act gets every action: fold, check or call, the level's raise sizes and all-in. Off the line, the usual tree is played, so the ranges that reach the spot come from the same game. An action the equilibrium never takes is played by a sliver (`tremble`) of the hands that continue there. Against limps, the isolation raise is 3.5bb plus 1bb per extra limper.
+- **Three-way pots:** near the line, pots can see the flop three-way (`flop3`, `allin3`). They pay from a three-way equity table of every ordered class triple (`equity3.cpp`, 1,000 deals each, about 3 minutes on 4 cores; the two opponents' cards are independent of each other): share = W/(W₁+W₂+W₃), W = equity^g × a factor per postflop position × playability, × an extra factor for the last raiser. A first pass uses the heads-up settings. Then up to three three-way pots you are in, the likeliest first, are played out by the 3-way solver (`tools/multiway-solver`) on 40 sample flops (48 runouts, 200 iterations) with the first pass's ranges. g, the first and last positions' factors and the raiser's factor are fitted to its EVs by hand class (coordinate descent, weighted by reach), and a second pass solves with the fits.
+- **Four or more players to the flop (`many`):** a rough mean-field model keeps the rest of the tree going (a class's pot share is 1/(1 + the sum over opponents of their average equity odds against it, raised to g)), but it undervalues speculative hands badly: on the button behind two limpers it folded 55 and T9s. A spot where you can reach one of these pots is refused.
+- **Iterations:** Quick, Standard and Deep run 250/500, 300/800 and 400/1,200 iterations (first pass/second pass), and 20, 40 and 80 flops. A 6-max forced tree has about 1,400 nodes, roughly 0.7 s per iteration on one core here.
+
 ## PLO
 
 PLO charts use the same solver over hand groups instead of the 169 NLH classes:

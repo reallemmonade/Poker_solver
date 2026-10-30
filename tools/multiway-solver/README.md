@@ -87,7 +87,7 @@ memory_limit_mb 12000
 output result.json
 ```
 
-The solver prints `Iter: N` and `Total exploitability X precent` lines, which the bridge reads for progress, and writes the current street's tree: for every decision, each combo's average strategy, its EV per action (chips from the street's start, net of what it put in, so the three EVs sum to the pot), and its reach. `mw_solver --eval` ranks `hole board` lines from stdin.
+The solver prints `Iter: N` and `Total exploitability X precent` lines, which the bridge reads for progress, and writes the current street's tree: for every decision, each combo's average strategy, its EV per action (chips from the street's start, net of what it put in, so the three EVs sum to the pot), and its reach. `rootEV` gives each combo's value from the start of the solve for each player, in the same units (the preflop spot solver fits three-way pots to it). `mw_solver --eval` ranks `hole board` lines from stdin.
 
 ## Precomputing (library)
 
