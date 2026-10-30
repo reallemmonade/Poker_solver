@@ -175,7 +175,8 @@
  // for the analysis range grids. Empty when the chart has no path to the node.
  function chartRanges(pack,node,hand,relative,index,size,name){
   const steps=pathOf(pack,node);if(!steps)return{};const live=hand.living(),source='Imported preflop chart: '+name,rangeAssumptions=[];
-  for(const seat of live){const w=classes.map((_,i)=>{let r=1;for(const [anc,k]of steps)if(anc.seat===relative(seat)){const row=rowAt(pack,anc,i);r*=row?row[k]:0;}return r;}),peak=Math.max(...w);if(peak>0)rangeAssumptions.push({seat,range:classRangeText(w.map(x=>x/peak)),source});}
+  // A player still to act for the first time holds every hand, so only the actor's grid is drawn for them.
+  for(const seat of live){if(seat!==hand.actor&&!steps.some(([anc])=>anc.seat===relative(seat)))continue;const w=classes.map((_,i)=>{let r=1;for(const [anc,k]of steps)if(anc.seat===relative(seat)){const row=rowAt(pack,anc,i);r*=row?row[k]:0;}return r;}),peak=Math.max(...w);if(peak>0)rangeAssumptions.push({seat,range:classRangeText(w.map(x=>x/peak)),source});}
   const classMix={};classes.forEach((c,i)=>{const row=rowAt(pack,node,i);if(!row)return;const m=Array(size).fill(0);row.forEach((p,k)=>{if(index[k]>=0)m[index[k]]+=p;});const t=m.reduce((a,b)=>a+b,0);if(t>0)classMix[c]=m.map(x=>Math.round(x/t*1000)/1000);});
   return{rangeAssumptions,handMix:{seat:hand.actor,classes:classMix}};
  }
