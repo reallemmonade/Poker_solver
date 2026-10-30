@@ -88,7 +88,8 @@ function initInterface(){
   const onMac=/Macintosh/.test(navigator.userAgent)&&navigator.maxTouchPoints<2;
   setup.append(onMac?create('ol','help','<li>Paste in Terminal (about 10 minutes the first time).<pre class="ui-solver-cmd"><code>'+esc(cmd)+'</code></pre>'+button('Copy command','id="uiSolverCopy"')+'</li><li>Set <b>Solver on your Mac</b> to <b>On</b>.</li>'):create('p','help','Open this app on your Mac to set it up.'));
   const wrap=create('div','field wide');wrap.append(setup);$('spotLocalSolver').closest('.field').after(wrap);const copy=$('uiSolverCopy');if(copy)copy.onclick=()=>navigator.clipboard?.writeText(cmd).then(()=>{copy.textContent='Copied';setTimeout(()=>copy.textContent='Copy command',2000);},()=>{});}
- const exportRow=create('div','row gap');exportRow.append($('spotExport'));analysisPane.append(exportRow);
+ // Solves already save to Saved spots and sync to your devices; Library → Transfer backs them up as a file.
+ $('spotExport').remove();
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones
  // the three panes sit side by side and you swipe between them, so the table screen holds only the game.
  const historyPane=create('aside','ui-history-pane');historyPane.id='uiHistoryPane';historyPane.setAttribute('aria-label','Hand history and session');
