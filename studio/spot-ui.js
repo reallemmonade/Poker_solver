@@ -134,7 +134,7 @@ function spotPlan(hand){
    if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
    else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
    else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
-  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';else if(load>.5)plan.note='Your Mac is busy, so this is slower.';}
+  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
  }
  plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
@@ -167,6 +167,10 @@ function solveSpotClick(skipReference=false){
  box.innerHTML=plan.efforts?'<p><strong>Solve '+planPlace(plan)+'</strong></p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve '+planPlace(plan)+'</strong> · '+planTimeText(plan)+'</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
  show();
 }
+// The solve choice shown straight in the analysis panel when the spot has no stored answer and the solve isn't instant:
+// where it runs and how long, with one button per effort.
+function solvePromptHTML(plan){return'<div class="solve-inline"><p><strong>Solve '+planPlace(plan)+'</strong>'+(plan.efforts?'':' · '+planTimeText(plan))+'</p>'+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">May stop without an answer.</p>':'')+'<div class="row">'+(plan.efforts?Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+(state.busy?' disabled':'')+'>'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join(''):'<button type="button" class="btn" data-inline-solve="standard"'+(state.busy?' disabled':'')+'>Solve</button>')+'</div></div>';}
+document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve});});
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
