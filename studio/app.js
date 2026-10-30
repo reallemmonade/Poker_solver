@@ -68,11 +68,11 @@ function playBusy(){return state.busy&&!softJob()||liveSession.passive||liveSess
 // A custom-size error shows by the input and in the status line until the next action or hand.
 function customBetError(message){state.customError=message;status(message,true);$('legalHint').textContent=message;}
 function clearCustomBetError(){if(state.customError&&$('status').textContent===state.customError)status('');state.customError=null;}
-// Solver help: the analysis pane and solved size presets. A hand where any of your decisions had it on, or every card was
-// revealed, is marked assisted; only unassisted hands count toward leaks and insights.
-function solverHelpOn(){return $('solverHelp')?$('solverHelp').checked:true}
-function markAssisted(help){const h=state.hand;if(h&&!h.done&&($('reveal').checked||$('controlAll').checked||help&&h.actor===state.hero)){h.assisted=true;saveLiveSession();}}
-function chooseAction(action){if(!state.hand||state.hand.done||playBusy()||tableView.playing)return;clearCustomBetError();if(state.hand.actor===state.hero&&(solverHelpOn()||$('reveal').checked||$('controlAll').checked))state.hand.assisted=true;const hand=state.hand,before=hand.clone(),baseKey=PokerSpot.publicKey(observedData(hand)),chart=hand.street===0?preflopReference(hand):null,solved=activeSpotResult(hand)||(chart?.supported?chart:null),task=state.pending?.automatic&&state.pending.baseKey===baseKey?state.pending:null,item={kind:'play',action,background:true,hand:before,live:hand,baseKey};
+// A hand is assisted, and left out of leaks and insights, once the analysis was on screen with a strategy in it while it
+// was your turn (studioInterface.analysisOnScreen), or cards were revealed or you controlled every seat. Looking after
+// you act or after the hand, or auto-analyze running unseen, keeps it counted.
+function markAssisted(){const h=state.hand;if(h&&!h.done&&!h.assisted&&($('reveal').checked||$('controlAll').checked||h.actor===state.hero&&typeof studioInterface!=='undefined'&&studioInterface.analysisOnScreen?.())){h.assisted=true;saveLiveSession();}}
+function chooseAction(action){if(!state.hand||state.hand.done||playBusy()||tableView.playing)return;clearCustomBetError();if(state.hand.actor===state.hero)markAssisted();const hand=state.hand,before=hand.clone(),baseKey=PokerSpot.publicKey(observedData(hand)),chart=hand.street===0?preflopReference(hand):null,solved=activeSpotResult(hand)||(chart?.supported?chart:null),task=state.pending?.automatic&&state.pending.baseKey===baseKey?state.pending:null,item={kind:'play',action,background:true,hand:before,live:hand,baseKey};
  applyPlayAction(action);
  // The automatic analysis is for a decision that is gone, so stop it without a 'stopped' message.
  if(!$('gradeEvery').checked){if(task){if(task.dispatched&&task.solveOptions?.localSolver){task.silentStop=true;state.worker?.postMessage({type:'stop'});}else{if(task.dispatched)dropSpotWorker();state.pending=null;$('progress').style.width='0%';lock();}}return;}
@@ -125,7 +125,7 @@ function solvedSizes(h){const m=solvedSizeMemo,libs=postflopLibrary.libraries.re
 function renderActionBar(h,q,l,canPlay){
   const box=$('playActions'),find=kind=>q.actions.find(a=>a.kind===kind)||G.modelActions(h).find(a=>a.kind===kind),toCall=G.bb(l.callCost);
   if(h.actor===state.hero&&preActionSeat(h)){const kind=ActionBar.take(preActionKey(h),{check:l.check,toCall:G.bb(l.callCost)}),action=kind&&find(kind);if(action){setTimeout(()=>{if(state.hand===h&&!h.done&&!playBusy())chooseAction(action);else renderPlay();},0);return true;}}
-  const raise=l.canRaise?{solved:solverHelpOn()||$('controlAll').checked?solvedSizes(h):[],standard:standardSize(h),kind:h.currentBet?'raise':'bet',min:G.bb(Math.min(l.minRaiseTo,l.maxRaiseTo)),max:G.bb(l.maxRaiseTo),allIn:G.bb(l.allInTo),effective:G.bb(Math.max(0,...h.living().filter(i=>i!==h.actor).map(i=>h.streetPaid[i]+h.stacks[i]))),pot:G.bb(h.pot),currentBet:G.bb(h.currentBet),toCall,preflop:h.street===0,bb:G.bb(G.units(h.config.bb))}:null;
+  const raise=l.canRaise?{solved:solvedSizes(h),standard:standardSize(h),kind:h.currentBet?'raise':'bet',min:G.bb(Math.min(l.minRaiseTo,l.maxRaiseTo)),max:G.bb(l.maxRaiseTo),allIn:G.bb(l.allInTo),effective:G.bb(Math.max(0,...h.living().filter(i=>i!==h.actor).map(i=>h.streetPaid[i]+h.stacks[i]))),pot:G.bb(h.pot),currentBet:G.bb(h.currentBet),toCall,preflop:h.street===0,bb:G.bb(G.units(h.config.bb))}:null;
   ActionBar.turn(box,{key:preActionKey(h)+':'+h.actor+':'+h.actionLog.length,fold:l.fold,check:l.check,toCall,callAllIn:l.callCost===h.stacks[h.actor],raise,disabled:playBusy()||!canPlay,
     note:!l.reopened&&l.toCall>0?'Raising is closed: the all-in since your last action was smaller than a full raise, so it did not reopen the betting.':'',
     onFold:()=>chooseAction(find('fold')),onCheck:()=>chooseAction(find('check')),onCall:()=>chooseAction(find('call')),
