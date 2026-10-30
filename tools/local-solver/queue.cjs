@@ -39,7 +39,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta('macsolver',{seen:Date.now(),threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta('macsolver',{seen:Date.now(),features:['preflop'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
    for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
