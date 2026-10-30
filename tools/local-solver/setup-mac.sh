@@ -60,6 +60,7 @@ cat > "$plist" <<EOF
  <key>WorkingDirectory</key><string>$dir</string>
  <key>RunAtLoad</key><true/>
  <key>KeepAlive</key><true/>
+ <key>AbandonProcessGroup</key><true/>
  <key>StandardOutPath</key><string>$log</string>
  <key>StandardErrorPath</key><string>$log</string>
 </dict></plist>

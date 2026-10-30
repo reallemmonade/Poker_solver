@@ -12,7 +12,7 @@ const citrusAccount=(()=>{
  let account=read(ACCOUNT,null);if(!account?.token||!account?.user?.id)account=null;
  const uid=()=>account?.user.id,key=name=>name+':'+uid();
  const sync={status:account?'waiting':'signedOut',at:read(account?key('citrus-sync-at-v1'):'',0),timer:0,running:null,again:false,note:''};
- const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-)/.test(id)||id==='macsolver'||id==='liveSession');
+ const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-|preflopwant-)/.test(id)||id==='macsolver'||id==='macupdate'||id==='liveSession');
  function dbName(){const owner=read(OWNER,null);if(account)return owner===account.user.id?LEGACY_DB:LEGACY_DB+'-'+account.user.id;return owner?LEGACY_DB+'-guest':LEGACY_DB;}
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){

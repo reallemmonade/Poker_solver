@@ -26,9 +26,21 @@ let job=null,finished=null;
 const busy=()=>!!job&&!job.learning;
 const learnedCount=()=>{try{return (learn.library()?.spots||[]).reduce((n,s)=>n+Object.keys(s.flops).length,0);}catch{return 0;}};
 async function stopLearning(){const j=job;if(!j?.learning)return;j.cancelled=true;j.child.kill('SIGKILL');await j.closed;}
+// Updating from the app (POST /update here, or a 'macupdate' row from your phone): the same setup-mac.sh as the first
+// install, in its own process group so it outlives the restart it ends with. Its output goes to
+// ~/Library/Logs/citrus-poker-update.log.
+const UPDATE_CMD='curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash',canUpdate=process.platform==='darwin';let updating=0;
+function selfUpdate(){
+ if(!canUpdate)throw Error('Updating from the app works on a Mac only.');
+ if(busy())throw Error('A solve is running on this computer. Update once it ends.');
+ if(Date.now()-updating<15*60e3)return;updating=Date.now();
+ const log=path.join(os.homedir(),'Library','Logs','citrus-poker-update.log'),fd=fs.openSync(log,'a');
+ try{spawn('/bin/bash',['-c',UPDATE_CMD],{detached:true,stdio:['ignore',fd,fd],env:{...process.env,PATH:'/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'}}).unref();}finally{fs.closeSync(fd);}
+ console.log('Updating the solver. Log: '+log);
+}
 const queue=createQueue({port:args.port,threads:args.threads,busy,status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
  learn:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),
- learnPreflop:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning});
+ learnPreflop:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning,update:canUpdate&&selfUpdate});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}
@@ -114,10 +126,11 @@ function solvePreflop(spec,learning=false){
 const server=http.createServer((req,res)=>{
  if(req.headers.origin&&!originOK(req.headers.origin))return send(req,res,403,{error:'This page is not allowed to use the local solver. Add its origin to RANGE_LAB_ORIGINS.'});
  if(req.method==='OPTIONS'){res.writeHead(204,headers(req));return res.end();}
- if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),mwSolver:fs.existsSync(args['mw-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy(),learning:!!job?.learning,learnedFlops:learnedCount(),spot:true,preflop:true,linkedUser:queue.user,version:1});
+ if(req.method==='GET'&&req.url==='/health')return send(req,res,200,{ok:true,update:canUpdate,solver:fs.existsSync(args.solver),ploSolver:fs.existsSync(args['plo-solver']),mwSolver:fs.existsSync(args['mw-solver']),threads:args.threads,memoryMB:args.memory,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy(),learning:!!job?.learning,learnedFlops:learnedCount(),spot:true,preflop:true,linkedUser:queue.user,version:1});
  // The app on this computer links the bridge to the signed-in account, so solves queued from other devices run here.
  if(req.method==='POST'&&req.url==='/link'){let body='';req.on('data',d=>{body+=d;if(body.length>4000)req.destroy();});req.on('end',()=>{try{queue.link(JSON.parse(body));send(req,res,200,{ok:true});}catch(error){send(req,res,400,{error:error.message});}});return;}
  if(req.method==='GET'&&req.url==='/status')return send(req,res,200,busy()?{busy:true,iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}}:{busy:false});
+ if(req.method==='POST'&&req.url==='/update'){try{selfUpdate();send(req,res,202,{updating:true});}catch(error){send(req,res,409,{error:error.message});}return;}
  if(req.method==='POST'&&req.url==='/cancel'){if(!busy())return send(req,res,200,{ok:true});const j=job;j.cancelled=true;j.child.kill('SIGKILL');j.closed.then(()=>send(req,res,200,{ok:true}));return;}
  // A background solve's outcome, collected once: 202 while it runs.
  // The flops this computer learned, as one postflop library for the app here.

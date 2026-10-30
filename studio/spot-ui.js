@@ -8,7 +8,7 @@ function linkLocalBridge(url,health){const link=typeof citrusAccount!=='undefine
 // to be down, the solve button is not offered for spots that need it.
 const localBridge={up:null,checked:0};
 async function checkLocalBridge(){const el=$('spotLocalStatus'),url=$('spotLocalSolver')?.value;if(!url){localBridge.up=null;if(el)el.textContent='';return null;}
- try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3000),h=await fetch(url.replace(/\/$/,'')+'/health',{signal:ctl.signal}).then(r=>r.json()).finally(()=>clearTimeout(t));localBridge.up=!!h.solver;localBridge.spot=!!h.spot;localBridge.preflop=!!h.preflop;localBridge.threads=Number(h.threads)||0;localBridge.load=Number(h.load)||0;linkLocalBridge(url,h);loadLearnedFlops(url,h);if(el)el.textContent=h.solver?'TexasSolver is running on this computer'+(h.threads?' with '+h.threads+' threads':'')+'. Big heads-up flop, turn and river spots go to it.':'The bridge is running, but TexasSolver is not built. Run tools/local-solver/install-mac.sh.';}
+ try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3000),h=await fetch(url.replace(/\/$/,'')+'/health',{signal:ctl.signal}).then(r=>r.json()).finally(()=>clearTimeout(t));localBridge.up=!!h.solver;localBridge.spot=!!h.spot;localBridge.preflop=!!h.preflop;localBridge.update=!!h.update;localBridge.threads=Number(h.threads)||0;localBridge.load=Number(h.load)||0;linkLocalBridge(url,h);loadLearnedFlops(url,h);if(el)el.textContent=h.solver?'TexasSolver is running on this computer'+(h.threads?' with '+h.threads+' threads':'')+'. Big heads-up flop, turn and river spots go to it.':'The bridge is running, but TexasSolver is not built. Run tools/local-solver/install-mac.sh.';}
  catch{localBridge.up=false;if(el)el.textContent='TexasSolver is not running on this computer. Start it with tools/local-solver/start.command.';}
  localBridge.checked=Date.now();spotUI.last=null;return localBridge.up;}
 // Flops the library is missing: a heads-up flop whose preflop line has a library spot but whose flop was never solved
@@ -128,9 +128,13 @@ function spotPlan(hand){
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
   plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
   // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.
-  const stale='Your Mac\'s solver needs an update to solve preflop lines. Open Settings → Solver settings → Set up the solver on a Mac and run the command there again.';
-  if(pre&&(bridge?!localBridge.preflop:mac?.seen&&!(mac.features||[]).includes('preflop')))plan.blocked=stale;
-  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user)plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on. Your Mac picks up solves from then on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when your Mac is back.';else if(load>.5)plan.note='Your Mac is busy with other work, so this is slower.';}
+  // A bridge that can update itself does it from a tap, here or on your phone; an older one shows the setup command
+  // on the Mac, and the phone sends you there.
+  if(pre&&(bridge?!localBridge.preflop:mac?.seen&&!(mac.features||[]).includes('preflop'))){const u=spotUI.macUpdate,self=bridge?localBridge.update:(mac.features||[]).includes('update');
+   if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
+   else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
+   else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
+  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';else if(load>.5)plan.note='Your Mac is busy, so this is slower.';}
  }
  plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
@@ -159,16 +163,25 @@ function solveSpotClick(skipReference=false){
  const block=job&&(jobPending(job)||job.status==='done')?jobText(job):plan.route==='none'?plan.reason:plan.blocked;
  if(block){box.innerHTML='<p>'+esc(block)+'</p><div class="row"><button type="button" class="btn secondary" data-solve-cancel>OK</button></div>';show();return;}
  if(!plan.efforts&&plan.seconds<=10&&!plan.note){analyzeSpot(h,{kind:'inspect',plan});return;}
- const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">Very wide pots can stop without an answer.</p>':'');
- box.innerHTML=plan.efforts?'<p><strong>Solve this '+(plan.kind==='preflop'?'preflop spot':'flop')+' '+planPlace(plan)+'?</strong> '+(plan.kind==='preflop'?'Deeper plays out more sample flops for the three-way pots.':'Deeper is closer to the exact strategy.')+'</p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor)+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve this spot '+planPlace(plan)+'?</strong> '+planTimeText(plan).replace(/^./,x=>x.toUpperCase())+'.</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
+ const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">May stop without an answer.</p>':'');
+ box.innerHTML=plan.efforts?'<p><strong>Solve '+planPlace(plan)+'</strong></p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve '+planPlace(plan)+'</strong> · '+planTimeText(plan)+'</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
  show();
 }
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
 // bridge's heartbeat: when it was last seen, its threads and how busy the Mac is.
-spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;
-async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;}catch{}watchSolveJobs();}
+spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;spotUI.macUpdate=null;
+// Updating the Mac's solver: straight to the bridge on the Mac itself, else a 'macupdate' row it picks up within the sync time.
+const UPDATE_MS=10*60e3;
+async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.value;
+ if(localBridge.up&&url){try{const r=await fetch(url.replace(/\/$/,'')+'/update',{method:'POST'}),b=await r.json().catch(()=>({}));spotUI.macUpdate=r.ok?{status:'updating',at}:{status:'failed',at,message:b.error||'Error '+r.status+'.'};}catch(e){spotUI.macUpdate={status:'failed',at,message:e.message};}
+  if(spotUI.macUpdate.status==='updating')setTimeout(()=>checkLocalBridge().then(()=>{if(localBridge.preflop)spotUI.macUpdate=null;if(state.hand)renderPlay();}),90e3);}
+ else{spotUI.macUpdate={status:'wanted',at};try{await dbPut('meta',{id:'macupdate',value:spotUI.macUpdate});}catch{}citrusAccount.run();watchSolveJobs();}
+ spotUI.last=null;if(state.hand)renderPlay();}
+async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;const up=rows.find(r=>r.id==='macupdate')?.value;if(up&&typeof up==='object'&&(up.at||0)>=(spotUI.macUpdate?.at||0))spotUI.macUpdate=up;
+  // Done once the Mac's heartbeat shows the new solver.
+  if(spotUI.macUpdate&&(spotUI.mac?.features||[]).includes('preflop')&&(spotUI.mac.seen||0)>(spotUI.macUpdate.at||0))spotUI.macUpdate=null;}catch{}watchSolveJobs();}
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
 // This device's id, so it cancels only the solves it sent.
@@ -208,7 +221,7 @@ async function sendToMac(task,observed,opts,extraAction){
 }
 // While a solve is out on the Mac, sync every 20 seconds, and every 10 while it runs, so its progress stays
 // current and its answer shows soon after it lands.
-function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()];if(!jobs.some(jobPending))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
+function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()],u=spotUI.macUpdate;if(!jobs.some(jobPending)&&!(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
 // A finished Mac solve for the live spot shows as soon as it syncs in.
 async function deliverSolveJob(force=false){
  const h=state.hand,j=spotJob(h);if(!j||j.status!=='done'||state.busy||activeSpotResult(h))return;if(!force&&spotUI.delivered===j.rowId)return;spotUI.delivered=j.rowId;

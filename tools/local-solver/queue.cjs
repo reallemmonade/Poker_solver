@@ -28,8 +28,8 @@ function progressOf(job,s,first){
  const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
  return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
 }
-function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},log=console.log}){
- let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null;const jobs=new Map(),wants=new Map();
+function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log}){
+ let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null,updateWant=null;const jobs=new Map(),wants=new Map();
  // Open jobs and wanted flops are kept with the cursor: a restart pulls only what changed since, so they would be lost.
  const open=(m,...states)=>[...m].filter(([,v])=>states.includes(v.status));
  try{const {jobs:j,wants:w,...saved}=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;for(const [id,v]of Array.isArray(j)?j:[])jobs.set(id,v);for(const [id,v]of Array.isArray(w)?w:[])wants.set(id,v);}}catch{}
@@ -39,10 +39,10 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta('macsolver',{seen:Date.now(),features:['preflop'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta('macsolver',{seen:Date.now(),features:update?['preflop','update']:['preflop'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
-   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
+   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
    cursor=page.cursor;if(!page.more)break;}
   save();
  }
@@ -77,7 +77,10 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   if(!link||running)return;
   running=(async()=>{try{
    if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[heartbeat()]});}
-   await pull();if(!busy())await runNext();
+   await pull();
+   // An update asked for from your phone runs once nothing is solving; this bridge restarts with it.
+   if(updateWant?.status==='wanted'&&!busy()){const {t,...w}=updateWant;updateWant=null;let row={...w,status:'updating',startedAt:Date.now()};try{if(!update)throw Error('This computer can\'t update from the app.');update();log('Updating, as asked from your account.');}catch(e){row={...w,status:'failed',message:e.message};}await api('POST','/api/sync',{rows:[meta('macupdate',row,(t||Date.now())+1)]});if(row.status==='updating')return;}
+   if(!busy())await runNext();
    if(!busy()&&!learning&&![...jobs.values()].some(j=>j.status==='queued'||j.status==='running'))learnNext();
   }catch(e){if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
