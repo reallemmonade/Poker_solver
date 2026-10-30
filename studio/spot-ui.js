@@ -216,17 +216,21 @@ function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+'
 spotUI.shownProgress=new Map();
 function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left,stale:j.startedAt>0&&now-j.startedAt>120000,at:j.startedAt};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,run=j.rowId+' '+j.startedAt,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(run)||0));spotUI.shownProgress.set(run,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
 function jobState(j){
- if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
+ if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved.'};
  if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
-  return{text:g.phase==='preparing'?'Your Mac is preparing the ranges…':'Solving on your Mac · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),p:g.p};}
+  return g.phase==='preparing'?{text:'Preparing ranges…',label:'Preparing',time:'',p:g.p}:{text:'Solving · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),label:'Solving '+Math.floor(g.p*100)+'%',time:g.left>=5?solveTimeText(g.left).replace('about ',''):'almost done',p:g.p};}
  const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac;
  if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
  if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
- return{text:'Queued on your Mac · '+solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60)),p:0};
+ const wait=solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60));return{text:'Queued · '+wait,label:'Queued',time:wait.replace('about ','~'),p:0,queued:true};
 }
 function jobText(j){return jobState(j).text;}
-function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key);return'<div class="notice" id="solveJobNotice">'+(jobPending(j)?'<button type="button" class="ui-text-button solve-cancel" data-cancel-job="'+esc(id)+'">Cancel</button>':'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
+// A pending solve takes the Solve button's place (.solve-job hides #analyze): the bar fills as it runs, ✕ cancels,
+// striped while queued. Anything that needs words (waiting for the Mac, no progress reports) stays a notice.
+function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
+ if(jobPending(j)&&st.label)return'<div class="solve-job'+(st.queued?' queued':'')+'" id="solveJobNotice" role="progressbar" aria-label="'+esc(st.text)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div class="solve-job-fill" style="width:'+(st.queued?100:Math.max(2,Math.min(100,st.p*100))).toFixed(1)+'%"></div><span>'+esc(st.label)+'</span><span>'+esc(st.time)+'</span>'+cancel()+'</div>';
+ return'<div class="notice'+(jobPending(j)?' solve-job-wait':'')+'" id="solveJobNotice">'+(jobPending(j)?cancel('Cancel'):'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
 setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
 async function sendToMac(task,observed,opts,extraAction){
  if(!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
