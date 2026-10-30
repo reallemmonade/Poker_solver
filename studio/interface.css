@@ -128,5 +128,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 /* Shared action palette (actionTones in references-ui.js): fold, check/call, bets small to large, all-in. */
 :root{--act-fold:#86a3c0;--act-passive:#6dba86;--act-bet1:#f6cd6b;--act-bet2:#ee9a45;--act-bet3:#e0703a;--act-allin:#c4483a}
 .range-grid span.mixed{color:#17130d}
+/* Your own hand's cell: the frequency bars above are for this exact hand, the grid for the whole range. */
+.range-grid span[data-hand]{box-shadow:0 0 0 2px var(--ink);position:relative;z-index:1}
 .action-key{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;margin:0 0 6px;color:var(--muted)}
 .action-key span{display:inline-flex;align-items:center;gap:4px}.action-key i{width:10px;height:10px;border-radius:2px;display:inline-block}
