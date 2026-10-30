@@ -71,10 +71,10 @@ function initInterface(){
  const compatibility=create('div','hide');compatibility.hidden=true;compatibility.append($('tableTitle'),$('samples'));tablePane.append(compatibility);
  play.querySelector('.table-legend')?.remove();playTop.remove();
  analysisPane.append(create('div','ui-analysis-title','<h2>This decision</h2><button type="button" class="ui-analysis-toggle" id="uiAnalysisToggle" aria-expanded="true">Hide</button>'),create('div','ui-analysis-controls'));
- // Hide keeps the analysis off screen so your hands count toward leaks; it is remembered on this device. A device that had
- // the old "Solver help while I play" setting off starts hidden.
+ // Hide keeps the analysis off screen, so the decisions you make aren't counted as peeks; it is remembered on this device.
+ // Wide screens, where the pane sits beside the table, start hidden, and so does a device that had Solver help off.
  {const key='citrus-analysis-hidden',toggle=$('uiAnalysisToggle'),set=hidden=>{analysisPane.classList.toggle('ui-analysis-hidden',hidden);toggle.textContent=hidden?'Show':'Hide';toggle.setAttribute('aria-expanded',String(!hidden));};let stored=null;try{stored=localStorage.getItem(key);}catch{}
-  if(stored!==null)set(stored==='1');else dbAll('meta').then(rows=>{if(rows.find(r=>r.id==='solverHelp')?.value===false)set(true);}).catch(()=>{});
+  if(stored!==null)set(stored==='1');else if(!matchMedia('(max-width:800px),(max-width:1000px) and (pointer:coarse)').matches)set(true);else dbAll('meta').then(rows=>{if(rows.find(r=>r.id==='solverHelp')?.value===false)set(true);}).catch(()=>{});
   toggle.onclick=()=>{const hidden=!analysisPane.classList.contains('ui-analysis-hidden');set(hidden);try{localStorage.setItem(key,hidden?'1':'0');}catch{}markAssisted();};}
  const controls=analysisPane.querySelector('.ui-analysis-controls');controls.append($('autoAnalyze').closest('label'),$('analyze'),$('spotStop'));const confirm=create('div','spot-confirm hide');confirm.id='spotConfirm';controls.after(confirm);$('autoAnalyze').closest('label').lastChild.textContent=' Auto-analyze';
  const grading=details('Decision recording'),gradeLabel=$('gradeEvery').closest('label');gradeLabel.lastChild.textContent=' Record an assessment when I act (runs in the background; play continues)';grading.append(gradeLabel);settingsDialog.querySelector('.ui-dialog-content').prepend(grading);
@@ -89,7 +89,7 @@ function initInterface(){
   setup.append(onMac?create('ol','help','<li>Paste in Terminal (about 10 minutes the first time).<pre class="ui-solver-cmd"><code>'+esc(cmd)+'</code></pre>'+button('Copy command','id="uiSolverCopy"')+'</li><li>Set <b>Solver on your Mac</b> to <b>On</b>.</li>'):create('p','help','Open this app on your Mac to set it up.'));
   const wrap=create('div','field wide');wrap.append(setup);$('spotLocalSolver').closest('.field').after(wrap);const copy=$('uiSolverCopy');if(copy)copy.onclick=()=>navigator.clipboard?.writeText(cmd).then(()=>{copy.textContent='Copied';setTimeout(()=>copy.textContent='Copy command',2000);},()=>{});}
  // Solves already save to Saved spots and sync to your devices; Library → Transfer backs them up as a file.
- $('spotExport').remove();
+ compatibility.append($('spotExport'));
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones
  // the three panes sit side by side and you swipe between them, so the table screen holds only the game.
  const historyPane=create('aside','ui-history-pane');historyPane.id='uiHistoryPane';historyPane.setAttribute('aria-label','Hand history and session');
@@ -106,7 +106,7 @@ function initInterface(){
  let seenFeedback='';new MutationObserver(()=>{const text=$('playFeedback').textContent.trim();if(text&&text!==seenFeedback){seenFeedback=text;if(!/^Choose an action\./.test(text)&&swiping()&&ui.pane!==2)paneDots.querySelector('[data-pane="2"]').classList.add('news');}}).observe($('playFeedback'),{childList:true,subtree:true,characterData:true});
  ui.showPane=showPane;
  // The analysis is on screen when Play shows the pane (not hidden, and swiped to on phones) with a strategy in it, or
- // Study has the live hand open. markAssisted asks this whenever the screen or the hand changes.
+ // Study has the live hand open. markAssisted asks this whenever the screen or the hand changes, to mark peeks.
  ui.analysisOnScreen=()=>{if(document.hidden||analysisPane.classList.contains('ui-analysis-hidden'))return false;if(ui.area==='study')return true;if(ui.area!=='play'||!analysisPane.offsetParent||swiping()&&ui.pane!==2)return false;return[...$('currentPolicy').children].some(n=>!n.matches('.notice,.waiting-turn'));};
  document.addEventListener('visibilitychange',()=>markAssisted());
  const practiceTopics=details('Change topics');practiceTopics.id='uiPracticeTopics';const quizTrainingPanel=document.querySelector('.quiz-training');quizTrainingPanel.before(create('div','ui-topic-summary','<strong id="uiTopicSummary"></strong>'+button('Change topics','id="uiTopicsButton"')));practiceTopics.append(quizTrainingPanel);$('quiz').insertBefore(practiceTopics,$('quizStatus'));
