@@ -76,7 +76,9 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
  .ui-app .ui-live-grid .ui-table-pane .felt{margin-left:clamp(8px,3.5vw,16px);margin-right:clamp(8px,3.5vw,16px)}
  .ui-app .ui-live-grid .ui-table-pane>#playActions{margin-top:auto}
  /* Short phones (iPhone SE): the felt gives up height so Fold, Call and Raise stay above the bottom navigation. */
- @media(max-height:700px){.ui-app .ui-live-grid .ui-table-pane .felt{height:max(180px,calc(100% - var(--dock,140px) - 10px));margin:6px clamp(8px,3.5vw,16px) 4px}}
+ @media(max-height:700px){.ui-app .ui-live-grid .ui-table-pane .felt{height:max(180px,calc(100% - var(--dock,140px) - 10px));margin:6px clamp(8px,3.5vw,16px) 4px}
+  /* That felt is too short to keep the board in the middle: it rides higher so the pot fits between it and the hero's cards. */
+  .ui-app .ui-live-grid .felt-logo,.ui-app .ui-live-grid .board-area{top:41%}.ui-app .ui-live-grid .table-pot{top:59%}}
  .ui-app .ui-live-grid #playActions:not(:empty),.ui-app .ui-live-grid #playActions:empty~.ui-session-line{position:static;box-shadow:none;padding:4px 0}
 }
 /* Landscape phones hide the bottom navigation: the screens take the full height below the pane dots, and the felt fills its column. */
