@@ -65,9 +65,12 @@ class Solver{
   // 3-bet and bigger flop pots may use their own realization (tree.cjs reraised).
   const r=this.o.reraised;const fitted=f=>matrices({...this.o,...f},{...this.m,play:f.playTable?this.m.classes.map((c,i)=>f.playTable[c]??this.m.play[i]):this.m.play});
   this.M3=r&&this.m.variant==='NLH'?fitted(r):this.M;
-  // Flop lines with a fit of their own (tree.cjs spots) carry their matrices on the terminal.
-  const spots=this.m.variant==='NLH'&&this.o.spots;this.spotCount=0;
-  const each=node=>{if(node.type==='decision'){node.children.forEach(each);return;}if(node.type!=='fold'&&spots[node.key]){node.M=fitted(spots[node.key]);this.spotCount++;}};
+  // Flop lines with a fit of their own (tree.cjs spots) carry their matrices on the terminal; a line
+  // with measured shares (level2.cjs) is then rescaled to match them.
+  const spots=this.m.variant==='NLH'&&this.o.spots;this.spotCount=0;this.measuredCount=0;
+  const each=node=>{if(node.type==='decision'){node.children.forEach(each);return;}const f=node.type==='flop'&&spots[node.key];if(!f)return;
+   node.M=f.sharpness!==undefined?fitted(f):node.raises>=2?this.M3:this.M;this.spotCount++;
+   if(f.measured?.length){node.M=this.measured(node.M,node,f.measured);delete node.commit;this.measuredCount++;}};
   if(spots)each(this.tree.root);
   const K=this.K,w=this.m.weight;this.mass=v=>{let s=0;for(let i=0;i<K;i++)s+=w[i]*v[i];return s;};
   for(const node of this.tree.nodes){const A=node.actions.length,K=this.K;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
@@ -131,6 +134,28 @@ class Solver{
     seen*=m;odds+=m>0?o/m:0;}
    odds/=R(s)*play[i];out[i]=f*seen*(pot/(1+odds)-node.inv[p]);
   }
+  return out;
+ }
+ // Level 2 (tools/preflop/level2.cjs): each class's row of the flop share matrices this line uses is
+ // scaled so the model's pot share against the solved opponent range equals the share TexasSolver
+ // measured, averaged in logs over the measurements (each against its own ranges). The matrix keeps
+ // the model's card removal and opponent-hand shape; the measured value already reflects the
+ // stack-to-pot ratio, so the line gets no all-in blend.
+ measured(base,node,list){
+  const K=this.K,cls=this.m.classes,C=this.M.C,oop=node.players[1],names=node.aggressor===oop?['ipCaller','oopRaiser']:['ip','oop'],out={...base};
+  ['ip','oop'].forEach((side,s)=>{
+   const S=base[names[s]],logk=new Float64Array(K),n=new Float64Array(K);
+   for(const m of list){
+    const opp=side==='ip'?m.rangeOop:m.rangeIp,target=m[side],r=Float64Array.from(cls,c=>opp[c]||0);
+    for(let i=0;i<K;i++){const t=target[cls[i]];if(!(t>0))continue;let won=0,seen=0;
+     for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}
+     if(won>0&&seen>0){logk[i]+=Math.log(t*seen/won);n[i]++;}}
+   }
+   const M=new Float64Array(K*K);
+   // Shares above 1 are real: a hand can win more than the pot it reached the flop with.
+   for(let i=0;i<K;i++){const k=n[i]?Math.min(10,Math.max(.05,Math.exp(logk[i]/n[i]))):1;for(let j=0;j<K;j++)M[i*K+j]=S[i*K+j]*k;}
+   out[names[s]]=M;
+  });
   return out;
  }
  // Regret matching (current) or the averaged strategy, laid out [action*K+class].
