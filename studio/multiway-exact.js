@@ -22,7 +22,7 @@
   }
   // One timed iteration shows whether the time budget can reach the number
   // of iterations a solve needs, so a hopeless tree goes to the fallback now.
-  paced(label){const t=clock();this.step();const per=clock()-t,left=this.options.milliseconds-(clock()-this.started);need(this.complete||per*100<=left,'One iteration of this exact '+label+' tree takes '+(per/1000).toFixed(1)+' s, so the remaining '+Math.max(0,Math.round(left/1000))+' s of the time budget allows fewer than 100 iterations, too few to converge. Use fewer bet sizes or raises.');}
+  paced(label){const t=clock();this.step();const per=clock()-t,left=this.options.milliseconds-(clock()-this.started);need(this.complete||per*100<=left,'One iteration of this exact '+label+' tree takes '+(per/1000).toFixed(1)+' sec, so the remaining '+Math.max(0,Math.round(left/1000))+' s of the time budget allows fewer than 100 iterations, too few to converge. Use fewer bet sizes or raises.');}
   account(bytes=0){
    this.bytes+=bytes;
    this.overBudget(this.nodes.length,this.bytes);

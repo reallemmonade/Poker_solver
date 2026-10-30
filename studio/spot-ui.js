@@ -155,7 +155,8 @@ function preflopFlopPlayers(hand){const n=hand.n,bb=(hand.button+(n===2?1:2))%n,
 function preflopSeconds(hand,three){const n=hand.n,its=three?1100:800;return its*(n===2?.01:.075*n)+three*40*150;}
 // One line for a spot with no solve: what the solve button says instead.
 function unsolvableReason(hand){const plan=spotPlan(hand);return plan?.route==='none'?plan.reason:plan?.blocked||'';}
-function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+' s':seconds<5400?'about '+Math.round(seconds/60)+' min':seconds<172800?'about '+Math.round(seconds/3600)+' h':'about '+Math.round(seconds/86400)+' days';}
+// The number and its unit never split across lines.
+function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+'\u00a0sec':seconds<5400?'about '+Math.round(seconds/60)+'\u00a0min':seconds<172800?'about '+Math.round(seconds/3600)+'\u00a0h':'about '+Math.round(seconds/86400)+'\u00a0days';}
 function planTimeText(plan,factor=1){const text=solveTimeText(plan.solve*factor+plan.wait);return plan.mayStop?text.replace('about','up to'):text;}
 function planPlace(plan){return onDeviceRoute(plan)?'on this device':'on your Mac';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
@@ -209,7 +210,7 @@ document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-j
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
 // the Mac every 10 seconds (tools/local-solver/queue.cjs, progressOf); between reports it counts down locally.
-function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+' min ago':Math.round(m/60)+' h ago';}
+function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+'\u00a0min ago':Math.round(m/60)+'\u00a0h ago';}
 // Two minutes without a report (or, before the first one, since the Mac marked it running) reads as stopped.
 // Between reports the bar keeps moving at the reported rate, and it never steps back when a new report is lower.
 spotUI.shownProgress=new Map();
@@ -218,11 +219,11 @@ function jobState(j){
  if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved on your Mac.'};
  if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
   return{text:g.phase==='preparing'?'Your Mac is preparing the ranges…':'Solving on your Mac · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),p:g.p};}
- const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac,solve=solveTimeText(j.seconds||60);
+ const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac;
  if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
- if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac (last seen '+agoText(Date.now()-mac.seen)+'). Then '+solve+' to solve.'};
- const ahead=queuedSeconds()-Math.max(0,j.seconds||0);return{text:'Queued on your Mac. Starts '+(ahead>30?'in '+solveTimeText(ahead):'within 30 s')+', then '+solve+' to solve.',p:0};
+ if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
+ return{text:'Queued on your Mac · '+solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60)),p:0};
 }
 function jobText(j){return jobState(j).text;}
 function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key);return'<div class="notice" id="solveJobNotice">'+(jobPending(j)?'<button type="button" class="ui-text-button solve-cancel" data-cancel-job="'+esc(id)+'">Cancel</button>':'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
@@ -290,7 +291,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
 function endSolveFeedback(task,message,failed){const progress=$('spotInlineProgress'),el=$(task?.kind==='review'?'reviewFeedback':'playFeedback');if(!progress)return;if(['quiz','quizPrepare'].includes(task?.kind)||!el?.contains(progress)){progress.textContent=message;return;}el.innerHTML='<h3>'+(failed?'The solve failed':'The solve was stopped')+'</h3><p role="status"'+(failed?' class="error"':'')+'>'+esc(message)+'</p>';}
 function handleSpotWorkerMessage(message){
  if(message.type==='spotProgress'){
-  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'s'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the exact river tree':'Solving the current continuation',text=phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
+  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'\u00a0sec'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the exact river tree':'Solving the current continuation',text=phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
   status(text);if($('spotInlineProgress'))$('spotInlineProgress').textContent=text;$('progress').style.width=p.phase==='preparing'?'2%':p.phase==='local'?Math.min(95,5+p.done/6)+'%':Math.min(99,100*p.done/p.total)+'%';
   if(['quiz','quizPrepare'].includes(state.pending?.kind))$('quizStatus').textContent=(state.pending.kind==='quizPrepare'?'Preparing your next decision · ': 'Reviewing your hand · ')+text;
   return true;
