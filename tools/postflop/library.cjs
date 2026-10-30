@@ -7,7 +7,8 @@
 //   node tools/postflop/library.cjs solve --charts preflop-library.json.gz --spots btn-bb --flops 100 --out postflop-work
 //   node tools/postflop/library.cjs bundle --out postflop-work
 //   node tools/postflop/library.cjs list
-// --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration.
+// --spots per-spot stands for every 6-max and heads-up 100bb line used by per-spot calibration;
+// --except a,b leaves those ids out of the list (to solve them separately at another flop count).
 // --jobs N solves N flops at once (each with --threads threads), across all the listed spots;
 // --limit N stops after the first N unsolved flops (to time one).
 // --shard K/N keeps every Nth listed flop from the Kth (1-based, in spot and flop order) and
@@ -182,7 +183,7 @@ function classEvs(tree){
 
 async function solve(){
  const treeFile=args.tree||path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
- const packs=loadCharts(args.charts),auto=new Set(args.spots.split(',').includes('per-spot')?PER_SPOT:[]),ids=args.spots.split(',').flatMap(id=>id==='per-spot'?PER_SPOT:[id]),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
+ const packs=loadCharts(args.charts),auto=new Set(args.spots.split(',').includes('per-spot')?PER_SPOT:[]),except=new Set((args.except||'').split(',')),ids=args.spots.split(',').flatMap(id=>id==='per-spot'?PER_SPOT:[id]).filter(id=>!except.has(id)),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
  for(const id of ids){
   // A per-spot line the chart never reaches (a 4-bet that is jam or fold) is skipped.
   let spot;try{spot=prepare(id,packs);}catch(e){if(!auto.has(id))throw e;console.log(`${id}: skipped (${e.message})`);continue;}

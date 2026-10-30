@@ -10,7 +10,7 @@ set -u
 K=$1; N=$2
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/help}
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; SPOT_FLOPS=${SPOT_FLOPS:-60}
+JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; DEPTH_FLOPS=${DEPTH_FLOPS:-100}; TABLE_FLOPS=${TABLE_FLOPS:-100}; TURN=${TURN:-0}; EXTRA_FLOPS=${EXTRA_FLOPS:-50}; SPOT_FLOPS=${SPOT_FLOPS:-60}; SPOT_FLOPS_SRP=${SPOT_FLOPS_SRP:-$SPOT_FLOPS}
 V4=$W/preflop-library-v4.json.gz; C1=$W/charts1/preflop-library.json.gz; V6=$W/preflop-library-v6-calibrated.json.gz
 cd "$R" || exit 1
 say(){ echo "$(date -u '+%F %T') $*"; }
@@ -20,6 +20,9 @@ SINGLE=btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp
 THREE=btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hj-btn-3bet,co-btn-3bet,hu-3bet
 SRP=$SINGLE,$THREE
 LIMP=sb-bb-limp,hu-limp
+# The single-raised per-spot lines solve far slower than the 3-bet, 4-bet and limped ones, so they
+# can take fewer flops (SPOT_FLOPS_SRP, default SPOT_FLOPS).
+PS_SRP=btn-bb,co-bb,utg-bb,sb-bb,hu-srp,co-btn,hj-btn,utg-btn,hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj
 EXTRA=hj-bb,btn-sb,co-sb,hj-sb,utg-sb,utg-co,hj-co,utg-hj,hj-co-3bet,co-sb-3bet,utg-hj-3bet,utg-co-3bet,hj-sb-3bet,utg-btn-3bet
 T4=4max-co-bb,4max-btn-bb,4max-co-btn,4max-sb-bb,4max-btn-bb-3bet,4max-sb-bb-3bet
 T9=9max-utg-bb,9max-hj-bb,9max-co-bb,9max-btn-bb,9max-utg-btn,9max-co-btn,9max-sb-bb,9max-btn-bb-3bet,9max-sb-bb-3bet
@@ -38,7 +41,7 @@ solve(){ # charts out spots flops iterations [more args]
 }
 evs(){ # the main run's order backwards
   solve $1 $2 $(all $LIMP) 24 200
-  [ "${3:-}" = per-spot ] && solve $1 $2 per-spot $SPOT_FLOPS 150
+  [ "${3:-}" = per-spot ] && { solve $1 $2 per-spot $SPOT_FLOPS 150 --except $PS_SRP; solve $1 $2 $PS_SRP $SPOT_FLOPS_SRP 150; }
   solve $1 $2 $(all $THREE) 72 150
   solve $1 $2 $(all $SINGLE) 24 150
 }
