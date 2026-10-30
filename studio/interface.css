@@ -149,3 +149,4 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .perf-axis{position:absolute;top:14px;right:16px;height:176px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none;font-variant-numeric:tabular-nums}
 .perf-stats{margin-top:12px;grid-template-columns:repeat(6,1fr)}.perf-empty{text-align:center;padding:40px 12px}.perf-empty b{font-size:16px}
 @media(max-width:800px),(max-width:1000px) and (pointer:coarse){.perf-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.perf-chart{height:150px}.perf-axis{height:146px}.perf-stats{grid-template-columns:repeat(3,1fr)}}
+.ui-analysis:has(.solve-inline) #analyze{display:none}.solve-inline p{margin:0 0 8px}

@@ -7,9 +7,10 @@ function comboOf(cards){if(!cards||cards.length!==4)return cards||'';const a=car
 function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const hi=RANKS.indexOf(combo[0]),lo=RANKS.indexOf(combo[1]),suited=combo[2]==='s';if(hi===lo)return'Pairs';if(lo>=8)return'Broadway';if(suited&&hi===12)return'Suited aces';if(suited&&hi-lo<=2)return'Suited connectors';return suited?'Other suited':'Other offsuit';}
 // A decision counts as a mistake when the solver measured a loss, or a chart choice is played under 5% in the source.
 // A chip-EV chart standing in for an ICM table does not model the payouts, and an approximate (off-tree size) answer is not
-// the chart's own, so their choices are shown but never counted as mistakes.
-function gradeMistake(g){return g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
-function gradeCost(g){return g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
+// the chart's own, so their choices are shown but never counted as mistakes. A decision made after looking at the analysis
+// (peeked) always counts, at no measured cost: needing to look means the spot isn't known yet.
+function gradeMistake(g){return g.peeked?true:g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+function gradeCost(g){return!g.peeked&&g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,
   pot=c.startStreet>0?'Postflop':raises>=3?'4-bet+':raises===2?'3-bet':raises===1?'SRP':pre.some(a=>a.kind==='call')?'Limped':'Walk',
@@ -39,7 +40,7 @@ function renderHandDB(box){if(!box)return;
  for(const k of ['result','sort'])box.querySelector('[data-hdb="'+k+'"]').value=handDB.filter[k];
  const rows=handDBFiltered(),rate=bbPer100(rows);box.querySelector('.hdb-bar').hidden=!all.length;
  box.querySelector('.hdb-sum').textContent=all.length?rows.length+' hand'+(rows.length===1?'':'s')+(rate===null?'':' · '+signedBB(rate)+' bb/100'):'';
- box.querySelector('.hdb-list').innerHTML=all.length?rows.slice(0,handDB.shown).map(f=>'<button type="button" class="hdb-row" data-open-hand="'+esc(f.id)+'"><b>'+esc(f.combo||'–')+'</b><span>'+esc(f.pos+' · '+f.pot+(f.line?' · '+f.line:''))+'</span>'+(f.assisted?'<i class="hdb-help" title="Analysis seen · not in leaks"></i>':'')+(f.mistakes?'<i class="hdb-flag" title="'+f.mistakes+' mistake'+(f.mistakes>1?'s':'')+'"></i>':'')+'<em class="'+(f.net>0?'hdb-up':f.net<0?'hdb-down':'')+'">'+signedBB(f.net)+'</em></button>').join('')||'<p class="help">No hands match.</p>':'<p class="help">Finished hands show up here.</p>';
+ box.querySelector('.hdb-list').innerHTML=all.length?rows.slice(0,handDB.shown).map(f=>'<button type="button" class="hdb-row" data-open-hand="'+esc(f.id)+'"><b>'+esc(f.combo||'–')+'</b><span>'+esc(f.pos+' · '+f.pot+(f.line?' · '+f.line:''))+'</span>'+(f.assisted?'<i class="hdb-help" title="Assisted · not in leaks"></i>':'')+(f.mistakes?'<i class="hdb-flag" title="'+f.mistakes+' mistake'+(f.mistakes>1?'s':'')+'"></i>':'')+'<em class="'+(f.net>0?'hdb-up':f.net<0?'hdb-down':'')+'">'+signedBB(f.net)+'</em></button>').join('')||'<p class="help">No hands match.</p>':'<p class="help">Finished hands show up here.</p>';
  box.querySelector('.hdb-more').hidden=rows.length<=handDB.shown;box.querySelector('.hdb-insights').hidden=!all.length;
  if(box.querySelector('.hdb-insights').open)box.querySelector('.hdb-body').innerHTML=insightsHTML(rows);}
 // Results swing by ±100 bb/100 over a few hundred hands, so leaks are ranked by solver-measured mistake cost, which settles far sooner.
