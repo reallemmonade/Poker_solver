@@ -72,9 +72,11 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
  /* The felt keeps one height while the betting bar, pre-actions and Next hand come and go: they share a dock of
     steady height (--dock, grown in interface.js to the tallest it has needed) at the bottom of the screen. */
  .ui-app .ui-live-grid .ui-table-pane .felt{flex:0 0 auto;height:max(300px,calc(100% - var(--dock,140px) - 20px));min-height:0;margin:12px 0 8px}
+ /* The rail and its outer ring sit inside the screen, with clear margins on both sides: the scrolling pane clips anything past its edge. */
+ .ui-app .ui-live-grid .ui-table-pane .felt{margin-left:clamp(8px,3.5vw,16px);margin-right:clamp(8px,3.5vw,16px)}
  .ui-app .ui-live-grid .ui-table-pane>#playActions{margin-top:auto}
  /* Short phones (iPhone SE): the felt gives up height so Fold, Call and Raise stay above the bottom navigation. */
- @media(max-height:700px){.ui-app .ui-live-grid .ui-table-pane .felt{height:max(180px,calc(100% - var(--dock,140px) - 10px));margin:6px 0 4px}}
+ @media(max-height:700px){.ui-app .ui-live-grid .ui-table-pane .felt{height:max(180px,calc(100% - var(--dock,140px) - 10px));margin:6px clamp(8px,3.5vw,16px) 4px}}
  .ui-app .ui-live-grid #playActions:not(:empty),.ui-app .ui-live-grid #playActions:empty~.ui-session-line{position:static;box-shadow:none;padding:4px 0}
 }
 /* Landscape phones hide the bottom navigation: the screens take the full height below the pane dots, and the felt fills its column. */
