@@ -16,6 +16,8 @@ In the app, set **Analysis inputs & accuracy → Solver on your Mac** to **On**.
 curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash
 ```
 
+**Updates** need no Terminal once a bridge from this version is running: when the app says the solver needs an update, tap **Update**, on the Mac or on a phone signed in to the same account. The bridge runs the same command itself (`POST /update`, or a `macupdate` row from your account, picked up within 20 seconds), in its own process group so it survives the restart. Its output goes to `~/Library/Logs/citrus-poker-update.log`.
+
 Then open the app on that Mac, sign in, and set **Solver settings → Solver on your Mac** to **On**. The app shows the same steps under that setting. The manual steps are below.
 
 
