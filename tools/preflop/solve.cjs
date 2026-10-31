@@ -156,26 +156,25 @@ class Solver{
      for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}
      if(won>0&&seen>0){logk[i]+=Math.log(t*seen/won);n[i]++;}}
    }
-   // Each class's scale factor, then kicker order: a class measured on no flop takes the factor of
-   // the nearest measured class on its kicker chain (stronger side first), since the hands at the
-   // bottom of a range measure worst and an unmeasured lower kicker would otherwise keep the
-   // model's more hopeful value; then the resulting shares against the last measured range are
-   // kept non-increasing down each chain (weighted pool-adjacent-violators on log share, weighted
-   // by the class's share of that range), as calibrate.cjs does for playability.
-   const k=Float64Array.from(logk,(x,i)=>n[i]?Math.min(10,Math.max(.05,Math.exp(x/n[i]))):NaN);
+   // Each class's scale factor, then kicker order: the shares against the last measured range are
+   // kept non-increasing down each kicker chain (weighted pool-adjacent-violators on log share, as
+   // calibrate.cjs does for playability). A class measured on no flop keeps the model's share but
+   // carries almost no weight, so it is only capped by the nearest measured stronger kicker: the
+   // hands at the bottom of a range measure worst, and an unmeasured lower kicker would otherwise
+   // keep the model's more hopeful value. Copying the neighbour's factor instead lifted weak
+   // unmeasured hands into 3-bet bluffs (blind 3-bets doubled on the pilot's round-0 chart).
+   const k=Float64Array.from(logk,(x,i)=>n[i]?Math.min(10,Math.max(.05,Math.exp(x/n[i]))):1);
    const last=list[list.length-1],opp=side==='ip'?last.rangeOop:last.rangeIp,own=side==='ip'?last.rangeIp:last.rangeOop,r=Float64Array.from(cls,c=>opp[c]||0);
    const model=new Float64Array(K);for(let i=0;i<K;i++){let won=0,seen=0;for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}model[i]=seen>0?won/seen:0;}
    for(const chain of CHAINS){
-    const ids=chain.map(c=>cls.indexOf(c));
-    ids.forEach((i,a)=>{if(!isNaN(k[i]))return;for(let d=1;d<ids.length;d++){const up=ids[a-d],down=ids[a+d];if(up!==undefined&&!isNaN(k[up])){k[i]=k[up];return;}if(down!==undefined&&!isNaN(k[down])){k[i]=k[down];return;}}});
     const blocks=[];
-    for(const i of ids){if(isNaN(k[i])||!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:(own[cls[i]]||0)+1e-3,n:[i]});
+    for(const i of chain.map(c=>cls.indexOf(c))){if(!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:n[i]?(own[cls[i]]||0)+1e-3:1e-6,n:[i]});
      while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
     for(const b of blocks)for(const i of b.n)k[i]=Math.min(10,Math.max(.05,Math.exp(b.v)/model[i]));
    }
    const M=new Float64Array(K*K);
    // Shares above 1 are real: a hand can win more than the pot it reached the flop with.
-   for(let i=0;i<K;i++){const f=isNaN(k[i])?1:k[i];for(let j=0;j<K;j++)M[i*K+j]=S[i*K+j]*f;}
+   for(let i=0;i<K;i++)for(let j=0;j<K;j++)M[i*K+j]=S[i*K+j]*k[i];
    out[names[s]]=M;
   });
   return out;
