@@ -197,7 +197,7 @@
   const depth=G.bb(Math.min(...live.map(i=>real.initial[i]).sort((a,b)=>b-a).slice(0,2))),table={...config,button:0};let best=null;
   const shapes=[],normal=G.normalize(table);for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance))continue;const f=fit(pack,normal,shapes);if(f===null||best&&gap+f>=best.score)continue;best={pack,gap,chart,score:gap+f,rakeFree:f===1};}
   if(!best)return null;const pack=best.pack,labels=pack.groups?pack.groups.labels:classes,relative=i=>(i-config.button+n)%n,proxy=new G.Hand(pack.config,{rng:G.rng(745)}),replay=new G.Hand(config,{rng:G.rng(746)});
-  const weights=Array.from({length:n},()=>new Float64Array(labels.length).fill(1));
+  const weights=Array.from({length:n},()=>new Float64Array(labels.length).fill(1)),borrowed=[];
   for(const a of pre){
    const node=pack.index.get(historyKey(proxy));if(proxy.actor!==relative(a.seat))return null;
    // Charts leave out decisions that are always folds (BB behind an SB 3-bet); a
@@ -210,12 +210,23 @@
     const jam=replay.legal().allInTo,chartJam=proxy.legal().allInTo,want=G.bb(a.target);
     if(a.target>=jam){const all=options.find(o=>o.x.target===chartJam);if(all){pick=all.i;break;}}
     pick=options.filter(o=>o.x.target!==chartJam||a.target>=jam).sort((p,q)=>Math.abs(Math.log(G.bb(p.x.target)/want))-Math.abs(Math.log(G.bb(q.x.target)/want)))[0]?.i??options[0].i;break;}
+   let from=node;if(pick<0&&a.kind==='call'){const b=borrowCall(pack,proxy);if(b){from=b.node;pick=b.pick;borrowed.push({seat:a.seat,key:b.node.key});}}
    if(pick<0)return null;const w=weights[a.seat];
-   for(let i=0;i<labels.length;i++){const row=rowAt(pack,node,i);w[i]*=row?row[pick]:0;}
+   for(let i=0;i<labels.length;i++){const row=rowAt(pack,from,i);w[i]*=row?row[pick]:0;}
+   if(from!==node){proxy.act({kind:'call'});replay.act(a);continue;}
    const chosen=node.actions[pick];proxy.act({kind:chosen.kind,target:chosen.target});replay.act(a);
   }
   const seats={};for(const seat of live){const w=weights[seat],peak=Math.max(...w);if(!(peak>0))return null;seats[seat]=Array.from(w,x=>x/peak);}
-  return{pack,name:pack.name,game:pack.groups?'PLO4':'NLH',labels,seats,depthMatch:best.gap>1e-9?{chart:best.chart,actual:depth}:null,rakeFree:best.rakeFree,key:historyKey(proxy),chart:proxy,live:live.map(relative)};
+  return{pack,name:pack.name,game:pack.groups?'PLO4':'NLH',labels,seats,depthMatch:best.gap>1e-9?{chart:best.chart,actual:depth}:null,rakeFree:best.rakeFree,key:historyKey(proxy),chart:proxy,live:live.map(relative),borrowed};
+ }
+ // Trimmed chart trees let one player flat an open and fold everyone else behind (so every flop is heads-up), but
+ // people overcall: the big blind behind an open and a call. That call takes the seat's flat range against the same
+ // raise with the earlier flatters folded instead (the big blind's call against the open alone), the nearest line
+ // the chart solved. It is a little wide for a 3-way pot, and the range answer says it was borrowed.
+ function borrowCall(pack,proxy){
+  const segs=historyKey(proxy).split('/');let last=-1;segs.forEach((x,i)=>{if(x.split(':')[1]==='raise')last=i;});if(last<0)return null;
+  const alt=segs.map((x,i)=>{const [seat,kind]=x.split(':');return i>last&&kind==='call'?seat+':fold:0':x;}).join('/');if(alt===segs.join('/'))return null;
+  const node=pack.index.get(alt);if(!node||node.seat!==undefined&&node.seat!==proxy.actor)return null;const pick=node.actions.findIndex(x=>x.kind==='call');return pick<0?null:{node,pick};
  }
  // Range text the spot solver parses: hand classes with weights (NLH).
  function classRangeText(weights,floor=.001){return classes.map((c,i)=>[c,weights[i]]).filter(([,w])=>w>=floor).map(([c,w])=>w>=.9995?c:c+':'+(Math.round(w*1000)/1000)).join(',');}
