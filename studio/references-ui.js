@@ -37,7 +37,7 @@ function chartPostflopRanges(hand,observed,opts){
   if(r.game==='NLH'){const weights=Array.from(w),i=PokerPreflop.classes.indexOf(heroClass);if(hero&&i>=0)weights[i]=Math.max(weights[i],.01);ranges[seat]=PokerPreflop.classRangeText(weights);}
   else{const limit=opts.localSolver?[600,1200,2500][observed.board.length-3]:299,combos=PokerPreflop.ploCombos({pack:r.pack,weights:w},observed.board,{limit,include:hero?observed.heroCards:null,seed:1+(+seat)}),peak=Math.max(...combos.map(c=>c.weight));if(!combos.length||!(peak>0))return null;ranges[seat]=combos.map(c=>c.cards.map(G.Core.cardName).join('')+':'+Math.max(.01,Math.round(1000*c.weight/peak)/1000)).join(',');}
  }
- return{ranges,origin:'Imported preflop chart: '+r.name+(r.depthMatch?' (nearest depth '+fmt(r.depthMatch.chart)+' bb for '+fmt(r.depthMatch.actual)+' bb)':'')+(r.game==='NLH'?'':'; a weighted sample of combos')};
+ return{ranges,origin:'Imported preflop chart: '+r.name+(r.depthMatch?' (nearest depth '+fmt(r.depthMatch.chart)+' bb for '+fmt(r.depthMatch.actual)+' bb)':'')+(r.game==='NLH'?'':'; a weighted sample of combos')+(r.borrowed?.length?'; the chart has no overcall here, so '+r.borrowed.map(b=>G.positions(hand.n,observed.config.button)[b.seat]).join(' and ')+' calls with the range it calls the raise with alone':'')};
 }
 // Precomputed flop strategies (Library → Preflop solver references → Import).
 // They answer a flop decision when its preflop line, chart and flop (up to
