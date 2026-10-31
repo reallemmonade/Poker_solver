@@ -334,7 +334,37 @@ const RANGE_KEY='<div class="action-key"><span>How often they have it:</span><sp
 // A hand held under 1% of the time reads as out of the range (a dark cell with no bar looked like a bug), and any hand
 // above that gets a visible sliver of fill.
 const RANGE_MIN=.01;
-function rangeGridHTML(text,mix=null,tones=null,mark=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),raw=Math.min(1,w.get(k)||0),x=raw<RANGE_MIN?0:raw,m=mix&&x>0&&mix[k];cells+='<span '+(k===mark?'data-hand ':'')+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':(x>0?'':'class="none" ')+'style="--w:'+(x>0?Math.max(.12,x):0).toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid" role="img" aria-label="Range grid">'+cells+'</div>';}
+function rangeGridHTML(text,mix=null,tones=null,mark=null,pick=null){const w=rangeClassWeights(text);let cells='';for(let i=0;i<13;i++)for(let j=0;j<13;j++){const a=GRID_RANKS[Math.min(i,j)],b=GRID_RANKS[Math.max(i,j)],k=i===j?a+b:a+b+(i<j?'s':'o'),raw=Math.min(1,w.get(k)||0),x=raw<RANGE_MIN?0:raw,m=mix&&x>0&&mix[k];cells+='<span '+(k===mark?'data-hand ':'')+(pick&&k===pick.k?'data-picked ':'')+(m?'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+k+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'"':(x>0?'':'class="none" ')+'style="--w:'+(x>0?Math.max(.12,x):0).toFixed(2)+'" title="'+k+' '+Math.round(x*100)+'%"')+'>'+k+'</span>';}return'<div class="range-grid"'+(pick?' data-rc="'+pick.id+'" aria-label="Range grid: tap a hand for its suit combos"':' role="img" aria-label="Range grid"')+'>'+cells+'</div>'+(pick?'<div class="range-combos"'+(pick.k?'>'+rangeCombosHTML(rangeCombos.get(pick.id),pick.k):' hidden>')+'</div>':'');}
+// Tap a cell in the acting player's grid (postflop) for each suit combo's own action mix: from the flop on the solver
+// plays every combo apart (AhKh on a two-heart board is not AsKs), and a cell is their average. Combos the board or the
+// viewer's cards block are left out; combos the range no longer holds (<1%) too.
+const rangeCombos=new Map();let rangeComboSeq=0,rangePicked=null;
+function classCombos(k){const suits='shdc',out=[];for(let x=0;x<4;x++)for(let y=0;y<4;y++){if(k.length===2?y<=x:k[2]==='s'?y!==x:y===x)continue;out.push(k[0]+suits[x]+k[1]+suits[y]);}return out;}
+function rangeCombosHTML(d,k){
+ if(!d)return'';const C=G.Core,dead=new Set(d.dead),rows=[];
+ for(const name of classCombos(k)){const cs=C.cards(name);if(cs.some(c=>dead.has(c)))continue;const key=cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),m=d.combos[key];if(!m)continue;const w=d.reach?d.reach[key]??0:d.weights.get(key)??0;if(w<RANGE_MIN)continue;rows.push({cs,m,w,mine:key===d.mine});}
+ const tag=k+'<button type="button" class="range-combos-close" aria-label="Close">×</button>';
+ if(!rows.length)return'<div class="range-combos-head">'+tag+'</div><p class="help">Not in the range here</p>';
+ return'<div class="range-combos-head">'+tag+'</div>'+rows.map(r=>'<div class="range-combo'+(r.mine?' mine':'')+'"><span class="range-combo-cards">'+r.cs.map(c=>cardHTML(c)).join('')+'</span><span class="range-combo-bar" style="'+actionMixStyle(r.m,d.tones)+';opacity:'+(.35+.65*Math.min(1,r.w)).toFixed(2)+'">'+r.m.map((p,i)=>p>=.2?'<b style="left:'+(r.m.slice(0,i).reduce((a,b)=>a+b,0)*100).toFixed(1)+'%;width:'+(p*100).toFixed(1)+'%">'+Math.round(p*100)+'</b>':'').join('')+'</span></div>').join('');
+}
+if(typeof document!=='undefined')document.addEventListener('click',e=>{
+ const close=e.target.closest('.range-combos-close'),cell=!close&&e.target.closest('.range-grid[data-rc]>span');if(!close&&!cell)return;
+ const fig=e.target.closest('figure'),grid=fig?.querySelector('.range-grid[data-rc]'),panel=fig?.querySelector('.range-combos');if(!grid||!panel)return;
+ const id=+grid.dataset.rc,d=rangeCombos.get(id),k=cell?cell.textContent:null,same=cell&&cell.hasAttribute('data-picked');
+ grid.querySelectorAll('[data-picked]').forEach(x=>x.removeAttribute('data-picked'));
+ if(close||same||!d||cell.classList.contains('none')){panel.hidden=true;panel.innerHTML='';rangePicked=null;return;}
+ cell.setAttribute('data-picked','');panel.innerHTML=rangeCombosHTML(d,k);panel.hidden=false;rangePicked={sig:d.sig,k};
+});
+// The tap-a-cell state for the acting player's grid, or null where the solve has no per-combo mixes (preflop, where
+// every suit combo plays the same, and PLO).
+function comboPick(r,mix,tones){
+ const h=state.hand,board=h?.board||[];if(!mix.combos||!board.length||!h||h.rules?.hole>2)return null;
+ const C=G.Core,hero=h.holes[state.hero],own=r.seat===state.hero,dead=[...board,...(!own&&hero?.length===2?hero:[])],sig=board.map(C.cardName).join('')+'|'+r.seat+'|'+h.actionLog?.length;
+ let weights=new Map();if(!mix.reach){try{for(const x of PokerSpot.parseRange(r.range,{hole:2},board))weights.set(x.cards.slice().sort((a,b)=>b-a).map(C.cardName).join(''),Math.min(1,x.weight));}catch{}}
+ const id=++rangeComboSeq;rangeCombos.set(id,{combos:mix.combos,reach:mix.reach||null,weights,tones,dead,sig,mine:own&&hero?.length===2?hero.slice().sort((a,b)=>b-a).map(C.cardName).join(''):null});
+ for(const old of rangeCombos.keys())if(old<id-12)rangeCombos.delete(old);
+ return{id,k:rangePicked&&rangePicked.sig===sig?rangePicked.k:null};
+}
 function spotRangesHTML(result){
  const all=result?.solve?.rangeAssumptions||result?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&all.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
@@ -343,7 +373,7 @@ function spotRangesHTML(result){
  const mix=result.handMix&&result.handMix.classes&&typeof result.handMix.classes==='object'?result.handMix:null,tones=mix?actionTones(result.actions,h):null;
  // The acting player, whose strategy colors the grid, comes first.
  ranges.sort((p,q)=>(mix&&q.seat===mix.seat)-(mix&&p.seat===mix.seat));
- return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(share(r)>0?' · '+(share(r)<.5?'<1':Math.round(share(r)))+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones,state.hand):rangeClassWeights(r.range).size?RANGE_KEY:'')+(/^All legal hands/.test(r.range)?'<p class="help">Any '+(h?.rules?.hole>2?'hand':'two cards')+'</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones,h&&r.seat===state.hero&&h.holes[r.seat]?.length===2?G.Core.handClass(h.holes[r.seat]):null):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
+ return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(share(r)>0?' · '+(share(r)<.5?'<1':Math.round(share(r)))+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones,state.hand):rangeClassWeights(r.range).size?RANGE_KEY:'')+(/^All legal hands/.test(r.range)?'<p class="help">Any '+(h?.rules?.hole>2?'hand':'two cards')+'</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones,h&&r.seat===state.hero&&h.holes[r.seat]?.length===2?G.Core.handClass(h.holes[r.seat]):null,mine?comboPick(r,mix,tones):null):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
 }
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);

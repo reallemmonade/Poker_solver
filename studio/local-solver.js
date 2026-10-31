@@ -257,6 +257,14 @@
   const out={};for(const k in sum)out[k]=sum[k].map(x=>Math.round(x/count[k]*1000)/1000);return out;
  }
 
+ // Each combo's own action mix (suits matter on a board), keyed by its cards high card first ("AhKh"). For the
+ // tap-a-cell view of the range grid.
+ function comboMix(table,index,size){
+  const out={};
+  for(const [combo,row]of Object.entries(table)){const cs=C.cards(combo);if(cs.length!==2||!Array.isArray(row))continue;const t=row.reduce((a,b)=>a+b,0);if(!(t>0))continue;const m=Array(size).fill(0);row.forEach((p,i)=>{m[index[i]]+=p/t;});out[cs.sort((a,b)=>b-a).map(C.cardName).join('')]=m.map(x=>Math.round(x*1000)/1000);}
+  return out;
+ }
+
  // The PLO solver's tree: actions carry the street total ("to") they bet or raise to.
  function followPLO(tree,path){
   let node=tree;
@@ -313,7 +321,7 @@
   const s=engine.spec,tree=engine.body.tree,node=followMW(tree.tree,s.path),player=node.player,index=tree.combos[player].indexOf(s.hero);
   assert(player===s.heroIndex&&index>=0,'The solver strategy does not include your hand.');
   const cash=engine.hand.config.mode==='cash',{actions,probs,mean,index:map}=mapMW(engine.hand,node,node.strategy[index],node.evs[index]),hasEV=cash&&mean.every(Number.isFinite),values=hasEV?mean:actions.map(()=>0),best=hasEV?values.indexOf(Math.max(...values)):probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0),converged=Number.isFinite(tree.exploitability)&&tree.exploitability<=s.accuracy,adjusted=(node.adjusted||[]).includes(index);
-  let handMix=null;try{const table={};tree.combos[player].forEach((c,i)=>{table[c]=node.strategy[i];});handMix={seat:engine.hand.actor,classes:classMix(table,map,actions.length)};}catch{}
+  let handMix=null;try{const table={};tree.combos[player].forEach((c,i)=>{table[c]=node.strategy[i];});handMix={seat:engine.hand.actor,classes:classMix(table,map,actions.length),combos:comboMix(table,map,actions.length)};}catch{}
   const street=STREETS[s.board.length-3],book=s.sizes[street],shortest=Math.min(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]))<Math.max(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]));
   return{supported:true,actions,reference:probs,mean:values,se:zeros,loss:hasEV?values.map(v=>values[best]-v):zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:cash?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),reliable:hasEV&&converged,...handMix?{handMix}:{},
    solve:{version:1,method:'local-multiway',exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],bestEVRow:adjusted,sampledRunouts:tree.sampledRunouts,turnCards:tree.turnCards,riverCards:tree.riverCards,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:s.ranges.map(r=>Object.keys(r).length),
@@ -347,7 +355,7 @@
    if(this.error)return{supported:false,message:'Local solver: '+this.error};
    if(this.spec.game==='PLO4')return resultPLO(this);
    if(this.spec.game==='NLH3')return resultMW(this);
-   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length)};}catch{}
+   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length),combos:comboMix(node.strategy.strategy,index,actions.length)};}catch{}
    return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
     solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
      warning:'Solved by TexasSolver on this computer for the ranges shown, with the listed bet sizes on every later street. Exploitability is the solver\'s own estimate, in percent of the pot. It does not report action EVs, so no decision cost is graded.'+chipCaveat(this.hand.config)}};
