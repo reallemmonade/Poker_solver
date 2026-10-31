@@ -21,17 +21,18 @@ const ActionBar=(()=>{
     // Sizes that share a label (two at or above the effective stack, or two that round to the same share) show once, the smaller kept.
     const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':share((t-r.currentBet)/(r.pot+r.toCall)),target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
     if(sl.length>1)return sl;
-    // Otherwise standard sizes that fit the legal range (preflop multiples, postflop the solver tree's 1/3, 2/3 and 1.5x pot), and All-in
+    // Otherwise standard sizes (preflop multiples, postflop the solver tree's 1/3, 2/3 and 1.5x pot), and All-in. A size below the
+    // minimum bet (1/3 of a small limped pot) shows at the minimum rather than dropping out; sizes at or above the all-in fold into it.
     // (Pot when a pot limit caps the bet below the all-in).
-    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).filter(([t])=>t>=r.min-.005&&snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
+    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).map(([t,label])=>[Math.max(t,r.min),label]).filter(([t])=>snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
     return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
   //     onFold, onCheck, onCall, onBet(target)}
   function turn(box,o){
-    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(r.standard>0?snap(Math.min(r.standard,cover(r)),r):r.min):null;
-    // The amount starts at the first solved size; solved sizes that arrive later move it until you pick a size yourself.
+    const r=o.raise,s0=r?solvedList(r):[],def=r?s0.find(t=>t<cover(r)-1e-9)??s0[0]??(!r.preflop?presets(r)[0].target:r.standard>0?snap(Math.min(r.standard,cover(r)),r):r.min):null;
+    // The amount starts at the first solved size (postflop with none, the first preset); solved sizes that arrive later move it until you pick a size yourself.
     if(turnState.key!==o.key||!turnState.touched&&turnState.def!==def)turnState={key:o.key,amount:def,def,touched:false};
     // Re-renders keep a typed amount as it is (any 0.01 bb is legal); only the slider snaps to steps.
     if(r)turnState.amount=clamp(turnState.amount??r.min,r);
@@ -89,6 +90,6 @@ const ActionBar=(()=>{
   function shortcuts(box){return box.classList.contains('ab-bar')?keys.get(box)||{}:null;}
   function press(box,k){const m=shortcuts(box),el=m?.[k];if(!el||el.disabled)return false;if(k==='a'&&m.allIn)m.allIn();else el.click();return true;}
   function clear(box){delete box.dataset.abSig;keys.delete(box);box.classList.remove('ab-bar','ab-waiting');box.innerHTML='';}
-  return{turn,waiting,take,clear,shortcuts,press};
+  return{turn,waiting,take,clear,shortcuts,press,presets};
 })();
 if(typeof module!=='undefined')module.exports=ActionBar;
