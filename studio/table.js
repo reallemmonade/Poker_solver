@@ -3,7 +3,7 @@
 const tableView={generation:0,botTimer:null,presented:null,playing:false,message:'',mode:'normal'};
 const seatLayouts={2:[[50,90],[50,10]],3:[[50,90],[15,27],[85,27]],4:[[50,90],[9,50],[50,10],[91,50]],5:[[50,90],[10,61],[29,13],[71,13],[90,61]],6:[[50,90],[15,77],[13,29],[50,10],[87,29],[85,77]],7:[[50,90],[17,80],[9,44],[32,11],[68,11],[91,44],[83,80]],8:[[50,90],[19,82],[9,54],[23,17],[50,10],[77,17],[91,54],[81,82]],9:[[50,90],[21,83],[10,62],[13,35],[34,12],[66,12],[87,35],[90,62],[79,83]]};
 function seatPoint(hand,seat,hero=state.hero){const p=seatLayouts[hand.n][(seat-hero+hand.n)%hand.n];return{x:p[0],y:p[1]};}
-function betPoint(hand,seat,hero=state.hero){const p=seatPoint(hand,seat,hero);return{x:Math.abs(p.x-50)<5?63:50+(p.x-50)*.67,y:50+(p.y-50)*.57};}
+function betPoint(hand,seat,hero=state.hero){const p=seatPoint(hand,seat,hero);return{x:50+(p.x-50)*.67,y:50+(p.y-50)*.57};}
 function betAt(root,hand,seat){const el=root?.querySelector('[data-bet="'+seat+'"]');return el?{x:parseFloat(el.style.left),y:parseFloat(el.style.top)}:betPoint(hand,seat);}
 // Seat stacks keep one decimal (none from 1000 bb) so the box never outgrows its seat.
 function seatStack(x){return fmt(x,x>=1000?0:1)}
