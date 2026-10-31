@@ -72,6 +72,11 @@ function pass(text){console.log('PASS '+text);count++;}
 // Off-tree flop sizes: a hand-made library spot (pot 100, stack 1000, bets 33/66/150% and all-in) maps bets pseudo-harmonically,
 // clamps beyond its sizes, sends a jam to the all-in, a bigger price than the node's tightens the defence toward MDF, and a
 // smaller one widens it (fold share x alpha(real)/alpha(node)).
+{const AB=require('./action-bar.js'),r={min:1,max:145.2,allIn:145.2,effective:180,pot:2.5,currentBet:0,toCall:0,preflop:false,bb:1,solved:[]},labels=x=>AB.presets(x).map(p=>p.label+'@'+p.target).join(' ');
+ assert.equal(labels(r),'1/3@1 2/3@1.65 1.5x@3.75 All-in@145.2','An unsolved limped pot keeps every default size, 1/3 at the minimum bet');
+ assert.equal(labels({...r,pot:20}),'1/3@6.6 2/3@13.2 1.5x@30 All-in@145.2');
+ assert.equal(labels({...r,pot:20,solved:[13.2,30]}),'2/3@13.2 1.5x@30','Solved sizes still lead when the solver has two or more');
+ pass('Unsolved spots show every default bet size (1/3, 2/3, 1.5x pot, All-in), with sizes under the minimum bet shown at the minimum');}
 {const PL=require('./postflop-library.js'),PF=require('./preflop.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
  const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),share=i=>(i*7%5)/4,bets=['BET 33','BET 66','BET 150','BET 1000'],facing=b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(i=>[1-share(i),share(i)],2)});
  const flop={nodes:[{path:'',player:'oop',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},{path:'CHECK',player:'ip',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},...bets.map(facing)]};
