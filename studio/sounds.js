@@ -6,7 +6,9 @@ const CitrusSounds=(()=>{
  let ctx=null,out=null,noiseBuffer=null,choice='felt';
  try{const saved=localStorage.getItem(KEY);if(saved==='off'||SETS.some(s=>s.id===saved))choice=saved}catch{}
  function audio(){if(ctx)return ctx;const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;try{if(navigator.audioSession)navigator.audioSession.type='ambient'}catch{}
-  ctx=new AC();const squash=ctx.createDynamicsCompressor();squash.threshold.value=-14;squash.ratio.value=6;out=ctx.createGain();out.gain.value=.8;out.connect(squash);squash.connect(ctx.destination);
+  ctx=new AC();const squash=ctx.createDynamicsCompressor();squash.threshold.value=-14;squash.ratio.value=6;out=ctx.createGain();out.gain.value=.8;
+  // A gentle top cut and low lift keep the sounds warm instead of tinny on phone speakers.
+  const warm=ctx.createBiquadFilter(),body=ctx.createBiquadFilter();warm.type='lowpass';warm.frequency.value=5200;warm.Q.value=.5;body.type='lowshelf';body.frequency.value=220;body.gain.value=4;out.connect(warm);warm.connect(body);body.connect(squash);squash.connect(ctx.destination);
   noiseBuffer=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate);const d=noiseBuffer.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;return ctx;}
  function unlock(force){if(choice==='off'&&!force)return Promise.resolve();const c=audio();if(!c)return Promise.resolve();const ready=c.state==='running'?Promise.resolve():c.resume().catch(()=>{});
   // iOS only starts output after a sound begins inside the gesture itself.
@@ -17,11 +19,11 @@ const CitrusSounds=(()=>{
  function noise(t,{f=2000,to=f,filter='bandpass',q=1,dur=.08,gain=.3,attack=.002}){const s=ctx.createBufferSource(),b=ctx.createBiquadFilter();s.buffer=noiseBuffer;b.type=filter;b.Q.value=q;b.frequency.setValueAtTime(f,t);if(to!==f)b.frequency.exponentialRampToValueAtTime(to,t+dur);s.connect(b);b.connect(envelope(t,gain,attack,dur));s.start(t,Math.random()*.8);s.stop(t+dur+.02);}
  const wobble=(x,k=.06)=>x*(1+(Math.random()*2-1)*k);
  // Cards and chips sound the same in every set. A card is a quick slide, an edge snap and a soft landing on cloth.
- const card=(t,level=1)=>{const g=wobble(level,.12);noise(t,{f:1400,to:4200,q:1.1,dur:.05,gain:.2*g,attack:.018});noise(t+.035,{f:3200,filter:'highpass',dur:.014,gain:.34*g});noise(t+.05,{f:2200,q:.8,dur:.03,gain:.16*g});noise(t+.058,{f:700,filter:'lowpass',dur:.045,gain:.3*g});tone(t+.058,{f:wobble(170),to:90,dur:.04,gain:.08*g})};
+ const card=(t,level=1)=>{const g=wobble(level,.12);noise(t,{f:700,to:2400,q:1,dur:.055,gain:.22*g,attack:.018});noise(t+.035,{f:1700,filter:'highpass',dur:.014,gain:.24*g});noise(t+.05,{f:1300,q:.8,dur:.035,gain:.18*g});noise(t+.058,{f:450,filter:'lowpass',dur:.06,gain:.42*g});tone(t+.058,{f:wobble(125),to:65,dur:.06,gain:.16*g})};
  // A clay chip hitting another rings briefly at a few high modes; a stack is a run of hits that settle.
  function chip(t,level=1){const s=ctx.createBufferSource();s.buffer=noiseBuffer;const g=ctx.createGain();g.gain.setValueAtTime(level*3.2,t);g.gain.exponentialRampToValueAtTime(.001,t+.008);s.connect(g);
-  for(const [f,q,v] of [[2600,14,.9],[4100,18,.8],[5900,20,.6],[8300,16,.35]]){const b=ctx.createBiquadFilter(),m=ctx.createGain();b.type='bandpass';b.frequency.value=wobble(f,.08);b.Q.value=q;m.gain.value=v;g.connect(b);b.connect(m);m.connect(out)}
-  s.start(t,Math.random()*.9);s.stop(t+.03);noise(t,{f:7000,filter:'highpass',dur:.006,gain:.18*level});}
+  for(const [f,q,v] of [[1450,10,1],[2250,12,.8],[3300,14,.5],[4700,12,.22]]){const b=ctx.createBiquadFilter(),m=ctx.createGain();b.type='bandpass';b.frequency.value=wobble(f,.08);b.Q.value=q;m.gain.value=v;g.connect(b);b.connect(m);m.connect(out)}
+  s.start(t,Math.random()*.9);s.stop(t+.03);noise(t,{f:900,filter:'lowpass',dur:.012,gain:.22*level});}
  function stack(t,count,level=1){let at=t,v=level;for(let i=0;i<count;i++){chip(at,v);at+=wobble(i<count-3?.03:.018,.35);v*=i<count-3?wobble(.95,.04):.62}return at}
  const slide=(t,dur=.3,gain=.12)=>noise(t,{f:600,to:1400,q:.6,dur,gain,attack:dur*.4});
  const chips={call:t=>stack(t,4),bet:t=>stack(t,6),raise:t=>stack(stack(t,6)+.09,5,.9)};
@@ -38,10 +40,10 @@ const CitrusSounds=(()=>{
  const thump=(t,gain=.5)=>{tone(t,{f:150,to:70,dur:.09,gain});noise(t,{f:500,filter:'lowpass',dur:.05,gain:gain*.7})};
  const felt={...chips,
   check:t=>{thump(t);thump(t+.13,.42)},
-  fold:t=>{noise(t,{f:1100,to:2600,q:.6,dur:.24,gain:.18,attack:.06});noise(t+.18,{f:2400,filter:'highpass',dur:.03,gain:.2})},
+  fold:t=>noise(t,{f:600,to:1300,q:.6,dur:.26,gain:.22,attack:.07}),
   allin:t=>{thump(allinChips(t)+.02,.5)},
   win:t=>{potChips(t)},
-  turn:t=>{tone(t,{f:1568,dur:1.1,gain:.2});tone(t,{f:1568*2.76,dur:.45,gain:.05});tone(t,{f:1568*5.4,dur:.15,gain:.02})}};
+  turn:t=>{tone(t,{f:784,dur:1.2,gain:.26});tone(t,{f:784*2.76,dur:.5,gain:.06});tone(t,{f:784*5.4,dur:.15,gain:.015})}};
  // Pop: playful game blips.
  const blip=(t,f,dur=.07,gain=.07,type='square')=>tone(t,{f,dur,gain,type,attack:.002});
  const pop={...chips,
