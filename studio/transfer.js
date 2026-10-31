@@ -62,7 +62,7 @@ async function prepareStudyBackup(){
 }
 function shareStudyBackup(){
  const file=transferUI.file;if(!file)return;
- navigator.share({files:[file],title:'Citrus Poker study backup'}).then(()=>transferMessage('Share sheet closed. Your backup is in the destination you selected; this app cannot confirm the upload.')).catch(error=>{if(error.name!=='AbortError')transferMessage('Sharing failed. Use Download backup instead. '+error.message,true);});
+ navigator.share({files:[file],title:'Guava Poker study backup'}).then(()=>transferMessage('Share sheet closed. Your backup is in the destination you selected; this app cannot confirm the upload.')).catch(error=>{if(error.name!=='AbortError')transferMessage('Sharing failed. Use Download backup instead. '+error.message,true);});
 }
 function downloadStudyBackup(){if(!transferUI.file)return;const url=URL.createObjectURL(transferUI.file),a=document.createElement('a');a.href=url;a.download=transferUI.file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);transferMessage('Download requested. Copy the file to your other device and open it there.');}
 function validateBackupRow(store,row){
@@ -94,7 +94,7 @@ async function validateStudyImport(data){
   const row=data.key?normalizeSavedSpot({...data,id:'spot-'+hash(data.key)}):portableSpot(data.observed,data.options,data.result,data.extraAction,data.updatedAt||data.exportedAt);
   return Object.fromEntries(studyStores.map(name=>[name,name==='solves'?[row]:[]]));
  }
- if(data?.format!==backupFormat||data.version!==1||!data.stores||typeof data.stores!=='object')throw Error('Choose a Citrus Poker study backup or exported spot analysis.');
+ if(data?.format!==backupFormat||data.version!==1||!data.stores||typeof data.stores!=='object')throw Error('Choose a Guava Poker study backup or exported spot analysis.');
  const out={};let total=0;
  for(const name of studyStores){const rows=data.stores[name];if(!Array.isArray(rows)||rows.length>100000)throw Error('Invalid or oversized '+name+' collection.');total+=rows.length;}
  if(total>200000)throw Error('This backup has too many records for a browser import.');
