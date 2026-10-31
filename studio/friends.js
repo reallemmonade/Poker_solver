@@ -62,5 +62,6 @@
  $('create').onclick=create;$('join').onclick=()=>join();$('start').onclick=start;$('nextHand').onclick=next;$('copyInvite').onclick=copy;$('leave').onclick=leave;$('lobbyLeave').onclick=leave;$('backIn').onclick=back;$('rebuy').onclick=rebuy;$('showCards').onclick=showCards;
  const query=new URLSearchParams(location.search).get('room'),resume=saved();if(query){$('joinCode').value=query.toUpperCase();if(resume?.room===query.toUpperCase())rejoin(resume);else say('Enter your name to take a seat at this table.');}else if(resume)rejoin(resume);
  seatHUD();
+ if(window.CitrusSounds){const top=document.querySelector('.top'),back=top?.querySelector('a[href="/"]');const b=CitrusSounds.button('btn secondary');b.style.marginLeft='auto';if(back){back.before(b);b.style.marginRight='12px'}else top?.append(b)}
  window.addEventListener('pagehide',()=>clearTimeout(pollTimer));
 })();
