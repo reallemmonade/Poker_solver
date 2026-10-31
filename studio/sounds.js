@@ -2,8 +2,8 @@
 // Three sets share the same events. The audio session is "ambient", so iPhones follow the silent switch
 // and music from other apps keeps playing. Nothing sounds until the first tap or key press unlocks audio.
 const CitrusSounds=(()=>{
- const KEY='citrus-sounds',SETS=[{id:'zest',label:'Zest'},{id:'felt',label:'Felt'},{id:'pop',label:'Pop'}],EVENTS=['deal','board','check','fold','call','bet','raise','allin','win','turn'];
- let ctx=null,out=null,noiseBuffer=null,choice='zest';
+ const KEY='citrus-sounds',SETS=[{id:'felt',label:'Felt'},{id:'zest',label:'Zest'},{id:'pop',label:'Pop'}],EVENTS=['deal','board','check','fold','call','bet','raise','allin','win','turn'];
+ let ctx=null,out=null,noiseBuffer=null,choice='felt';
  try{const saved=localStorage.getItem(KEY);if(saved==='off'||SETS.some(s=>s.id===saved))choice=saved}catch{}
  function audio(){if(ctx)return ctx;const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;try{if(navigator.audioSession)navigator.audioSession.type='ambient'}catch{}
   ctx=new AC();const squash=ctx.createDynamicsCompressor();squash.threshold.value=-14;squash.ratio.value=6;out=ctx.createGain();out.gain.value=.8;out.connect(squash);squash.connect(ctx.destination);
@@ -58,7 +58,12 @@ const CitrusSounds=(()=>{
   // Board cards: the burn card goes face down first, then the street's cards flip.
   if(name==='board'){card(t,.6);for(let i=0;i<cards;i++)card(t+.14+i*gap);return true}
   if(!v[name])return false;v[name](t);if(name==='turn')try{navigator.vibrate?.([25,60,25])}catch{}return true;}
- function set(id){if(id!=='off'&&!SETS.some(s=>s.id===id))return;choice=id;try{localStorage.setItem(KEY,id)}catch{}}
- return{sets:SETS,events:EVENTS,play,set,get choice(){return choice},unlock};
+ // The speaker button turns sounds off and back on to the last set; Settings and every button stay in step.
+ let last='felt';try{const l=localStorage.getItem(KEY+'-last');if(SETS.some(s=>s.id===l))last=l}catch{}if(choice!=='off')last=choice;
+ function set(id){if(id!=='off'&&!SETS.some(s=>s.id===id))return;choice=id;if(id!=='off')last=id;try{localStorage.setItem(KEY,id);localStorage.setItem(KEY+'-last',last)}catch{}if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('citrus-sounds',{detail:id}));}
+ function toggle(){set(choice==='off'?last:'off');if(choice!=='off')unlock().then(()=>play('check'));}
+ const ICON='<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>';
+ function button(className='btn secondary'){const b=document.createElement('button');b.type='button';b.className=className+' sound-toggle';const paint=()=>{const off=choice==='off';b.innerHTML=ICON+(off?'<path d="M17 9l5 6M22 9l-5 6"/>':'<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>')+'</svg>';b.setAttribute('aria-pressed',String(!off));b.setAttribute('aria-label',off?'Turn sounds on':'Turn sounds off');b.title=off?'Sounds off':'Sounds on'};paint();b.onclick=toggle;window.addEventListener('citrus-sounds',paint);return b;}
+ return{sets:SETS,events:EVENTS,play,set,toggle,button,get choice(){return choice},unlock};
 })();
 if(typeof window!=='undefined')window.CitrusSounds=CitrusSounds;

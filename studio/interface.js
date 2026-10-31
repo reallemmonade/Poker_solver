@@ -21,6 +21,7 @@ function initInterface(){
  shell.classList.add('ui-shell');layout.classList.add('ui-layout');document.body.classList.add('ui-app');
  document.querySelector('.hero').remove();$('mobileSetupToggle').hidden=true;
  document.querySelector('.top').innerHTML='<a class="brand ui-brand" href="#play" aria-label="Citrus Poker home">'+CITRUS_MARK+'<span>CITRUS</span> POKER</a><nav class="ui-primary" aria-label="Main activities">'+NAV_AREAS.map(navButton).join('')+'</nav>'+button('Settings','id="uiSettingsButton" aria-haspopup="dialog"');
+ $('uiSettingsButton').before(CitrusSounds.button('btn secondary ui-sound-button'));
  citrusAccount.mount(document.querySelector('.top'),$('uiSettingsButton'));
  document.querySelector('.ui-brand').onclick=event=>{event.preventDefault();navigate('play');};
  const context=create('section','ui-context','<div><strong id="uiGameSummary"></strong><div class="small muted" id="uiGameContext"></div></div>'+button('Edit game','id="uiEditGame" aria-haspopup="dialog"'));
@@ -52,7 +53,7 @@ function initInterface(){
  const method=details('Technical details');$('method').classList.remove('view');method.append($('method'));for(const a of document.querySelectorAll('a[href^="http"]')){a.target='_blank';a.rel='noopener';}settingsDialog.querySelector('.ui-dialog-content').append(method);
  const tools=details('Advanced solver tools');tools.classList.add('setup','ui-model-tools');tools.append(create('p','help','Reusable models are optional. Current-spot analysis has its own solve and reuses identical saved results.'),modelTree,training,$('newModel'),$('progress').parentElement);settingsDialog.querySelector('.ui-dialog-content').append(tools);
  // Sounds sit outside the folded sections so muting is one tap. Picking a set plays its turn chime.
- const sounds=create('div','field gap ui-sounds','<label for="uiSounds">Sounds</label><select class="input" id="uiSounds">'+CitrusSounds.sets.map(s=>'<option value="'+s.id+'">'+s.label+'</option>').join('')+'<option value="off">Off</option></select>');settingsDialog.querySelector('.ui-dialog-content').append(sounds);$('uiSounds').value=CitrusSounds.choice;$('uiSounds').onchange=()=>{CitrusSounds.set($('uiSounds').value);CitrusSounds.unlock().then(()=>CitrusSounds.play('turn'))};
+ const sounds=create('div','field gap ui-sounds','<label for="uiSounds">Sounds</label><select class="input" id="uiSounds">'+CitrusSounds.sets.map(s=>'<option value="'+s.id+'">'+s.label+'</option>').join('')+'<option value="off">Off</option></select>');settingsDialog.querySelector('.ui-dialog-content').append(sounds);$('uiSounds').value=CitrusSounds.choice;window.addEventListener('citrus-sounds',()=>$('uiSounds').value=CitrusSounds.choice);$('uiSounds').onchange=()=>{CitrusSounds.set($('uiSounds').value);CitrusSounds.unlock().then(()=>CitrusSounds.play('turn'))};
  const cardDisplay=details('Card display & theme');settingsDialog.querySelector('.ui-dialog-content').append(cardDisplay);
  // Theme follows the device's light/dark preference unless the player picks one. The look supplies the colours
  // (the Off My Plate looks, or the original green); the table color picks a felt that takes the look's colours.
