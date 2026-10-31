@@ -47,6 +47,8 @@ for(const spot of library.spots.filter(s=>s.game!=='PLO4')){
     ok(!r.solve.library.sizesMatched&&f>=0&&(cut<=1+1e-9?same||direct.every((p,i)=>i===f||Math.abs(p*cut-r.reference[i])<1e-9):c>=0&&r.reference[f]<=direct[f]+1e-9&&(same||direct.every((p,i)=>Math.abs((i===c?p+direct[f]-r.reference[f]:i===f?r.reference[f]:p)-r.reference[i])<1e-9))),spot.id+' '+key+' '+what+': approximate, tightened or widened stored row');continue;}
    ok(what!=='vs bet 120%','vs bet 120% is approximate');
    ok(node.actions.length!==r.actions.length||direct.every((p,i)=>Math.abs(p-r.reference[i])<1e-9),spot.id+' '+key+' '+what+': same row as the stored node');
+   // The tap-a-cell view: the hero's own combo, by its real cards, carries the answer's mix, and no board card shows up.
+   {const k=cards.slice().sort((x,y)=>y-x).map(C.cardName).join(''),m=r.handMix?.combos?.[k],names=board.map(C.cardName);ok(m&&m.every((p,i)=>Math.abs(p-r.reference[i])<2e-3)&&r.handMix.reach[k]>0&&!Object.keys(r.handMix.combos).some(x=>names.includes(x.slice(0,2))||names.includes(x.slice(2))),spot.id+' '+key+' '+what+': hero combo mix by real suits');}
    ok(Math.abs(r.reference[r.best]-direct[best])<1e-9||node.actions.length!==r.actions.length,spot.id+' '+key+' '+what+': best action');
    for(const a of r.actions)ok((()=>{try{h.clone().act(a);return true;}catch{return false;}})(),spot.id+' '+key+' '+what+': legal action '+a.label);
    if(what==='root'){const changed={...spot,rangeOop:{...spot.rangeOop,AA:(spot.rangeOop.AA||0)>.5?0:1}};ok(!Lib.query([{spots:[changed]}],range,h),spot.id+' '+key+': a re-solved chart with other ranges gets no answer');ok(Lib.query([{spots:[changed]},library],range,h),spot.id+' '+key+': a stale library imported first does not hide this one');}

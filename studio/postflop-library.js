@@ -86,15 +86,15 @@
   const steps=streetSteps(hand,1);
   // A stand-in flop is used only where it holds this decision and, with the
   // hero's cards moved onto it, a strategy for them.
-  let flop,key,found,r,at;
+  let flop,key,found,r,at,mv;
   let similar=null;
   for(const cand of candidates){const f=spot.flops[cand.key],w=f&&walk(f,steps,scale,G.units(hand.config.bb),false,{pot:potStart,stack:spot.stack*scale});if(!w||w.node.player!==(hand.actor===ip?'ip':'oop'))continue;const cards=hero.map(cand.move),board=C.cards(cand.key);if(cards.some(x=>x==null||board.includes(x))||new Set(cards).size<cards.length)continue;
    let q=null,near=null,i=-1;if(spot.game==='PLO4'){const p=ploIndex(f,w.node.player,cards,board,hand.rules);if(p){i=p.index;near=p.similar;}}else i=comboIndex(cards);if(i>=0)q=row(w.node,i);
-   if(q){flop=f;key=cand.key;found=w;r=q;similar=near;at=i;break;}}
+   if(q){flop=f;key=cand.key;found=w;r=q;similar=near;at=i;mv=cand.move;break;}}
   if(!r)return null;const standIn=key!==c.key;
   // A bigger price than the node's tightens this combo's defence (and the range grid's) toward MDF, a smaller one widens it.
   let cut=null;if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),spot.game==='PLO4'?null:C.cards(key));r=cut(at,r);}
-  const {actions,probs,index}=libraryActions(hand,found.node,r,scale),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut)};
+  const {actions,probs,index}=libraryActions(hand,found.node,r,scale),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,mv,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),hand.board)};
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[[ip,'ip'],[oop,'oop']].map(([seat,p])=>({seat,range:spot.game==='PLO4'?'Chart range':reachText(reachOf(spot,flop,p,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),C.cards(key)),source})),
@@ -237,6 +237,18 @@
   const out={};for(const k in sum)out[k]=sum[k].map(x=>Math.round(x/count[k]*1000)/1000);return out;
  }
 
+ // Each real combo's own action mix at the node (suits matter once the board is out: AhKh on a two-heart board is not
+ // AsKs), keyed by the real cards high card first ("AhKh"), plus its reach scaled so the most reached combo is 1.
+ // move(x) carries a real card onto the stored flop's suits (and ranks, for a stand-in flop). For the tap-a-cell view.
+ function comboMix(node,index,size,cut,move,reach,board){
+  const combos={},w={};let peak=0;
+  COMBOS.forEach(([a,b])=>{if(board.includes(a)||board.includes(b))return;const x=move(a),y=move(b);if(x==null||y==null||x===y)return;const i=comboIndex([x,y]);let r=row(node,i);if(!r)return;if(cut)r=cut(i,r);
+   const m=Array(size).fill(0);r.forEach((p,k)=>{m[index[k]]+=p;});const t=m.reduce((s,v)=>s+v,0);if(!(t>0))return;const name=C.cardName(b)+C.cardName(a);combos[name]=m.map(v=>Math.round(v/t*1000)/1000);
+   if(reach){w[name]=reach[i]||0;peak=Math.max(peak,w[name]);}});
+  if(peak>0)for(const k in w)w[k]=Math.round(w[k]/peak*1000)/1000;
+  return peak>0?{combos,reach:w}:{combos};
+ }
+
  // Turn strategies (tools/postflop/library.cjs --turn 1, then bundle-turn): one file per spot.
  // Bytes: "CTL1", the header length (uint32, little-endian), the header JSON ({format, name,
  // spot, flops: [{key, weight, iterations, exploitability, offset, length}]}), then each flop's
@@ -280,7 +292,7 @@
   const found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb),false,line.at);if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
   const cards=hand.holes[hand.actor].map(line.move);let r=row(found.node,comboIndex(cards)),cut=null;if(!r)return null;
   if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]);r=cut(comboIndex(cards),r);}
-  const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
+  const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,line.move,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),hand.board)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix,...line.offTree||found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:t.flop.iterations||0,exploitability:t.flop.exploitability,seconds:0,rangeAssumptions:[[t.ip,'ip'],[t.oop,'oop']].map(([seat,p])=>({seat,range:reachText(reachOf(t.spot,null,p,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]),source})),
     library:{spot:t.spot.label,flop:t.key,turn:line.prefix.split('|')[1],standIn:false,line:line.prefix+(found.path?'/'+found.path:''),sizesMatched:!substituted,scale:t.scale},
