@@ -11,7 +11,9 @@
 #           chart never plays a way still get a measured value there.
 #  Round 2: only the lines whose ranges moved more than MOVED (level2.cjs moved); the rest keep round 1.
 # Each round's charts: the last KEEP measurements per line in set2.json, the 6-max 100bb chart
-# rebuilt at ITERATIONS, every other chart from v6. Final: l2/charts-final.json.gz, balance-checked.
+# rebuilt at ITERATIONS, every other chart from v6. Final: l2/charts-final.json.gz, balance-checked
+# and order-checked (order-check.cjs, the 6-max 100bb chart only).
+# SET2 (default $CAL_WORK/set2.json) is the calibration the measurements go into.
 # Everything resumes: solved flops, fits and charts already written are kept. LINES, FLOPS, ROUNDS,
 # ITERATIONS and SOLVE_ITERATIONS shrink it for a test.
 set -u
@@ -19,7 +21,7 @@ K=${1:-1}; N=${2:-1}
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/help}; L=$W/l2
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
 JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; FLOPS=${FLOPS:-60}; FLOOR=${FLOOR:-0.006}; KEEP=${KEEP:-2}; MOVED=${MOVED:-0.05}; ITERATIONS=${ITERATIONS:-2000}; ROUNDS=${ROUNDS:-2}; LINES=${LINES:-per-spot-6max}; SOLVE_ITERATIONS=${SOLVE_ITERATIONS:-150}
-V6=$W/preflop-library-v6-calibrated.json.gz; CHART='NLH cash 6-handed 100bb'
+V6=${V6:-$W/preflop-library-v6-calibrated.json.gz}; SET2=${SET2:-$W/set2.json}; CHART='NLH cash 6-handed 100bb'
 export NODE_OPTIONS=--max-old-space-size=16384
 cd "$R" || exit 1; mkdir -p $L
 say(){ echo "$(date -u '+%F %T') [$K/$N] $*"; }
@@ -43,13 +45,14 @@ charts(){ # calibration out: the 6-max 100bb chart rebuilt, every other v6 chart
   rm -rf $L/build-$(basename $2 .json.gz)
   node tools/preflop/library.cjs --out $L/build-$(basename $2 .json.gz) --games nlh --limp 1 --seats 6 --formats cash --depths 100 --calibration $1 --base $V6 --iterations $ITERATIONS --jobs 1 | grep -E "Problems|FAILED|Bundled|Kept|min"
   cp $L/build-$(basename $2 .json.gz)/preflop-library.json.gz $2.tmp && mv $2.tmp $2
-  node tools/preflop/balance-check.cjs $2 | sed 's/^/  /'; }
+  node tools/preflop/balance-check.cjs $2 | sed 's/^/  /'
+  node tools/preflop/order-check.cjs $2 | grep "$CHART" | sed 's/^/  order: /'; }
 spots(){ # round: the lines to solve
   if [ $1 = 1 ]; then echo $LINES; else node tools/preflop/level2.cjs moved --old $L/charts$(($1-2)).json.gz --new $L/charts$(($1-1)).json.gz --spots $LINES --threshold $MOVED 2>/dev/null; fi; }
 
 if [ $K = 1 ]; then
   [ -f $L/m0.json.gz ] || node tools/preflop/level2.cjs extract --work $W/ev2 --chart "$CHART" --out $L/m0.json.gz
-  node tools/preflop/level2.cjs fit --measure $L/m0.json.gz --base $W/set2.json --keep $KEEP --out $L/cal0.json
+  node tools/preflop/level2.cjs fit --measure $L/m0.json.gz --base $SET2 --keep $KEEP --out $L/cal0.json
   charts $L/cal0.json $L/charts0.json.gz
 fi
 for r in $(seq 1 $ROUNDS); do
@@ -63,9 +66,10 @@ for r in $(seq 1 $ROUNDS); do
     complete $L/r$r $L/charts$((r-1)).json.gz $s
     # Lines not re-solved this round keep their earlier measurements (fit takes the last KEEP).
     m=$L/m0.json.gz; for q in $(seq 1 $r); do m=$m,$L/r$q; done
-    node tools/preflop/level2.cjs fit --measure $m --base $W/set2.json --keep $KEEP --out $L/cal$r.json
+    node tools/preflop/level2.cjs fit --measure $m --base $SET2 --keep $KEEP --out $L/cal$r.json
     charts $L/cal$r.json $L/charts$r.json.gz
   fi
 done
-[ $K = 1 ] && { cp $L/charts$ROUNDS.json.gz $L/charts-final.json.gz; node tools/preflop/balance-check.cjs $L/charts-final.json.gz && say "BALANCE CHECK PASSED" || say "BALANCE CHECK FAILED"; }
+[ $K = 1 ] && { cp $L/charts$ROUNDS.json.gz $L/charts-final.json.gz; node tools/preflop/balance-check.cjs $L/charts-final.json.gz && say "BALANCE CHECK PASSED" || say "BALANCE CHECK FAILED"
+  node tools/preflop/order-check.cjs $L/charts-final.json.gz | grep -q "^ok   $CHART" && say "ORDER CHECK PASSED" || say "ORDER CHECK FAILED"; }
 say "LEVEL 2 DONE"
