@@ -115,9 +115,9 @@ let offReason='';
 function chooseStore(){const turso=process.env.TURSO_DATABASE_URL;if(turso)try{return libsqlStore(turso.trim(),(process.env.TURSO_AUTH_TOKEN||'').trim())}catch(e){offReason='Turso driver did not load ('+e.message+'); the build command must run npm install';console.error('Accounts are off: '+offReason);return null;}const url=process.env.DATABASE_URL;if(url)try{return postgresStore(url)}catch(e){offReason='Postgres driver did not load ('+e.message+'); the build command must run npm install';console.error('Accounts are off: '+offReason);return null;}if(process.env.RENDER&&!process.env.ACCOUNTS_IN_MEMORY){offReason='TURSO_DATABASE_URL is not set on this service';return null;}return memoryStore();}
 
 // Password-reset email goes through Resend (RESEND_API_KEY, needs a verified domain) or Brevo (BREVO_API_KEY, a verified
-// sender address is enough); EMAIL_FROM is the sender, e.g. "Citrus Poker <you@example.com>".
+// sender address is enough); EMAIL_FROM is the sender, e.g. "Guava Poker <you@example.com>".
 function chooseMailer(){
- const from=process.env.EMAIL_FROM||'',m=/^\s*(.*?)\s*<([^>]+)>\s*$/.exec(from),sender={name:m?m[1]||'Citrus Poker':'Citrus Poker',email:m?m[2]:from.trim()};
+ const from=process.env.EMAIL_FROM||'',m=/^\s*(.*?)\s*<([^>]+)>\s*$/.exec(from),sender={name:m?m[1]||'Guava Poker':'Guava Poker',email:m?m[2]:from.trim()};
  const send=async(url,headers,payload)=>{const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(payload)});if(!res.ok)throw Error('Email provider answered '+res.status+': '+(await res.text()).slice(0,200));};
  if(process.env.RESEND_API_KEY&&sender.email)return(to,subject,text)=>send('https://api.resend.com/emails',{Authorization:'Bearer '+process.env.RESEND_API_KEY},{from:sender.name+' <'+sender.email+'>',to:[to],subject,text});
  if(process.env.BREVO_API_KEY&&sender.email)return(to,subject,text)=>send('https://api.brevo.com/v3/smtp/email',{'api-key':process.env.BREVO_API_KEY},{sender,to:[{email:to}],subject,textContent:text});
@@ -164,7 +164,7 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
    limit(req,'forgot',8,15*60*1000);const s=await db(),data=await body(req);if(!mail)throw err(503,'Password reset by email is not set up on this server yet.');
    const user=await findUser(s,data.login);
    if(user?.email){const old=await s.getReset(user.id);if(!old||old.expires-RESET_MS<Date.now()-60000){const code=String(crypto.randomInt(0,1e6)).padStart(6,'0');await s.saveReset(user.id,resetHash(user.id,code),Date.now()+RESET_MS);
-    try{await mail(user.email,'Your Citrus Poker code: '+code,'Hi '+(user.name||user.username)+',\n\nYour code to reset your Citrus Poker password is '+code+'. It works for 15 minutes.\n\nYour username is '+user.username+'.\n\nIf you did not ask for this, ignore this email; your password stays the same.');}
+    try{await mail(user.email,'Your Guava Poker code: '+code,'Hi '+(user.name||user.username)+',\n\nYour code to reset your Guava Poker password is '+code+'. It works for 15 minutes.\n\nYour username is '+user.username+'.\n\nIf you did not ask for this, ignore this email; your password stays the same.');}
     catch(e){console.error('Reset email failed:',e.message);await s.deleteReset(user.id);throw err(502,'The email could not be sent. Try again in a few minutes.');}}}
    return json(res,200,{sent:true});
   }

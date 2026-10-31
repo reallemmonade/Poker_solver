@@ -1,5 +1,5 @@
 .felt{height:clamp(500px,48vw,610px);min-height:500px;margin:30px 8px 34px;border:9px solid var(--felt-rail,#50483b);border-radius:44%;background:var(--felt-bg,radial-gradient(ellipse at 50% 40%,#245b4d,#123a30));box-shadow:0 0 0 2px var(--felt-edge,#81735a),inset 0 0 0 2px var(--felt-edge,#98ac8138),inset 0 0 80px var(--felt-shadow,#001a1599);isolation:isolate}
-.felt-logo{position:absolute;left:50%;top:50%;width:min(150px,38%);aspect-ratio:1;transform:translate(-50%,-50%);z-index:0;pointer-events:none;opacity:.22}html[data-felt=paper] .felt-logo{opacity:.3}.felt-logo svg{display:block;width:100%;height:100%;margin:0;vertical-align:0}
+.felt-logo{position:absolute;left:50%;top:50%;width:min(150px,38%);aspect-ratio:1;transform:translate(-50%,-50%);z-index:0;pointer-events:none;opacity:.15}html[data-felt=paper] .felt-logo{opacity:.2}.felt-logo svg{display:block;width:100%;height:100%;margin:0;vertical-align:0}
 .seat-node{position:absolute;transform:translate(-50%,-50%);width:clamp(70px,12%,110px);z-index:5;text-align:center}
 .seat-node .player{position:relative;transform:none;min-width:0;max-width:none;width:100%;padding:7px 4px;background:linear-gradient(#182b29,#0d1d1d);border:1px solid #5b7970;box-shadow:0 5px 12px #0004;font-size:11px;z-index:2}
 .seat-node .player.active{outline:2px solid #a1e6b5;box-shadow:0 0 20px #9cdbaf35}
