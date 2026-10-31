@@ -60,7 +60,7 @@ async function addTurnLibrary(bytes){
  turnLibrary.spots=turnLibrary.spots.filter(s=>s.uid!==uid).concat(spot);for(const k of [...turnLibrary.cache.keys()])if(k.startsWith(uid+'|'))turnLibrary.cache.delete(k);
  return spot;
 }
-async function restoreTurnLibrary(){try{turnLibrary.spots=await turnStore('spots','readonly',store=>turnRequest(store.getAll()))||[];}catch{turnLibrary.spots=[];}}
+async function restoreTurnLibrary(){turnLibrary.restoring=true;try{turnLibrary.spots=await turnStore('spots','readonly',store=>turnRequest(store.getAll()))||[];}catch{turnLibrary.spots=[];}finally{turnLibrary.restoring=false;}if(state.hand)renderPlay();}
 async function turnChunk(spot,key){
  const id=spot.uid+'|'+key;if(turnLibrary.cache.has(id)){const c=turnLibrary.cache.get(id);turnLibrary.cache.delete(id);turnLibrary.cache.set(id,c);return c;}
  const bytes=await turnStore('flops','readonly',store=>turnRequest(store.get(id)));if(!bytes)return null;
@@ -123,12 +123,14 @@ function dropStoredBundle(meta){
 // the browser cache revalidates unchanged files, and nothing large is written to or read back from the database.
 // Phones and tablets download single files instead.
 const fetchLibraryFile=async file=>{const url='libraries/'+file.split('/').map(encodeURIComponent).join('/'),r=await fetch(url,{cache:'no-cache'}).catch(()=>fetch(url,{cache:'force-cache'}));if(!r.ok)throw Error('Missing '+file);return JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text());};
-let bundleManifest=null,bundleLoading=false;
+let bundleManifest=null,bundleLoading=false,bundleReady=Promise.resolve(),phoneLoads=0;
 // True while the built-in charts are still arriving, so a missing chart is not yet a real answer.
-function chartsLoading(){return bundleLoading||phoneFetches.size>0;}
-async function loadBundledLibraries(){
- if(!/^https?:$/.test(location.protocol)||typeof DecompressionStream!=='function')return;
- bundleLoading=true;
+function chartsLoading(){return bundleLoading||phoneLoads>0||phoneFetches.size>0||!!turnLibrary.restoring;}
+function loadBundledLibraries(){
+ if(!/^https?:$/.test(location.protocol)||typeof DecompressionStream!=='function')return Promise.resolve();
+ bundleLoading=true;return bundleReady=fetchBundledLibraries();
+}
+async function fetchBundledLibraries(){
  try{
   const manifest=await fetch('libraries/manifest.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
   if(!manifest?.version||!Array.isArray(manifest.packs)||!Array.isArray(manifest.flops))return;
@@ -150,7 +152,10 @@ async function loadBundledLibraries(){
 const memoryOnly=new WeakSet(),phoneFetches=new Map();
 function phoneFetch(file){if(!phoneFetches.has(file))phoneFetches.set(file,fetchLibraryFile(file).finally(()=>phoneFetches.delete(file)));return phoneFetches.get(file);}
 async function ensurePhoneLibraries(hand){
- const m=bundleManifest;if(!m||!hand)return false;let changed=false;
+ if(!bundleManifest||!hand)return false;phoneLoads++;try{return await fetchPhoneLibraries(hand);}finally{phoneLoads--;}
+}
+async function fetchPhoneLibraries(hand){
+ const m=bundleManifest;let changed=false;
  const before=postflopLibrary.libraries.length;postflopLibrary.libraries=postflopLibrary.libraries.filter(l=>!memoryOnly.has(l)||l.forHand===hand&&!hand.done);if(postflopLibrary.libraries.length<before)changed=true;
  if(hand.done)return changed;
  try{
