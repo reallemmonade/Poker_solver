@@ -2,7 +2,7 @@
 // Builds the whole NLH and PLO preflop chart library and bundles it into one file.
 //   node tools/preflop/library.cjs --out dir [--jobs 4] [--iterations 2000] [--every 500] [--games nlh,plo]
 // With --rake pct [--rakeCap bb] it builds raked cash charts only (tables with that rake and
-// cap use them; other raked tables fall back to the rake-free charts), at --depths (default 50,100,150,200).
+// cap use them; other raked tables fall back to the rake-free charts), at --depths (default 50,100,150,200); otherwise 10-1000bb, plus 4-15bb heads-up NLH.
 // Each chart keeps its averaged strategy from the checkpoint (every --every iterations) with the
 // lowest NashConv, since multiway CFR+ need not settle.
 // PLO needs plo-model.json (see plo-model.cjs).
@@ -18,7 +18,10 @@ for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''
 const raked=args.rake>0,SEATS=args.seats?args.seats.split(',').map(Number):[2,3,4,5,6,7,8,9],DEPTHS=args.depths?args.depths.split(',').map(Number):raked?[50,100,150,200]:[10,20,50,100,150,200,500,1000],FORMATS=args.formats?args.formats.split(','):raked?['cash']:['cash','mtt'],tag=raked?`-rake${args.rake}-cap${args.rakeCap}`:'';
 fs.mkdirSync(args.out,{recursive:true});
 
-const specs=[];for(const game of args.games.split(','))for(const seats of SEATS.slice().reverse())for(const format of FORMATS)for(const stack of DEPTHS)specs.push({game,seats,stack,format});
+// Heads-up NLH also gets 4, 6, 8, 12 and 15bb charts: below 20bb the right play shifts fast with depth
+// (an 8bb spot read off the 10bb chart limps hands that jam at 8bb), and these charts take seconds.
+const HU_SHORT=!args.depths&&!raked?[4,6,8,12,15]:[];
+const specs=[];for(const game of args.games.split(','))for(const seats of SEATS.slice().reverse())for(const format of FORMATS)for(const stack of [...game==='nlh'&&seats===2?HU_SHORT:[],...DEPTHS].sort((a,b)=>a-b))specs.push({game,seats,stack,format});
 const file=s=>path.join(args.out,`${s.game}-${s.format}-${s.seats}max-${s.stack}bb${tag}.json`);
 const queue=specs.filter(s=>!fs.existsSync(file(s)));
 console.log(`${specs.length} charts, ${queue.length} to solve, ${args.jobs} at a time.`);
