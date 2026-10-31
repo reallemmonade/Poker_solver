@@ -20,6 +20,7 @@
 // the log multiplier is scaled by n/(n + shrink x the median n of the fitted classes), where n is
 // its combos times flops. With a few dozen flops per spot the raw per-class fit is mostly noise
 // (fits on two halves of 120 3-bet-pot flops agreed at r=0.39). --shrink 0 turns it off.
+// Fitted playability is kept in kicker order (see monotone below); --monotone 0 turns it off.
 // --check dir reports the fitted model's pot-share error on flops solved elsewhere (held out).
 // --per-spot 1 also fits every spot with at least --spot-flops solved flops on its own, shrunk
 // toward its pot type's fit instead of the shape rule, and writes them as `spots` keyed by
@@ -29,9 +30,9 @@ const {playability,PLAY}=require('./solve.cjs');
 const table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
 const classes=table.classes,K=classes.length,index=new Map(classes.map((c,i)=>[c,i])),combos=classes.map(c=>c.length===2?6:c[2]==='s'?4:12);
 
-const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',check:'','per-spot':'','spot-flops':'20'};
+const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',monotone:'1',check:'','per-spot':'','spot-flops':'20'};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
-if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--check dir] [--per-spot 1 [--spot-flops 20]]');process.exit(1);}
+if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--monotone 0] [--check dir] [--per-spot 1 [--spot-flops 20]]');process.exit(1);}
 
 // The two players at the flop, from the chart line "seat:kind:target/...": out of position is
 // first after the button (seat 0), and the aggressor is the last raiser (none in a limped pot).
@@ -78,6 +79,23 @@ function predict(d,g,rho,iota,play,out){
 function loss(data,g,rho,iota,play){let s=0,w=0;const out=new Float64Array(K);for(const d of data){predict(d,g,rho,iota,play,out);for(let i=0;i<K;i++)if(d.weight[i]){const x=out[i]-d.target[i];s+=d.weight[i]*x*x;w+=d.weight[i];}}return Math.sqrt(s/w);}
 
 const base=classes.map(c=>playability(c,PLAY));
+// Kicker chains: the same high card and suitedness, kicker falling (K9s, K8s, ... K2s). Suited wheel
+// aces (A5s-A2s) form a chain of their own, since their straights make them more playable than A9s-A6s.
+const R='AKQJT98765432',chains=[];
+for(let i=0;i<12;i++)for(const s of ['s','o']){const hands=[...R.slice(i+1)].map(k=>R[i]+k+s);if(i===0&&s==='s')chains.push(hands.slice(0,8),hands.slice(8));else chains.push(hands);}
+// Fitted playability is kept non-increasing down each chain (weighted pool-adjacent-violators on the log
+// scale). Without it the classes at the bottom of the solved ranges, which realize worst, fall below the
+// next-lower kickers that sit just outside those ranges and keep the shape rule's value, so the charts
+// open K8s but fold K9s (tools/preflop/order-check.cjs). Unfitted classes get almost no weight.
+function monotone(play,weight){
+ for(const chain of chains){
+  const blocks=[];
+  for(const c of chain){const i=index.get(c),w=Math.max(weight[i],1e-9);blocks.push({v:Math.log(play[i]),w,n:[i]});
+   while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
+  for(const b of blocks)for(const i of b.n)play[i]=Math.exp(b.v);
+ }
+ return play;
+}
 function fit(collected){
  const r=fitPots(collected);if(args['per-spot']!=='1')return r;
  // Grouped by chart and line, so the same spot id solved on charts with other raise sizes stays apart.
@@ -113,7 +131,7 @@ function fitPlay(g,rho,iota){
   if(it===24&&shrink>0)for(let i=0;i<K;i++)if(fitted(i))play[i]=base0[i]*(play[i]/base0[i])**(total[i]/(total[i]+shrink));
   let ls=0,lb=0,n=0;for(let i=0;i<K;i++)if(fitted(i)){ls+=Math.log(play[i]);lb+=Math.log(base0[i]);n++;}const k=Math.exp((lb-ls)/n);for(let i=0;i<K;i++)if(fitted(i))play[i]*=k;
  }
- return play;
+ return args.monotone==='0'?play:monotone(play,total);
 }
 
 const before=loss(data,1.2,.12,.06,base);let best=null;
