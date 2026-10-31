@@ -137,7 +137,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .range-grid span[data-hand]{box-shadow:0 0 0 2px var(--ink);position:relative;z-index:1}
 .action-key{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;margin:0 0 6px;color:var(--muted)}
 .action-key span{display:inline-flex;align-items:center;gap:4px}.action-key i{width:10px;height:10px;border-radius:2px;display:inline-block}
-.action-key i.range-always{background:color-mix(in srgb,var(--ink) 42%,var(--panel2))}.action-key i.range-sometimes{background:linear-gradient(to right,color-mix(in srgb,var(--ink) 42%,var(--panel2)) 50%,var(--panel2) 0);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 25%,transparent)}
+.action-key i.range-never{background:var(--panel2);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 25%,transparent)}.action-key i.range-always{background:color-mix(in srgb,var(--ink) 42%,var(--panel2))}.action-key i.range-sometimes{background:linear-gradient(to right,color-mix(in srgb,var(--ink) 42%,var(--panel2)) 50%,var(--panel2) 0);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 25%,transparent)}
 .ui-jump{border:0;background:transparent;color:var(--accent,inherit);padding:0;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}.ui-jump-flash{animation:ui-jump-flash 1.6s ease-out}@keyframes ui-jump-flash{0%,30%{box-shadow:0 0 0 2px var(--accent,#c8e64c)}100%{box-shadow:0 0 0 2px transparent}}@media (prefers-reduced-motion:reduce){.ui-jump-flash{animation:none}}
 /* Main activity icons: beside the label on wide screens, above it in the phone tab bar. */
 .ui-primary [data-area]{display:inline-flex;align-items:center;gap:7px}.ui-nav-icon{width:18px;height:18px;flex:none}
