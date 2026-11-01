@@ -8,6 +8,10 @@
 // minutes it also pushes a 'macsolver' heartbeat (last seen, threads, load) so the phone can say whether this
 // computer is online and busy. With nothing queued and the computer otherwise idle, it learns the flops your devices
 // asked for ('flopwant-' rows, see learn.cjs) one at a time, and marks each done.
+// Other computers can run the same bridge for your account (server.cjs --name): each takes only the jobs the app sent
+// to it by that name ('mac' is this Mac), beats as 'solver-<name>' and, given its price (--rate, dollars an hour), puts
+// what each solve cost on the job. A cloud worker (--once <job>, tools/cloud) is started for one job: it gets the job
+// and the account's sync cursor with it, solves, pushes the answer and exits.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
 const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000,PROGRESS_MS=10000,IDLE_LOAD=.5,WANT_DAYS=30;
 
@@ -28,21 +32,24 @@ function progressOf(job,s,first){
  const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
  return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
 }
-function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log}){
+function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log,name='mac',rate=0,once=null,onIdle=null,bootAt=Date.now()}){
  let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null,updateWant=null;const jobs=new Map(),wants=new Map();
+ // What a solve has cost so far, in dollars: a cloud worker is billed from the moment it starts, its boot included.
+ const costOf=from=>rate>0?Math.round(rate*(Date.now()-(once?bootAt:from))/36)/1e5:0,mine=j=>once?false:(j.target||'mac')===name;
  // Open jobs and wanted flops are kept with the cursor: a restart pulls only what changed since, so they would be lost.
  const open=(m,...states)=>[...m].filter(([,v])=>states.includes(v.status));
- try{const {jobs:j,wants:w,...saved}=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;for(const [id,v]of Array.isArray(j)?j:[])jobs.set(id,v);for(const [id,v]of Array.isArray(w)?w:[])wants.set(id,v);}}catch{}
- const save=()=>{try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor,jobs:open(jobs,'queued','running'),wants:open(wants,'wanted','learning')}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
+ if(once){link=once.link;cursor=Number(once.cursor)||0;jobs.set(once.id,{...once.job,t:Number(once.t)||Date.now()});}
+ else try{const {jobs:j,wants:w,...saved}=JSON.parse(fs.readFileSync(FILE,'utf8'));if(saved?.api&&saved?.token){link=saved;cursor=Number(saved.cursor)||0;for(const [id,v]of Array.isArray(j)?j:[])jobs.set(id,v);for(const [id,v]of Array.isArray(w)?w:[])wants.set(id,v);}}catch{}
+ const save=()=>{if(once)return;try{fs.writeFileSync(FILE,JSON.stringify({...link,cursor,jobs:open(jobs,'queued','running'),wants:open(wants,'wanted','learning')}),{mode:0o600});}catch(e){log('Could not save the account link: '+e.message);}};
  async function api(method,route,body){
   const r=await fetch(link.api.replace(/\/$/,'')+route,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+link.token},body:body?JSON.stringify(body):undefined});
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta('macsolver',{seen:Date.now(),features:update?['preflop','update']:['preflop'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),name,rate,features:update?['preflop','update','targets']:['preflop','targets'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
-   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
+   for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id)&&(!once||r.id===once.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
    cursor=page.cursor;if(!page.more)break;}
   save();
  }
@@ -54,35 +61,36 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   });
  }
  async function runNext(){
-  // Only this bridge runs queued solves, one at a time, so a job still marked running here was cut off by a restart.
-  const next=[...jobs.entries()].filter(([,j])=>j.status==='queued'||j.status==='running').sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0))[0];if(!next)return;
+  // Only this bridge runs the solves sent to it, one at a time, so a job still marked running here was cut off by a restart.
+  const next=[...jobs.entries()].filter(([id,j])=>(j.status==='queued'||j.status==='running')&&(once?id===once.id:mine(j))).sort((a,b)=>(a[1].createdAt||0)-(b[1].createdAt||0))[0];if(!next)return;
   // The job's rows from here on are stamped just after the phone's own write, not with this computer's clock, so a
   // cancel the phone writes later wins over them even when its clock is behind or it was offline when you tapped.
-  const [id,job]=next;let n=0,over=false;const at=()=>(job.t||Date.now())+ ++n;await stopLearning();const started={...job,status:'running',startedAt:Date.now()};delete started.t;jobs.set(id,started);
+  const [id,job]=next;let n=0,over=false;const at=()=>(job.t||Date.now())+ ++n;await stopLearning();const started={...job,status:'running',startedAt:Date.now(),worker:name,...rate>0?{rate,cost:costOf(Date.now())}:{}};delete started.t;jobs.set(id,started);
   await api('POST','/api/sync',{rows:[meta(id,started,at())]});log('Solving a spot sent from your account ('+id+').');
   // Progress goes up every 10 seconds while the solve runs, and the heartbeat with it: a long solve holds the
   // regular round, and the phone should still see this computer as online. A report still pulling when the solve
   // ends sends nothing, or its 'running' row would land after the answer and the job would be solved again.
-  const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
+  const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,...rate>0?{cost:costOf(started.startedAt)}:{},progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(!once&&Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
   const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);over=true;}const result=out.result;
   // Cancelled from the phone: the job row already says so, so nothing goes back.
   if(out.cancelled){log('Cancelled '+id+'.');return;}
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'},at())]});return;}
-  const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
+  const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost:costOf(started.startedAt)}:{},message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
   if(ok)rows.push({store:'solves',id:job.rowId,t:Date.now(),data:{id:job.rowId,key:job.key,result,observed:job.observed,options:job.options,extraAction:job.extraAction||null,updatedAt:new Date().toISOString()}});
   rows.push(meta(id,done,at()));jobs.set(id,done);await api('POST','/api/sync',{rows});log((ok?'Solved ':'Could not solve ')+id+' in '+Math.round((done.finishedAt-done.startedAt)/1000)+' s'+(ok?'.':': '+done.message));
  }
  async function tick(){
   if(!link||running)return;
   running=(async()=>{try{
+   if(once){await pull();const j=jobs.get(once.id);if(j&&(j.status==='queued'||j.status==='running'))await runNext();onIdle?.();return;}
    if(Date.now()-beat>BEAT_MS){beat=Date.now();await api('POST','/api/sync',{rows:[heartbeat()]});}
    await pull();
    // An update asked for from your phone runs once nothing is solving; this bridge restarts with it.
    if(updateWant?.status==='wanted'&&!busy()){const {t,...w}=updateWant;updateWant=null;let row={...w,status:'updating',startedAt:Date.now()};try{if(!update)throw Error('This computer can\'t update from the app.');update();log('Updating, as asked from your account.');}catch(e){row={...w,status:'failed',message:e.message};}await api('POST','/api/sync',{rows:[meta('macupdate',row,(t||Date.now())+1)]});if(row.status==='updating')return;}
    if(!busy())await runNext();
    if(!busy()&&!learning&&![...jobs.values()].some(j=>j.status==='queued'||j.status==='running'))learnNext();
-  }catch(e){if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
+  }catch(e){if(once){log('Cloud solve: '+e.message);onIdle?.();}else if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
   return running;
  }
@@ -116,7 +124,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   }
  }
  function start(){if(!timer){timer=setInterval(tick,POLL_MS);timer.unref?.();}tick();}
- if(link)start();
+ if(once)tick();else if(link)start();
  return{
   get user(){return link?.user||null},
   link(body){const api=String(body?.api||''),token=String(body?.token||''),user=String(body?.user||'');

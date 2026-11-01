@@ -99,9 +99,30 @@ function spotSettings(hand,pending={}){
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
 const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[150,120,10],MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
+// Cloud solves (tools/cloud): when your Mac is offline or busy, a queued solve can go to a container on Modal that is
+// billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
+// rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
+// with --name (tools/local-solver/link.cjs) beats as 'solver-<name>' and takes jobs while idle at its own rate.
+const CLOUD_SOLVER={url:'',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
+function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{}return v!=='off';}
+function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
+// Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
+// it waits for your Mac. Preflop lines that reach a 3-way flop take hours, so they wait for the Mac.
+function solveTarget(heavy){
+ const now=Date.now(),mac=spotUI.mac,macQueue=[...spotUI.jobs.values()].some(j=>jobPending(j)&&(j.target||'mac')==='mac');
+ if(mac?.seen&&now-mac.seen<MAC_OFFLINE_MS&&!mac.busy&&!macQueue)return{target:'mac',threads:mac.threads,load:mac.load,rate:0};
+ for(const s of spotUI.servers.values())if(s.seen&&now-s.seen<SERVER_OFFLINE_MS&&!s.busy&&!(s.load>.5)&&![...spotUI.jobs.values()].some(j=>jobPending(j)&&j.target===s.name))return{target:s.name,threads:s.threads,load:0,rate:Number(s.rate)||0,server:true};
+ if(!heavy&&cloudReady())return{target:'modal',threads:CLOUD_SOLVER.threads,load:0,rate:CLOUD_SOLVER.rate,boot:CLOUD_SOLVER.boot,cloud:true};
+ return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
+}
+// Cents, rounded the way a price reads: under 1¢ shows as <1¢.
+function centsText(dollars){const c=dollars*100;return c<1?'<1¢':c<10?(Math.round(c*10)/10)+'¢':c<100?Math.round(c)+'¢':'$'+(dollars).toFixed(2);}
+function planCost(plan,factor=1){return plan.rate>0?(plan.solve*factor+(plan.boot||0))/3600*plan.rate:0;}
+// What your cloud solves cost this calendar month, from the jobs synced to this account.
+function cloudSpendThisMonth(){const d=new Date(),from=new Date(d.getFullYear(),d.getMonth(),1).getTime();let s=0;for(const j of spotUI.jobs?.values()||[])if(j.cost>0&&(j.startedAt||j.createdAt||0)>=from)s+=j.cost;return s;}
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
 // v2: the trees with a small bet, a big bet and an overbet (learned ratios from the one-size trees no longer apply).
-function solveTimeKey(plan){return plan.route+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'-v2');}
+function solveTimeKey(plan){return(plan.target&&plan.target!=='mac'?plan.target:plan.route)+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'-v2');}
 function recordSolveTime(plan,seconds){if(!plan||!(seconds>0)||plan.kind==='multiway'||plan.learned)return;const t=solveTimes(),key=solveTimeKey(plan),ratio=seconds/plan.seed,old=t[key];t[key]=old>0?.6*old+.4*ratio:ratio;try{localStorage.setItem('range-lab-solve-times',JSON.stringify(t))}catch{}}
 // How fast this device runs the solvers' kind of work (typed-array arithmetic over scattered indexes), measured in
 // about 0.2 s and kept for a week. The browser river times above were measured where this scores BENCH_REFERENCE
@@ -122,19 +143,20 @@ function spotPlan(hand){
  const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
  if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
-  const mac=bridge?localBridge:spotUI.mac,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
+  const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
-  const three=pre&&preflopFlopPlayers(hand)===3?1:0,base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
-  const learned=kind==='nlh'&&hand.street===1&&!bridge&&learnedFlopReady(hand);
-  plan={route:bridge?'texas':'mac',learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+queuedSeconds()};
+  const base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const learned=kind==='nlh'&&hand.street===1&&!bridge&&dest.target==='mac'&&learnedFlopReady(hand);
+  plan={route:bridge?'texas':'mac',target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
   // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.
   // A bridge that can update itself does it from a tap, here or on your phone; an older one shows the setup command
   // on the Mac, and the phone sends you there.
-  if(pre&&(bridge?!localBridge.preflop:mac?.seen&&!(mac.features||[]).includes('preflop'))){const u=spotUI.macUpdate,self=bridge?localBridge.update:(mac.features||[]).includes('update');
+  const hb=spotUI.mac;
+  if(pre&&dest.target==='mac'&&(bridge?!localBridge.preflop:hb?.seen&&!(hb.features||[]).includes('preflop'))){const u=spotUI.macUpdate,self=bridge?localBridge.update:(hb.features||[]).includes('update');
    if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
    else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
    else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
-  else if(!bridge){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!mac?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-mac.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
+  else if(!bridge&&dest.target==='mac'){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!hb?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-hb.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
  }
  // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
  // can't be sent, so it isn't offered (the solve would only stop with that error).
@@ -157,8 +179,9 @@ function preflopSeconds(hand,three){const n=hand.n,its=three?1100:800;return its
 function unsolvableReason(hand){const plan=spotPlan(hand);return plan?.route==='none'?plan.reason:plan?.blocked||'';}
 // The number and its unit never split across lines.
 function solveTimeText(seconds){return seconds<60?'about '+Math.max(5,Math.round(seconds/5)*5)+'\u00a0sec':seconds<5400?'about '+Math.round(seconds/60)+'\u00a0min':seconds<172800?'about '+Math.round(seconds/3600)+'\u00a0h':'about '+Math.round(seconds/86400)+'\u00a0days';}
-function planTimeText(plan,factor=1){const text=solveTimeText(plan.solve*factor+plan.wait);return plan.mayStop?text.replace('about','up to'):text;}
-function planPlace(plan){return onDeviceRoute(plan)?'on this device':'on your Mac';}
+function planTimeText(plan,factor=1){const text=solveTimeText(plan.solve*factor+plan.wait),t=plan.mayStop?text.replace('about','up to'):text;return plan.rate>0?t+' · '+centsText(planCost(plan,factor)):plan.server?t+' · free':t;}
+function planPlace(plan){return onDeviceRoute(plan)?'on this device':plan.cloud?'in the cloud':plan.server?'on your server':'on your Mac';}
+function jobPlace(j){return j.target==='modal'?'The cloud':j.target&&j.target!=='mac'?'Your server':'Your Mac';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
 // A stand-in flop does not count once your Mac has learned the real one.
 function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand)||hand.street===0&&learnedPreflop(hand))return true;if(hand.street===0){noteMissingPreflop(hand);return false;}const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
@@ -186,7 +209,7 @@ function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
 // bridge's heartbeat: when it was last seen, its threads and how busy the Mac is.
-spotUI.jobs=new Map();spotUI.mac=null;spotUI.jobTimer=0;spotUI.macUpdate=null;
+spotUI.jobs=new Map();spotUI.mac=null;spotUI.servers=new Map();spotUI.jobTimer=0;spotUI.macUpdate=null;
 // Updating the Mac's solver: straight to the bridge on the Mac itself, else a 'macupdate' row it picks up within the sync time.
 const UPDATE_MS=10*60e3;
 async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.value;
@@ -194,7 +217,7 @@ async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.v
   if(spotUI.macUpdate.status==='updating')setTimeout(()=>checkLocalBridge().then(()=>{if(localBridge.preflop)spotUI.macUpdate=null;if(state.hand)renderPlay();}),90e3);}
  else{spotUI.macUpdate={status:'wanted',at};try{await dbPut('meta',{id:'macupdate',value:spotUI.macUpdate});}catch{}citrusAccount.run();watchSolveJobs();}
  spotUI.last=null;if(state.hand)renderPlay();}
-async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;const up=rows.find(r=>r.id==='macupdate')?.value;if(up&&typeof up==='object'&&(up.at||0)>=(spotUI.macUpdate?.at||0))spotUI.macUpdate=up;
+async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;spotUI.servers=new Map(rows.filter(r=>/^solver-[a-z0-9-]+$/.test(r.id)&&r.value&&typeof r.value==='object'&&r.value.name).map(r=>[r.id,r.value]));const up=rows.find(r=>r.id==='macupdate')?.value;if(up&&typeof up==='object'&&(up.at||0)>=(spotUI.macUpdate?.at||0))spotUI.macUpdate=up;
   // Done once the Mac's heartbeat shows the new solver.
   if(spotUI.macUpdate&&(spotUI.mac?.features||[]).includes('preflop')&&(spotUI.mac.seen||0)>(spotUI.macUpdate.at||0))spotUI.macUpdate=null;}catch{}watchSolveJobs();}
 // The latest solve sent for this spot. A cancelled one counts as none: you already know, and Solve this spot is offered again.
@@ -217,11 +240,14 @@ function agoText(ms){const m=Math.round(ms/60000);return m<1?'just now':m<90?m+'
 spotUI.shownProgress=new Map();
 function jobProgress(j){const g=j.progress,now=Date.now();if(!g?.at){const left=Math.max(0,(j.seconds||0)-(now-(j.startedAt||now))/1000);return{phase:'starting',p:0,left,stale:j.startedAt>0&&now-j.startedAt>120000,at:j.startedAt};}const left=Math.max(0,g.remaining-(now-g.at)/1000),raw=g.remaining>0?1-(1-g.p)*left/g.remaining:g.p,run=j.rowId+' '+j.startedAt,p=Math.min(.99,Math.max(raw,spotUI.shownProgress.get(run)||0));spotUI.shownProgress.set(run,p);return{phase:g.phase,p,left:(1-p)*left/Math.max(.01,1-raw),stale:now-g.at>120000,at:g.at};}
 function jobState(j){
- if(j.status==='failed')return{text:'Your Mac could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved.'};
- if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:'Your Mac stopped reporting progress ('+agoText(Date.now()-g.at)+'). It may be asleep.',p:g.p};
-  return g.phase==='preparing'?{text:'Preparing ranges…',label:'Preparing',time:'',p:g.p}:{text:'Solving · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done'),label:'Solving '+Math.floor(g.p*100)+'%',time:g.left>=5?solveTimeText(g.left).replace('about ',''):'almost done',p:g.p};}
+ const where=jobPlace(j),cost=j.cost>0?' · '+centsText(j.cost):'';
+ if(j.status==='failed')return{text:where+' could not solve this. '+(j.message||'')};if(j.status==='cancelled')return{text:'Solve cancelled.'};if(j.status==='done')return{text:'Solved.'};
+ if(j.status==='running'){const g=jobProgress(j);if(g.stale)return{text:where+' stopped reporting progress ('+agoText(Date.now()-g.at)+').'+(where==='Your Mac'?' It may be asleep.':''),p:g.p};
+  return g.phase==='preparing'?{text:'Preparing ranges…',label:'Preparing',time:cost.slice(3),p:g.p}:{text:'Solving · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done')+cost,label:'Solving '+Math.floor(g.p*100)+'%',time:(g.left>=5?solveTimeText(g.left).replace('about ',''):'almost done')+cost,p:g.p};}
  const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac;
  if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
+ if(j.target==='modal')return{text:'Starting in the cloud',label:'Starting',time:'~'+CLOUD_SOLVER.boot+'\u00a0sec',p:0,queued:true};
+ if(j.target&&j.target!=='mac'){const s=spotUI.servers.get('solver-'+j.target);if(!s?.seen||Date.now()-s.seen>SERVER_OFFLINE_MS)return{text:'Waiting for your server'+(s?.seen?' · last seen '+agoText(Date.now()-s.seen):'')};return{text:'Queued on your server',label:'Queued',time:'',p:0,queued:true};}
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
  if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
  const wait=solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60));return{text:'Queued · '+wait,label:'Queued',time:wait.replace('about ','~'),p:0,queued:true};
@@ -236,8 +262,19 @@ setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==
 async function sendToMac(task,observed,opts,extraAction){
  if(!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now()};
- await dbPut('meta',{id,value:job});spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
+ await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
+ if(job.target==='modal')startCloudSolve(id,job,t);
+}
+// The cloud worker gets the job itself (it may start before this device's sync lands) with your session and this
+// device's sync cursor, so it pulls only what changed since: a cancel from here. Its rows are stamped after t.
+async function startCloudSolve(id,job,t){
+ const link=citrusAccount.link;let error='';
+ try{const r=await fetch(CLOUD_SOLVER.url.replace(/\/$/,'')+'/solve',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+link.token},body:JSON.stringify({api:link.api,id,job,t,cursor:citrusAccount.cursor})}),b=await r.json().catch(()=>({}));if(!r.ok)error=String(b.detail||b.error||'Error '+r.status+'.');}
+ catch(e){error=e?.name==='TypeError'?'No connection.':String(e?.message||e);}
+ if(!error)return;const cur=spotUI.jobs.get(id);if(!cur||!jobPending(cur))return;
+ // It never started, so it's marked failed and costs nothing; Solve this spot is offered again after.
+ const value={...cur,status:'failed',message:error};spotUI.jobs.set(id,value);try{await dbPut('meta',{id,value});}catch{}citrusAccount.run();if(state.hand)renderPlay();
 }
 // While a solve is out on the Mac, sync every 20 seconds, and every 10 while it runs, so its progress stays
 // current and its answer shows soon after it lands.
@@ -246,7 +283,7 @@ function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const 
 async function deliverSolveJob(force=false){
  const h=state.hand,j=spotJob(h);if(!j||j.status!=='done'||state.busy||activeSpotResult(h))return;if(!force&&spotUI.delivered===j.rowId)return;spotUI.delivered=j.rowId;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
- if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
+ if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
 }
 addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{deliverSolveJob();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
@@ -287,7 +324,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   // A stored answer expected at the click was not there after all: ask about a real solve instead of running one
   // that can't finish here.
   if(pending.expectReference){const plan=spotPlan(hand);if(plan&&!onDeviceRoute(plan)){state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(!pending.automatic)solveSpotClick(true);return;}}
-  if(task.plan?.route==='mac'){await sendToMac(task,observed,opts,extraAction);if(state.pending!==task)return;state.pending=null;lock();const el=$('playFeedback');if(el)el.innerHTML='';status('Sent to your Mac.');return;}
+  if(task.plan?.route==='mac'){await sendToMac(task,observed,opts,extraAction);if(state.pending!==task)return;state.pending=null;lock();const el=$('playFeedback');if(el)el.innerHTML='';status(task.plan.cloud?'Sent to the cloud.':task.plan.server?'Sent to your server.':'Sent to your Mac.');return;}
   const worker=ensureWorker();if(spotUI.workerStamp!==sourceStamp){worker.postMessage({type:'load',snapshot:reference.snapshot});spotUI.workerStamp=sourceStamp;state.workerVersion=0;}
   task.dispatched=true;task.started=Date.now();worker.postMessage({type:'solve',observed,options:opts,extraAction,tag:pending.kind});
   }catch(error){const task=state.pending;state.pending=null;lock();quizAnalysisError(error.message,task);endSolveFeedback(task,error.message,true);status(error.message,true);}

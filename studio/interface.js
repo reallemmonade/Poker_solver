@@ -100,6 +100,12 @@ function initInterface(){
   const onMac=/Macintosh/.test(navigator.userAgent)&&navigator.maxTouchPoints<2;
   setup.append(onMac?create('ol','help','<li>Paste in Terminal (about 10 minutes the first time).<pre class="ui-solver-cmd"><code>'+esc(cmd)+'</code></pre>'+button('Copy command','id="uiSolverCopy"')+'</li><li>Set <b>Solver on your Mac</b> to <b>On</b>.</li>'):create('p','help','Open this app on your Mac to set it up.'));
   const wrap=create('div','field wide');wrap.append(setup);$('spotLocalSolver').closest('.field').after(wrap);const copy=$('uiSolverCopy');if(copy)copy.onclick=()=>navigator.clipboard?.writeText(cmd).then(()=>{copy.textContent='Copied';setTimeout(()=>copy.textContent='Copy command',2000);},()=>{});}
+ // Cloud solves (spot-ui.js, CLOUD_SOLVER): on unless you turn them off on this device; the line under says what they
+ // cost this month. Hidden until the cloud solver is deployed.
+ if(typeof CLOUD_SOLVER!=='undefined'&&CLOUD_SOLVER.url){const field=create('div','field'),spend=()=>{const el=$('uiCloudSpend');if(el)el.textContent='This month: '+centsText(cloudSpendThisMonth()).replace('<1¢','0¢');};
+  field.innerHTML='<label for="uiCloudSolves">Cloud when your Mac is away</label><select class="input" id="uiCloudSolves"><option value="on">On</option><option value="off">Off</option></select><p class="help" id="uiCloudSpend"></p>';
+  $('spotLocalSolver').closest('.field').after(field);const sel=$('uiCloudSolves');sel.value=cloudSolvesOn()?'on':'off';
+  sel.onchange=()=>{try{localStorage.setItem(CLOUD_KEY,sel.value);}catch{}spotUI.last=null;if(state.hand)renderPlay();};spend();addEventListener('citrus-synced',spend);}
  // Solves already save to Saved spots and sync to your devices; Library → Transfer backs them up as a file.
  compatibility.append($('spotExport'));
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones

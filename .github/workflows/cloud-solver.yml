@@ -1,0 +1,32 @@
+# Deploys the cloud solver (tools/cloud/modal_app.py) to Modal, so its image always runs the current solver code.
+# Needs the repository secrets MODAL_TOKEN_ID, MODAL_TOKEN_SECRET and CLOUD_USERS; without them it does nothing.
+name: Cloud solver
+on:
+  push:
+    branches: [main]
+    paths: ['tools/local-solver/**', 'tools/cloud/**', 'tools/plo-solver/**', 'tools/multiway-solver/**', 'tools/preflop/**', 'studio/spot-solver.js', 'studio/local-solver.js', 'studio/postflop-exact.js', 'studio/multiway-exact.js', 'studio/game.js', 'studio/trainer.js', '.github/workflows/cloud-solver.yml']
+  workflow_dispatch:
+concurrency: cloud-solver
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      CLOUD_USERS: ${{ secrets.CLOUD_USERS }}
+    steps:
+      - name: Check the Modal secrets
+        id: check
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then echo "No Modal token yet; nothing to deploy."; echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != '1'
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip != '1'
+        with: {python-version: '3.12'}
+      - name: Deploy
+        if: steps.check.outputs.skip != '1'
+        run: |
+          pip install --quiet modal
+          modal secret create --force guava-cloud CLOUD_USERS="$CLOUD_USERS" >/dev/null
+          modal deploy tools/cloud/modal_app.py
