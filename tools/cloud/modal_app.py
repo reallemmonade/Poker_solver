@@ -32,7 +32,8 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("build-essential", "cmake", "git", "python3-dev", "python3-setuptools", "libgomp1", "curl", "ca-certificates")
     .run_commands("curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs")
-    .pip_install("fastapi[standard]")
+    # setuptools gives TexasSolver's bundled pybind11 the distutils module Python 3.12 dropped.
+    .pip_install("fastapi[standard]", "setuptools")
     .add_local_dir(os.path.join(ROOT, "studio"), "/app/studio", copy=True, ignore=IGNORE)
     .add_local_dir(os.path.join(ROOT, "tools"), "/app/tools", copy=True, ignore=IGNORE)
     .add_local_dir(os.path.join(ROOT, "river"), "/app/river", copy=True)
