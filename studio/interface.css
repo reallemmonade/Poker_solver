@@ -204,6 +204,41 @@ body:not([data-area=study]) .sb-open{display:none!important}
 .sb-foot .btn{flex:1}
 
 .study-format{display:none;margin-right:auto}.ui-app[data-ui-route=study] .study-format{display:flex}.ui-app[data-ui-route=study] #uiPageHint{display:none}.ui-app[data-ui-route=study] .ui-page-heading{flex-wrap:wrap}
+/* New spot: seat rows (Out / In / You and a hand) and the line builder. */
+.sb-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.sb-seats{display:grid}
+.sb-seat{display:grid;grid-template-columns:52px auto 1fr;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+.sb-seat.out b{color:var(--muted)}
+.sb-seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.sb-seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:800;padding:6px 10px;cursor:pointer}
+.sb-seg button.on{background:var(--gold);color:var(--panel)}
+.sb-hand{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+.sb-random{color:var(--muted);border-style:dashed;background:transparent}
+.sb-log{display:grid;gap:6px}
+.sb-street{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin-top:4px}
+.sb-street .sb-slot{width:26px;height:36px}.sb-street .sb-pip{font-size:14px}
+.sb-act{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;background:var(--panel2);border:1px solid var(--line)}
+.sb-act b{color:var(--gold)}.sb-act.auto{opacity:.5}
+.sb-turn{border:1.5px solid var(--gold);border-radius:14px;padding:12px;display:grid;gap:10px;background:var(--panel2)}
+.sb-turn-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-turn-head>span:last-child{margin-left:auto}
+.sb-turn-cards{display:inline-flex;gap:3px}.sb-turn-cards .sb-pip{background:#f1f0e6;border-radius:4px;padding:2px 3px;font-size:13px}
+.sb-acts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sb-actbtn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:6px 4px;border-radius:12px;border:1.5px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-weight:800;font-size:13px;cursor:pointer}
+.sb-actbtn i{width:9px;height:9px;border-radius:3px;flex:none}
+.sb-custom{display:flex;gap:6px}.sb-custom .input{flex:1;min-width:0}
+/* History › Every decision (spot-builder.js). */
+.ed-box[hidden]{display:none}
+.ed-body{display:grid}
+.ed-key{margin:0 0 4px}
+.ed-street{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin:10px 0 2px}
+.ed-row{display:grid;grid-template-columns:42px auto 1fr auto;align-items:center;gap:8px;padding:7px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer;width:100%}
+.ed-row.ed-folds{grid-template-columns:auto 1fr}.ed-row.ed-now{grid-template-columns:42px 1fr;cursor:default}
+.ed-cards{display:inline-flex;gap:2px}.ed-cards .pcard{width:20px;height:28px;font-size:11px}
+.ed-mix{display:flex;height:9px;border-radius:5px;overflow:hidden;background:color-mix(in srgb,var(--ink) 10%,transparent)}
+.ed-mix i{display:block;height:100%}
+.ed-mix.ed-none{height:auto;background:none;color:var(--muted);font-size:11px}
+.ed-took{font-weight:800;white-space:nowrap}
+.ed-street{display:flex;align-items:center;gap:8px}.ed-board{display:inline-flex;gap:2px}.ed-board .pcard{width:20px;height:28px;font-size:11px}
 /* One look for every header and toolbar button (top bar, game line, topic line, side pane, page heading): same height, padding, type and centred label. */
 .ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-height:40px;padding:0 14px;font-size:14px;font-weight:500;line-height:1.2;white-space:nowrap;flex-shrink:0;vertical-align:middle}
 .ui-app .ui-context .sb-context-actions{align-items:center}
