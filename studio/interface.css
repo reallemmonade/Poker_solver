@@ -203,6 +203,7 @@ body:not([data-area=study]) .sb-open{display:none!important}
 .sb-foot{display:flex;justify-content:space-between;gap:10px}
 .sb-foot .btn{flex:1}
 
+.study-format{display:none;margin-right:auto}.ui-app[data-ui-route=study] .study-format{display:flex}.ui-app[data-ui-route=study] #uiPageHint{display:none}.ui-app[data-ui-route=study] .ui-page-heading{flex-wrap:wrap}
 /* One look for every header and toolbar button (top bar, game line, topic line, side pane, page heading): same height, padding, type and centred label. */
 .ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-height:40px;padding:0 14px;font-size:14px;font-weight:500;line-height:1.2;white-space:nowrap;flex-shrink:0;vertical-align:middle}
 .ui-app .ui-context .sb-context-actions{align-items:center}
