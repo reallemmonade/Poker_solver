@@ -203,3 +203,5 @@ body[data-area=study] .sb-open{display:inline-flex}
 .sb-card.taken{opacity:.22}
 .sb-foot{display:flex;justify-content:space-between;gap:10px}
 .sb-foot .btn{flex:1}
+
+.study-format{display:none;margin-right:auto}.ui-app[data-ui-route=study] .study-format{display:flex}.ui-app[data-ui-route=study] #uiPageHint{display:none}.ui-app[data-ui-route=study] .ui-page-heading{flex-wrap:wrap}
