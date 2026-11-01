@@ -98,6 +98,8 @@
 !/studio/rating.js
 !/studio/performance.js
 !/studio/hand-report.js
+!/studio/guess-gate.js
+!/studio/settings-ui.js
 !/studio/verify-rating.cjs
 !/studio/index.html
 !/studio/apple-touch-icon.png
