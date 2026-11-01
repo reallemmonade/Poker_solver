@@ -133,6 +133,7 @@
 !/studio/session.js
 !/studio/spot-solver.js
 !/studio/spot-ui.js
+!/studio/spot-builder.js
 !/studio/study.js
 !/studio/table.css
 !/studio/table.js
