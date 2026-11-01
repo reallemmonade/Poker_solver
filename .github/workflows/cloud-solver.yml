@@ -27,6 +27,11 @@ jobs:
       - name: Deploy
         if: steps.check.outputs.skip != '1'
         run: |
+          # Pasted secrets often carry a stray space or newline, or the --token-id flag from Modal's sample command.
+          clean() { printf '%s' "$1" | sed -E 's/--token-(id|secret)//g' | tr -d '[:space:]'; }
+          export MODAL_TOKEN_ID="$(clean "$MODAL_TOKEN_ID")" MODAL_TOKEN_SECRET="$(clean "$MODAL_TOKEN_SECRET")"
+          case "$MODAL_TOKEN_ID" in ak-*) ;; *) echo "MODAL_TOKEN_ID should start with ak-"; exit 1;; esac
+          case "$MODAL_TOKEN_SECRET" in as-*) ;; *) echo "MODAL_TOKEN_SECRET should start with as-"; exit 1;; esac
           pip install --quiet modal
           modal secret create --force guava-cloud CLOUD_USERS="$CLOUD_USERS" >/dev/null
           modal deploy tools/cloud/modal_app.py
