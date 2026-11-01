@@ -176,3 +176,29 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .range-combo-bar b{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:#17130d;font-variant-numeric:tabular-nums}
 .range-combo.mine .range-combo-cards{outline:2px solid var(--ink);outline-offset:1px;border-radius:3px}
 .range-combos .help{margin:2px 0}
+/* New spot builder (spot-builder.js): players, stack, seat, hand and board in one sheet. */
+.sb-context-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.sb-open{display:none}
+body[data-area=study] .sb-open{display:inline-flex}
+.sb-dialog .ui-dialog-content{display:grid;gap:14px}
+.sb-row{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:10px}
+.sb-label{font-size:13px;color:var(--muted);font-weight:600}
+.sb-chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.sb-chip{min-width:31px;padding:7px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.sb-chip.on{background:var(--gold);border-color:var(--gold);color:var(--panel)}
+.sb-stack{width:92px}
+.sb-slots{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.sb-divider{width:6px}
+.sb-slot{width:32px;height:44px;border-radius:7px;border:1.5px dashed var(--line);background:transparent;padding:0;cursor:pointer;display:grid;place-items:center}
+.sb-slot.filled{border-style:solid;background:#f1f0e6;border-color:#dedccf}
+.sb-slot.active{border-color:var(--gold);box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 45%,transparent)}
+.sb-slot.sb-gap{margin-left:4px}
+.sb-pip{display:flex;flex-direction:column;align-items:center;line-height:.9;font-weight:750;font-size:17px;color:var(--suit,#1b2727)}
+.sb-pip i{font-style:normal;font-size:.8em}
+.sb-pip.suit-s{--suit:var(--suit-s)}.sb-pip.suit-h{--suit:var(--suit-h)}.sb-pip.suit-d{--suit:var(--suit-d)}.sb-pip.suit-c{--suit:var(--suit-c)}
+.sb-grid{display:grid;grid-template-columns:repeat(13,minmax(0,1fr));gap:3px;max-width:520px}
+.sb-card{aspect-ratio:3/4;min-width:0;padding:0;border-radius:5px;border:1px solid #dedccf;background:#f1f0e6;cursor:pointer;display:grid;place-items:center}
+.sb-card .sb-pip{font-size:clamp(10px,3.1vw,15px)}
+.sb-card.taken{opacity:.22}
+.sb-foot{display:flex;justify-content:space-between;gap:10px}
+.sb-foot .btn{flex:1}
