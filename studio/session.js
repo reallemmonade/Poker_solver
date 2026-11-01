@@ -62,7 +62,7 @@ function renderSessionStatus(){
 }
 function scheduleSessionNext(){
  cancelSessionNext();const hand=state.hand;
- if(!hand?.done||!$('autoNextHand').checked||!$('play').classList.contains('active')||playBusy()||tableView.playing||state.dirty||$('controlAll').checked)return;
+ if(!hand?.done||typeof handReport!=='undefined'&&handReport.open||!$('autoNextHand').checked||!$('play').classList.contains('active')||playBusy()||tableView.playing||state.dirty||$('controlAll').checked)return;
  liveSession.timer=setTimeout(()=>{liveSession.timer=null;if(state.hand!==hand||!$('play').classList.contains('active')||!$('autoNextHand').checked||playBusy()||state.dirty)return;deal(true);},4500);
 }
 function sessionHandEnded(){
