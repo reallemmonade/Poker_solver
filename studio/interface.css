@@ -44,24 +44,24 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 /* Table screens (interface.js): history and session | table | analysis. Three columns on wide screens, table plus
    analysis with history underneath in between, and on phones one screen at a time that you swipe between. */
 .ui-pane-dots{display:none}
-.ui-pane-game{display:none}
 .ui-history-pane{padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:var(--ui-radius);min-width:0;font-size:13px}
 .ui-history-pane h2{margin:16px 0 8px;font-size:15px}.ui-history-pane h2:first-of-type{margin-top:14px}
 .ui-history-pane #handLog{line-height:1.6;max-height:none}.ui-history-pane .ui-pane-hands .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
 .ui-history-pane .ui-pane-hands .btn{padding:6px 10px;font-size:12px}
-.ui-pane-game{flex-direction:column;gap:8px}.ui-pane-game .btn{padding:7px 11px;font-size:12px}
 .ui-history-pane>details{margin-top:16px}.ui-history-pane>h2:has(+#handLog:empty){display:none}
 .ui-app[data-area=play] #uiGameContext{display:none}
 .ui-live-grid>.ui-history-pane{grid-column:2;grid-row:2}.ui-live-grid>.ui-table-pane{grid-column:1;grid-row:1/span 2}.ui-live-grid>.ui-analysis{grid-column:2;grid-row:1}
 @media(min-width:1280px){.ui-app .ui-live-grid{grid-template-columns:260px minmax(0,1fr) 340px}.ui-live-grid>.ui-history-pane{grid-column:1;grid-row:1}.ui-live-grid>.ui-table-pane{grid-column:2;grid-row:1}.ui-live-grid>.ui-analysis{grid-column:3;grid-row:1}}
 @media(max-width:800px),(max-width:1000px) and (pointer:coarse){
  .ui-app[data-area=play] #uiContext,.ui-app[data-area=play] .ui-subnav{display:none}
- .ui-pane-game{display:flex}
- .ui-pane-dots{display:flex;justify-content:center;gap:4px;margin:2px 0 6px}
- .ui-pane-dots button{position:relative;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:999px;cursor:pointer;touch-action:manipulation}
- .ui-pane-dots button.active{color:var(--ink);background:var(--accent-soft,var(--panel2))}
- .ui-pane-dots button:before{content:"";position:absolute;inset:-5px -2px}
- .ui-pane-dots button.news:after{content:"";position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--accent-fill,var(--gold))}
+ .ui-pane-dots{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:4px;margin:2px 0 6px}
+ .ui-pane-tabs{display:flex;justify-content:center;gap:4px}
+ .ui-pane-dots .ui-pane-tool{justify-self:start;width:36px;height:36px;min-height:0;padding:0;display:inline-flex;align-items:center;justify-content:center}
+ .ui-pane-dots .ui-pane-tool:last-child{justify-self:end}.ui-pane-tool svg{width:18px;height:18px}
+ .ui-pane-tabs button{position:relative;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:999px;cursor:pointer;touch-action:manipulation}
+ .ui-pane-tabs button.active{color:var(--ink);background:var(--accent-soft,var(--panel2))}
+ .ui-pane-tabs button:before{content:"";position:absolute;inset:-5px -2px}
+ .ui-pane-tabs button.news:after{content:"";position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--accent-fill,var(--gold))}
  /* The screens fill the space between the header and the bottom navigation; each scrolls on its own, and the
     felt takes whatever height the betting bar leaves. --pane-top and --nav-top are measured in interface.js: the
     installed iPhone app reports 100svh well short of the screen, which left a gap between the betting bar and the nav. */
@@ -243,7 +243,7 @@ body:not([data-area=study]) .sb-open{display:none!important}
 .ed-solve{justify-self:start;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--gold)}
 .ed-street{display:flex;align-items:center;gap:8px}.ed-board{display:inline-flex;gap:2px}.ed-board .pcard{width:20px;height:28px;font-size:11px}
 /* One look for every header and toolbar button (top bar, game line, topic line, side pane, page heading): same height, padding, type and centred label. */
-.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-height:40px;padding:0 14px;font-size:14px;font-weight:500;line-height:1.2;white-space:nowrap;flex-shrink:0;vertical-align:middle}
+.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-height:40px;padding:0 14px;font-size:14px;font-weight:500;line-height:1.2;white-space:nowrap;flex-shrink:0;vertical-align:middle}
 .ui-app .ui-context .sb-context-actions{align-items:center}
-@media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){font-size:13px;padding:0 12px}}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){font-size:13px;padding:0 12px}}
 .ui-subnav[data-edge=l]{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px);mask-image:linear-gradient(90deg,transparent,#000 32px)}.ui-subnav[data-edge=r]{-webkit-mask-image:linear-gradient(270deg,transparent,#000 32px);mask-image:linear-gradient(270deg,transparent,#000 32px)}.ui-subnav[data-edge=lr]{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
