@@ -21,21 +21,28 @@ function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
 function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
 // renderPlay asks for the analysis pane's content through this. body() builds the normal content.
 function guessGateHTML(h,solved,q,body){
- const shows=solved?!!solved.supported:displayPolicyReady(q);if(!shows||!guessGateOn()||!h||h.done)return body();
- const at=h.actionLog.length;
- if((h.unlocked||[]).includes(at)){const g=h.guessReveal?.at===at?h.guessReveal:null;return(g?guessRevealHTML(g):'')+body();}
+ if(!guessGateOn()||!h||h.done)return body();
+ const shows=solved?!!solved.supported:displayPolicyReady(q),at=h.actionLog.length;
+ if((h.unlocked||[]).includes(at)){guessSettle(h);const g=h.guessReveal?.at===at?h.guessReveal:null;return(g?guessRevealHTML(g):'')+body();}
+ // No answer yet: guess first, then the solve prompt (the solve grades the guess when it lands). A spot nothing can solve shows its notice.
+ if(!shows&&(unsolvableSpot(h)||!q?.actions?.length))return body();
  const actions=solved?.supported?solved.actions:q.actions;
  return'<div class="guess-lock"><div class="guess-blur" aria-hidden="true"></div><div class="guess-q">'+GUESS_LOCK+' Your play?</div>'+guessButtonsHTML(actions,h,'data-guess')+'</div>';}
 function guessUnlock(h,at){if(!(h.unlocked||[]).includes(at))h.unlocked=[...(h.unlocked||[]),at];}
 // The result a live guess is graded against: the analysis on screen, else the preflop chart or flop library behind it.
 function guessResult(h){let r=activeSpotResult(h);if(r?.supported)return r;try{r=(h.street===0?preflopReference(h):null)||postflopLibraryReference(h);}catch{r=null;}return r?.supported?r:null;}
-function guessLive(index){const h=state.hand;if(!h||h.done||playBusy())return;const at=h.actionLog.length,solved=activeSpotResult(h),q=solved?.supported?null:studyReferenceQuery(h),actions=solved?.supported?solved.actions:q.actions,action=actions[index];if(!action)return;
- const result=guessResult(h),tones=actionTones(actions,h),study=studioInterface.area==='study';let row=null;
- if(result&&T.matchAction(result.actions,action)>=0)try{row=scoreResult(result,{kind:'guess',action,hand:h.clone(),live:h});}catch{row=null;}
- const counted=!!row&&!h.assisted&&!$('reveal').checked&&(study||!$('controlAll').checked);
+function guessLive(index){const h=state.hand;if(!h||h.done)return;const at=h.actionLog.length,solved=activeSpotResult(h),q=solved?.supported?null:studyReferenceQuery(h),actions=solved?.supported?solved.actions:q.actions,action=actions[index];if(!action)return;
+ const tones=actionTones(actions,h);
  h.guessed=[...(h.guessed||[]),at];guessUnlock(h,at);
- h.guessReveal={at,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:guessVerdict(row,counted)};
+ h.guessReveal={at,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:{text:'Solve to grade',elo:null,cls:'none'}};
+ h.pendingGuess={at,action};guessSettle(h);
  saveLiveSession();renderPlay();}
+// Grades a guess as soon as its spot has an answer: at once when one is on hand, else when the solve lands while it is
+// still your turn. If you act first, chooseAction (app.js) grades the guess through the background assessment instead.
+function guessSettle(h){const g=h.pendingGuess;if(!g||g.at!==h.actionLog.length||h.done)return;const result=guessResult(h);if(!result)return;
+ h.pendingGuess=null;let row=null;if(T.matchAction(result.actions,g.action)>=0)try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h});}catch{row=null;}
+ const study=studioInterface.area==='study',counted=!!row&&!h.assisted&&!$('reveal').checked&&(study||!$('controlAll').checked);
+ if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,counted);saveLiveSession();}
 // Hand replay: a finished review analysis waits behind the guess buttons.
 function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?</div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
 function guessReplay(index){const g=guessGate.replay;if(!g)return;guessGate.replay=null;const box=$('reviewFeedback');
@@ -68,6 +75,7 @@ function initGuessGate(){
 .guess-good{color:var(--act-passive);background:color-mix(in srgb,var(--act-passive) 16%,transparent)}
 .guess-ok{color:var(--act-bet1);background:color-mix(in srgb,var(--act-bet1) 16%,transparent)}
 .guess-bad{color:var(--act-allin);background:color-mix(in srgb,var(--act-allin) 16%,transparent)}
+.ui-analysis:has(.guess-lock) #analyze{display:none}
 .guess-none{color:var(--muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}`;document.head.append(style);
  document.addEventListener('click',e=>{const b=e.target.closest('[data-guess],[data-guess-skip],[data-guess-replay],[data-guess-replay-skip]');if(!b)return;
   if(b.hasAttribute('data-guess'))guessLive(+b.dataset.guess);
