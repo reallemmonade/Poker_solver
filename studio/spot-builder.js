@@ -148,7 +148,7 @@ function dealBuiltSpot(withLine){
   if(steps.length){saveLiveSession();renderAll();}
  }catch(e){spotBuilder.pending=null;spotError(e.message);if(!d.open)status(e.message,true);}
 }
-// History › Every decision (Train › Decision only; it replaces the This hand log there): each decision of the hand with the seat's cards and the strategy
+// History › Every decision (Train › Decision only): each decision of the hand with the seat's cards and the strategy
 // for them where a chart or the flop library answers it. Tap a row to open that step in Hand replay, which can solve it.
 const everyDecision={key:'',html:''};
 function everyDecisionHTML(){
@@ -169,7 +169,7 @@ function everyDecisionHTML(){
  flush();
  if(!h.done){rows.push('<div class="ed-row ed-now"><b>'+names[h.actor]+'</b><span class="muted small">to act</span></div>');}
  everyDecision.key=key;everyDecision.html=rows.join('');return everyDecision.html;}
-function renderEveryDecision(){const box=$('uiEveryDecision');if(!box)return;const show=studioInterface.area==='study'&&!!state.hand?.actionLog.length;box.hidden=!show;const log=$('handLog'),head=log?.previousElementSibling;if(log)log.hidden=show;if(head?.tagName==='H2')head.hidden=show;if(show)box.querySelector('.ed-body').innerHTML=everyDecisionHTML();}
+function renderEveryDecision(){const box=$('uiEveryDecision');if(!box)return;const show=studioInterface.area==='study'&&!!state.hand?.actionLog.length;box.hidden=!show;if(show)box.querySelector('.ed-body').innerHTML=everyDecisionHTML();}
 // Hand replay keeps its import tools on top; jump past them to the table.
 function spotShowReplay(){requestAnimationFrame(()=>$('reviewTable')?.scrollIntoView({block:'start',behavior:'auto'}));}
 // A row with no chart or library answer starts the replay's analysis straight away.
@@ -188,7 +188,7 @@ function initSpotBuilder(){
  // Out seats keep folding by themselves when they come to act preflop at the table.
  const baseBots=advanceBots;advanceBots=function(){baseBots();const h=state.hand,live=spotBuilder.live;if(!h||h.done||h.street!==0||!live||live.dealId!==h.dealId||!live.out.includes(h.actor))return;clearTimeout(spotBuilder.foldTimer);
   spotBuilder.foldTimer=setTimeout(()=>{if(state.hand===h&&!h.done&&h.street===0&&live.out.includes(h.actor)&&!tableView.playing&&!playBusy())applyPlayAction({id:'f',kind:'fold',label:'Fold'});},motionMs(350));};
- const pane=$('uiHistoryPane'),log=$('handLog');if(pane&&log){const box=document.createElement('section');box.id='uiEveryDecision';box.className='ed-box';box.hidden=true;box.innerHTML='<h2>Every decision</h2><div class="ed-body"></div>';log.previousElementSibling?.tagName==='H2'?log.previousElementSibling.before(box):log.before(box);
+ const pane=$('uiHistoryPane'),log=$('handLog');if(pane&&log){const box=document.createElement('section');box.id='uiEveryDecision';box.className='ed-box';box.hidden=true;box.innerHTML='<h2>Every decision</h2><div class="ed-body"></div>';log.before(box);
   box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep,r.classList.contains('ed-open'));});
   const baseRender=renderPlay;renderPlay=function(...args){const out=baseRender.apply(this,args);try{renderEveryDecision();}catch{}return out;};}
  const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New spot';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}

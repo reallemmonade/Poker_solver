@@ -104,8 +104,8 @@ function initInterface(){
  compatibility.append($('spotExport'));
  // History & session: this hand, earlier hands and the table options. Beside the table on wide screens; on phones
  // the three panes sit side by side and you swipe between them, so the table screen holds only the game.
- const historyPane=create('aside','ui-history-pane');historyPane.id='uiHistoryPane';historyPane.setAttribute('aria-label','Hand history and session');
- historyPane.append(create('div','ui-pane-game','<strong id="uiPaneSummary"></strong><div class="row gap">'+button('Edit game','data-pane-edit')+button('Play with friends','data-pane-friends')+'</div>'),create('h2','','This hand'),$('handLog'),create('h2','','Earlier hands'),create('div','ui-pane-hands','<div id="uiPaneHands"></div>'),sessionOptions,handLine);
+ const historyPane=create('aside','ui-history-pane');historyPane.id='uiHistoryPane';historyPane.setAttribute('aria-label','Hand history and session');$('handLog').hidden=true;// The This hand log is gone (Maxam: not needed); the element stays for the code that fills it.
+ historyPane.append(create('div','ui-pane-game','<strong id="uiPaneSummary"></strong><div class="row gap">'+button('Edit game','data-pane-edit')+button('Play with friends','data-pane-friends')+'</div>'),$('handLog'),create('h2','','Earlier hands'),create('div','ui-pane-hands','<div id="uiPaneHands"></div>'),sessionOptions,handLine);
  handLine.hidden=true;
  for(const node of [...play.children])if(node!==liveGrid)node.remove();
  liveGrid.append(historyPane,tablePane,analysisPane);play.append(liveGrid);
