@@ -13,7 +13,7 @@ function perfDelta(c){const d=PokerRating.change(c.history,Date.now()-PERF_WEEK)
 const perfSigned=x=>x===null?'–':x>0?'+'+x:x<0?'−'+-x:'0';
 const perfRating=c=>c.rating===null?'–':c.rating+(c.provisional?'?':'');
 function renderPerformance(){const box=$('uiPerformance');if(!box)return;
- const facts=factsOf(state.histories),key=facts.map(f=>f.key).join()+'|'+perf.sel+'|'+$('gradeEvery').checked;if(perf.key===key&&box.dataset.ready)return;perf.key=key;box.dataset.ready='1';
+ const facts=factsOf(state.histories),key=facts.map(f=>f.key).join()+'|'+(typeof replayGuessFact==='function'?replayGuessFact().grades.length:0)+'|'+perf.sel+'|'+$('gradeEvery').checked;if(perf.key===key&&box.dataset.ready)return;perf.key=key;box.dataset.ready='1';
  const cats=PokerRating.compute(leakDecisions(facts)),c=cats.find(x=>x.id===perf.sel)||cats[0],cat=PokerRating.CATEGORIES.find(x=>x.id===c.id),
   hands=facts.filter(f=>!f.assisted&&cat.test(f)),rate=bbPer100(hands);
  if(!cats[0].n){box.innerHTML='<div class="perf-empty"><b>Play to earn your rating</b><p class="help">'+(!$('gradeEvery').checked?'<button type="button" class="ui-jump" data-jump="recording">Turn on decision recording</button> first.':'Hands where you saw the analysis before acting don’t count.')+'</p>'+(!$('gradeEvery').checked?'':'<button type="button" class="btn" data-route="play">Play</button>')+'</div>';return;}

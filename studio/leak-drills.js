@@ -12,7 +12,9 @@ function leakClass(g){if(leakDrill.classes.has(g.id))return leakDrill.classes.ge
   if(hand.actor===g.hero)c={topic:LEAK_TOPICS.find(t=>quizTopicMatches(hand,t))||'other',depth:quizEffective(hand.config,g.hero),publicKey:PokerSpot.publicKey(observed),seats:hand.n,pos:G.positions(hand.n,hand.button)[g.hero]};}catch{}
  leakDrill.classes.set(g.id,c);return c;}
 // Your graded table decisions (of the given hands' facts), newest first. Only grades with a measured cost or a chart frequency count.
-function leakDecisions(facts=factsOf(state.histories)){const out=[];
+function leakDecisions(facts=factsOf(state.histories),guesses=true){const out=[];
+ // Guesses made in Hand replay belong to no live hand, so they join as one extra group (guess-gate.js).
+ if(guesses&&typeof replayGuessFact==='function')facts=facts.concat(replayGuessFact());
  for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
   const chart=!!g.referenceSource&&!g.approximate&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
