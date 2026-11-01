@@ -8,12 +8,17 @@
 // the bridge validates it, writes the solver input itself, runs one solve at
 // a time and returns the strategy for the current street.
 //   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--plo-solver path/to/plo_solver] [--mw-solver path/to/mw_solver] [--port 8787] [--threads N] [--memory MB]
+//     [--name NAME --rate DOLLARS_PER_HOUR]   another computer solving for your account: it takes the jobs the app
+//                                            sends to NAME (see queue.cjs; link it with link.cjs)
+//     [--once job.json]                      a cloud worker: solve the one job in job.json, then exit (tools/cloud)
 const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process'),{Worker}=require('worker_threads');
 const L=require('../../studio/local-solver.js');
 const {createQueue}=require('./queue.cjs'),learn=require('./learn.cjs');
 
-const args={port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
-for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory'].includes(k)?Number(v):v;}
+const bootAt=Date.now(),args={name:'mac',rate:0,once:'',port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
+for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory','rate'].includes(k)?Number(v):v;}
+if(!/^[a-z0-9-]{1,24}$/.test(args.name))throw Error('--name takes 1 to 24 lowercase letters, digits or dashes.');
+const once=args.once?JSON.parse(fs.readFileSync(args.once,'utf8')):null;
 // Pages allowed to call the bridge: the Render site, and the app served from
 // localhost. A file:// page sends Origin "null", which sandboxed iframes on any
 // site also send, so it is allowed only when RANGE_LAB_ORIGINS lists null.
@@ -29,7 +34,7 @@ async function stopLearning(){const j=job;if(!j?.learning)return;j.cancelled=tru
 // Updating from the app (POST /update here, or a 'macupdate' row from your phone): the same setup-mac.sh as the first
 // install, in its own process group so it outlives the restart it ends with. Its output goes to
 // ~/Library/Logs/citrus-poker-update.log.
-const UPDATE_CMD='curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash',canUpdate=process.platform==='darwin';let updating=0;
+const UPDATE_CMD='curl -fsSL https://raw.githubusercontent.com/reallemmonade/Poker_solver/main/tools/local-solver/setup-mac.sh | bash',canUpdate=process.platform==='darwin'&&args.name==='mac';let updating=0;
 function selfUpdate(){
  if(!canUpdate)throw Error('Updating from the app works on a Mac only.');
  if(busy())throw Error('A solve is running on this computer. Update once it ends.');
@@ -38,9 +43,10 @@ function selfUpdate(){
  try{spawn('/bin/bash',['-c',UPDATE_CMD],{detached:true,stdio:['ignore',fd,fd],env:{...process.env,PATH:'/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'}}).unref();}finally{fs.closeSync(fd);}
  console.log('Updating the solver. Log: '+log);
 }
-const queue=createQueue({port:args.port,threads:args.threads,busy,status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
- learn:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),
- learnPreflop:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning,update:canUpdate&&selfUpdate});
+// A cloud worker never learns in the background: it is paid for by the second.
+const queue=createQueue({port:args.port,threads:args.threads,busy,name:args.name,rate:args.rate>0?args.rate:0,bootAt,once,onIdle:once&&(()=>{console.log('Cloud job finished.');process.exit(0);}),status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
+ learn:once?null:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),
+ learnPreflop:once?null:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning,update:canUpdate&&selfUpdate});
 function headers(req){
  const o=req.headers.origin,h={'Content-Type':'application/json','Cache-Control':'no-store'};
  if(o&&originOK(o)){h['Access-Control-Allow-Origin']=o;h['Vary']='Origin';h['Access-Control-Allow-Methods']='GET, POST, OPTIONS';h['Access-Control-Allow-Headers']='Content-Type';h['Access-Control-Allow-Private-Network']='true';}

@@ -12,7 +12,7 @@ const citrusAccount=(()=>{
  let account=read(ACCOUNT,null);if(!account?.token||!account?.user?.id)account=null;
  const uid=()=>account?.user.id,key=name=>name+':'+uid();
  const sync={status:account?'waiting':'signedOut',at:read(account?key('citrus-sync-at-v1'):'',0),timer:0,running:null,again:false,note:''};
- const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-|preflopwant-)/.test(id)||id==='macsolver'||id==='macupdate'||id==='liveSession');
+ const synced=(store,id)=>store==='hands'||store==='grades'||store==='solves'||store==='meta'&&(META.has(id)||/^(drill|practice|solvejob-|flopwant-|preflopwant-)/.test(id)||id==='macsolver'||/^solver-/.test(id)||id==='macupdate'||id==='liveSession');
  function dbName(){const owner=read(OWNER,null);if(account)return owner===account.user.id?LEGACY_DB:LEGACY_DB+'-'+account.user.id;return owner?LEGACY_DB+'-guest':LEGACY_DB;}
  // wake: a free Render service can take up to a minute to start, and until then requests fail outright; sign-in retries.
  async function api(method,path,data,token=account?.token,wake=false){
@@ -137,5 +137,5 @@ const citrusAccount=(()=>{
  // Signing in or out in another tab switches this device's data, so this tab follows; a fresh token for the same account is just adopted.
  addEventListener('storage',e=>{if(e.key!==ACCOUNT)return;let next=null;try{next=JSON.parse(e.newValue||'null')}catch{}if(!next?.token||!next?.user?.id)next=null;if((next?.user.id||null)!==(uid()||null))return location.reload();if(next){account=next;if(sync.status==='expired'){sync.status='waiting';schedule(500);}}});
  if(account){addEventListener('load',()=>schedule(1500));document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')run();else schedule(500);});addEventListener('online',()=>schedule(500));}
- return{dbName,changed,run,mount,signIn,signOut,get user(){return account?.user||null},get link(){return account?{api:API||location.origin,token:account.token,user:account.user.id}:null},get status(){return sync.status},synced};
+ return{dbName,changed,run,mount,signIn,signOut,get user(){return account?.user||null},get link(){return account?{api:API||location.origin,token:account.token,user:account.user.id}:null},get status(){return sync.status},get cursor(){return account?read(key('citrus-sync-cursor-v1'),0):0},synced};
 })();

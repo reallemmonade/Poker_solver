@@ -24,6 +24,8 @@ tune=()
 # -mcpu there too, but only as a deprecated -mtune).
 flags=(-march=native); case "$(uname -m)" in arm64|aarch64) flags=(-mcpu=native -march=native);; esac
 if [ "${cxx[0]}" = arch ]; then flags=(-mcpu=native); fi
+# A machine image built on one computer and run on others (tools/cloud) names a portable target instead.
+if [ -n "${CITRUS_MARCH:-}" ]; then flags=("-march=$CITRUS_MARCH"); fi
 for f in "${flags[@]}"; do
   if echo 'int main(){return 0;}' | "${cxx[@]}" "$f" -x c++ -o /dev/null - >/dev/null 2>&1; then tune=("$f"); break; fi
 done

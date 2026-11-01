@@ -2,6 +2,9 @@
 !/.gitignore
 !/README.md
 !/render.yaml
+!/.github/
+!/.github/workflows/
+!/.github/workflows/cloud-solver.yml
 !/server.cjs
 !/accounts.cjs
 !/package.json
@@ -22,6 +25,7 @@
 !/tools/local-solver/queue.cjs
 !/tools/local-solver/queue-worker.cjs
 !/tools/local-solver/learn.cjs
+!/tools/local-solver/link.cjs
 !/tools/local-solver/texassolver-evs.patch
 !/tools/plo-solver/
 !/tools/plo-solver/plo_solver.cpp
@@ -57,6 +61,9 @@
 !/tools/calibration/level2.sh
 !/tools/calibration/level2-sync.sh
 !/tools/split-libraries.cjs
+!/tools/cloud/
+!/tools/cloud/modal_app.py
+!/tools/cloud/test-cloud.cjs
 !/tools/chart-bots/
 !/tools/chart-bots/README.md
 !/tools/chart-bots/lib.cjs

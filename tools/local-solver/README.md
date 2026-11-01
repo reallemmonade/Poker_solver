@@ -176,3 +176,17 @@ The preflop charts only play lines that reach the flop heads-up: at most one cal
 TexasSolver is AGPL-3.0. Its author allows free personal use, and requires a commercial licence to provide it as a service over the internet. The install script builds it on your own computer from the author's repository, and this project does not redistribute it. The PLO and 3-way solvers are part of this project.
 
 Check the bridge without a solver: `node tools/local-solver/check-bridge.cjs`.
+
+## Other computers and the cloud
+
+When your Mac is offline or busy, a solve you start on your phone can go elsewhere (`solveTarget` in
+`studio/spot-ui.js`), and the button shows its time and price before you tap it:
+
+- **A rented server you already pay for** (for example a Hetzner box between calibration runs): build the solvers
+  with `install-linux.sh`, link it with `node tools/local-solver/link.cjs`, and run
+  `node tools/local-solver/server.cjs --name hetzner --rate 0`. It beats as `solver-hetzner` and takes jobs while idle.
+- **The cloud** (`tools/cloud/modal_app.py`, Modal, billed by the second, about $0.44 an hour): the phone posts the
+  job to the endpoint, which starts one container running this bridge with `--once`. It pushes progress and its cost
+  every 10 seconds and exits when done or cancelled. Deployed by `.github/workflows/cloud-solver.yml`.
+
+`node tools/cloud/test-cloud.cjs` checks the whole path locally with the real solver and a stand-in for Modal.
