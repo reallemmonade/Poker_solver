@@ -27,7 +27,7 @@ function guessGateHTML(h,solved,q,body){
  // No answer yet: guess first, then the solve prompt (the solve grades the guess when it lands). A spot nothing can solve shows its notice.
  if(!shows&&(unsolvableSpot(h)||!q?.actions?.length))return body();
  const actions=solved?.supported?solved.actions:q.actions;
- return'<div class="guess-lock"><div class="guess-blur" aria-hidden="true"></div><div class="guess-q">'+GUESS_LOCK+' Your play?</div>'+guessButtonsHTML(actions,h,'data-guess')+'</div>';}
+ return'<div class="guess-lock"><div class="guess-blur" aria-hidden="true"></div><div class="guess-q">'+GUESS_LOCK+' Your play?<small>Guess to see the solver</small></div>'+guessButtonsHTML(actions,h,'data-guess')+'</div>';}
 function guessUnlock(h,at){if(!(h.unlocked||[]).includes(at))h.unlocked=[...(h.unlocked||[]),at];}
 // The result a live guess is graded against: the analysis on screen, else the preflop chart or flop library behind it.
 function guessResult(h){let r=activeSpotResult(h);if(r?.supported)return r;try{r=(h.street===0?preflopReference(h):null)||postflopLibraryReference(h);}catch{r=null;}return r?.supported?r:null;}
@@ -44,7 +44,7 @@ function guessSettle(h){const g=h.pendingGuess;if(!g||g.at!==h.actionLog.length|
  const study=studioInterface.area==='study',counted=!!row&&!h.assisted&&!$('reveal').checked&&(study||!$('controlAll').checked);
  if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,counted);saveLiveSession();}
 // Hand replay: a finished review analysis waits behind the guess buttons.
-function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?</div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
+function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?<small>Guess to see the solver</small></div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
 function guessReplay(index){const g=guessGate.replay;if(!g)return;guessGate.replay=null;const box=$('reviewFeedback');
  if(index===null){box.innerHTML=resultHTML(g.result);return;}
  const action=g.result.actions[index],tones=actionTones(g.result.actions,g.hand),row=scoreResult(g.result,{kind:'reviewGuess',action,hand:g.hand});
@@ -59,8 +59,9 @@ function initGuessGate(){
  const style=document.createElement('style');style.textContent=`
 .guess-lock{position:relative;display:grid;gap:12px;padding:14px 0 4px}
 .guess-blur{height:150px;border-radius:12px;background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--ink) 9%,transparent) 0 14px,transparent 14px 16px),repeating-linear-gradient(0deg,color-mix(in srgb,var(--ink) 9%,transparent) 0 14px,transparent 14px 16px);filter:blur(5px);opacity:.7}
-.guess-q{display:flex;align-items:center;justify-content:center;gap:7px;font-weight:800;font-size:17px}
-.guess-blur+.guess-q{position:absolute;top:72px;left:0;right:0}
+.guess-q{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px;font-weight:800;font-size:17px;text-align:center}
+.guess-q small{flex-basis:100%;font-size:12px;font-weight:600;color:var(--muted)}
+.guess-blur+.guess-q{position:absolute;top:58px;left:0;right:0}
 .guess-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .guess-btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 6px;border-radius:12px;border:1.5px solid var(--line);background:var(--panel2);color:var(--ink);font:inherit;font-weight:800;font-size:14px;cursor:pointer}
 .guess-btn i{width:9px;height:9px;border-radius:3px;flex:none}
