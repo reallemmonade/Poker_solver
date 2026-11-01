@@ -179,8 +179,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 .range-combos .help{margin:2px 0}
 /* New spot builder (spot-builder.js): players, stack, seat, hand and board in one sheet. */
 .sb-context-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.sb-open{display:none}
-body[data-area=study] .sb-open{display:inline-flex}
+body:not([data-area=study]) .sb-open{display:none!important}
 .sb-dialog .ui-dialog-content{display:grid;gap:14px}
 .sb-row{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:10px}
 .sb-label{font-size:13px;color:var(--muted);font-weight:600}
@@ -203,3 +202,9 @@ body[data-area=study] .sb-open{display:inline-flex}
 .sb-card.taken{opacity:.22}
 .sb-foot{display:flex;justify-content:space-between;gap:10px}
 .sb-foot .btn{flex:1}
+
+/* One look for every header and toolbar button (top bar, game line, topic line, side pane, page heading): same height, padding, type and centred label. */
+.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;min-height:40px;padding:0 14px;font-size:14px;font-weight:500;line-height:1.2;white-space:nowrap;flex-shrink:0;vertical-align:middle}
+.ui-app .ui-context .sb-context-actions{align-items:center}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app :is(.top,.ui-context,.ui-topic-summary,.ui-pane-game,.ui-page-heading) .btn.secondary:not(.ui-primary .btn):not(.ui-account-button){font-size:13px;padding:0 12px}}
+.ui-subnav[data-edge=l]{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px);mask-image:linear-gradient(90deg,transparent,#000 32px)}.ui-subnav[data-edge=r]{-webkit-mask-image:linear-gradient(270deg,transparent,#000 32px);mask-image:linear-gradient(270deg,transparent,#000 32px)}.ui-subnav[data-edge=lr]{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
