@@ -159,18 +159,21 @@ function everyDecisionHTML(){
  h.actionLog.forEach((e,k)=>{const f=frames[k];if(!f)return;if(e.street!==street){flush();street=e.street;rows.push('<div class="ed-street"><span>'+G.STREET[street]+'</span>'+(street?'<span class="ed-board">'+f.board.map(c=>cardHTML(c)).join('')+'</span>':'')+'</div>');}
   const out=spotBuilder.live?.dealId===h.dealId&&spotBuilder.live.out.includes(e.seat);if(e.kind==='fold'&&street===0&&out){folds.push({k,seat:e.seat});return;}
   if(e.kind==='fold'&&street===0){let r=null;try{r=preflopReference(f);}catch{}const fi=r?.supported?r.actions.findIndex(a=>a.kind==='fold'):-1;if(!r?.supported||fi>=0&&(r.reference??r.probs)[fi]>.995){folds.push({k,seat:e.seat});return;}}
-  flush();let r=null;try{r=street===0?preflopReference(f):postflopLibraryReference(f);}catch{}
-  const probs=r?.supported?(r.reference||r.probs):null,tones=probs?actionTones(r.actions,f):null,label=spotActionLabel(e,f);
-  const bar=probs?'<span class="ed-mix">'+r.actions.map((a,i)=>Number.isFinite(probs[i])&&probs[i]>0?'<i style="width:'+(probs[i]*100).toFixed(1)+'%;background:var(--act-'+tones[i]+')"></i>':'').join('')+'</span>':'<span class="ed-mix ed-none">Tap to solve</span>';
-  const took=probs?r.actions.findIndex(a=>a.kind===e.kind&&(!['bet','raise'].includes(a.kind)||a.target===e.target)):-1,pct=!probs?'':took>=0&&Number.isFinite(probs[took])?' · '+fmt(probs[took]*100,0)+'%':' · not in chart';
-  rows.push('<button type="button" class="ed-row" data-ed-step="'+k+'"><b>'+names[e.seat]+'</b><span class="ed-cards">'+f.holes[e.seat].map(c=>cardHTML(c)).join('')+'</span>'+bar+'<span class="ed-took">'+esc(label)+pct+'</span></button>');});
+  flush();let r=null;try{r=activeSpotResult(f);if(!r?.supported)r=street===0?preflopReference(f):postflopLibraryReference(f);}catch{}
+  const probs=r?.supported?(r.reference||r.probs):null,tones=probs?actionTones(r.actions,f):null,label=spotActionLabel(e,f).replace(/^Raise to /,'Raise ').replace(/ bb$/,'');
+  const bar=probs?'<span class="ed-mix">'+r.actions.map((a,i)=>Number.isFinite(probs[i])&&probs[i]>0?'<i style="width:'+(probs[i]*100).toFixed(1)+'%;background:var(--act-'+tones[i]+')"></i>':'').join('')+'</span>':'<span class="ed-solve">Solve</span>';
+  const sized=['bet','raise'].includes(e.kind);let took=probs?r.actions.findIndex(a=>a.kind===e.kind&&(!sized||a.target===e.target)):-1;
+  if(took<0&&probs&&sized){let best=Infinity;r.actions.forEach((a,i)=>{const d=Math.abs((a.target||0)-e.target);if(['bet','raise'].includes(a.kind)&&!/all-in/i.test(a.label||'')&&d<best){best=d;took=i;}});}
+  const q=took>=0&&Number.isFinite(probs[took])?probs[took]:null,pct=!probs?'':q===null?'<em class="ed-pct ed-bad" title="Not in the chart">—</em>':'<em class="ed-pct ed-'+(q>=.5?'good':q>=.1?'ok':'bad')+'">'+fmt(q*100,0)+'%</em>';
+  rows.push('<button type="button" class="ed-row'+(probs?'':' ed-open')+'" data-ed-step="'+k+'"><b>'+names[e.seat]+'</b><span class="ed-cards">'+f.holes[e.seat].map(c=>cardHTML(c)).join('')+'</span>'+bar+'<span class="ed-took">'+esc(label)+pct+'</span></button>');});
  flush();
- if(!h.done){rows.push('<div class="ed-row ed-now"><b>'+names[h.actor]+'</b><span class="muted small">to act now · Analysis</span></div>');}
- everyDecision.key=key;everyDecision.html='<div class="ed-key small muted">Bars show what each seat’s cards should do. Tap a decision to replay and solve it.</div>'+rows.join('');return everyDecision.html;}
+ if(!h.done){rows.push('<div class="ed-row ed-now"><b>'+names[h.actor]+'</b><span class="muted small">to act</span></div>');}
+ everyDecision.key=key;everyDecision.html=rows.join('');return everyDecision.html;}
 function renderEveryDecision(){const box=$('uiEveryDecision');if(!box)return;const show=studioInterface.area==='study'&&!!state.hand?.actionLog.length;box.hidden=!show;if(show)box.querySelector('.ed-body').innerHTML=everyDecisionHTML();}
 // Hand replay keeps its import tools on top; jump past them to the table.
 function spotShowReplay(){requestAnimationFrame(()=>$('reviewTable')?.scrollIntoView({block:'start',behavior:'auto'}));}
-function openDecisionStep(k){const h=state.hand;if(!h)return;try{loadHistory(H.record(h,{hero:state.hero,revealAll:true}));state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();}catch(e){status(e.message,true);}}
+// A row with no chart or library answer starts the replay's analysis straight away.
+function openDecisionStep(k,solve=false){const h=state.hand;if(!h)return;try{loadHistory(H.record(h,{hero:state.hero,revealAll:true}));state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();if(solve)setTimeout(()=>{const b=$('reviewAnalyze');if(b&&!b.disabled)b.click();},0);}catch(e){status(e.message,true);}}
 function initSpotBuilder(){
  const d=document.createElement('dialog');d.className='ui-dialog sb-dialog';d.id='uiSpotDialog';d.setAttribute('aria-label','New spot');
  d.innerHTML='<div class="ui-dialog-head"><h2>New spot</h2><button type="button" class="btn secondary" data-close-dialog>Close</button></div><div class="ui-dialog-content"></div>';
@@ -186,7 +189,7 @@ function initSpotBuilder(){
  const baseBots=advanceBots;advanceBots=function(){baseBots();const h=state.hand,live=spotBuilder.live;if(!h||h.done||h.street!==0||!live||live.dealId!==h.dealId||!live.out.includes(h.actor))return;clearTimeout(spotBuilder.foldTimer);
   spotBuilder.foldTimer=setTimeout(()=>{if(state.hand===h&&!h.done&&h.street===0&&live.out.includes(h.actor)&&!tableView.playing&&!playBusy())applyPlayAction({id:'f',kind:'fold',label:'Fold'});},motionMs(350));};
  const pane=$('uiHistoryPane'),log=$('handLog');if(pane&&log){const box=document.createElement('section');box.id='uiEveryDecision';box.className='ed-box';box.hidden=true;box.innerHTML='<h2>Every decision</h2><div class="ed-body"></div>';log.previousElementSibling?.tagName==='H2'?log.previousElementSibling.before(box):log.before(box);
-  box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep);});
+  box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep,r.classList.contains('ed-open'));});
   const baseRender=renderPlay;renderPlay=function(...args){const out=baseRender.apply(this,args);try{renderEveryDecision();}catch{}return out;};}
  const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New spot';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
  const heading=document.querySelector('.ui-page-heading');if(heading){const box=document.createElement('div');box.className='sb-chips study-format';box.id='uiStudyFormat';box.setAttribute('role','group');box.setAttribute('aria-label','Game');
