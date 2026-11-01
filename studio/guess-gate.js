@@ -1,10 +1,9 @@
 'use strict';
 // Guess before solver (Settings › Decision recording, on by default): no solver strategy for a spot shows until you
 // have committed to a play there, and that play is what the rating counts.
-// · Play, your own seat: the action you take at the table is the guess, so the analysis stays locked until you act.
-//   Peek opens it anyway, which marks the decision peeked (a mistake, as before: see markAssisted in app.js).
-// · Everywhere else the analysis would show (Train › Decision and the spot builder, Control every seat, Hand replay):
-//   the pane shows the spot's actions first. The one you pick is graded like a table decision, then the strategy shows
+// · Wherever the analysis would show (Play at your turn, Train › Decision and the spot builder, Control every seat,
+//   Hand replay) the pane shows the spot's actions first; at the table you swipe over, guess, then swipe back and act
+//   (bots wait on your turn). The one you pick is graded like a table decision, then the strategy shows
 //   with your pick, its cost and the rating change on top. Skip opens it without a guess (a peek at your own seat).
 // Live-hand guesses join that hand's grades (so the rating, leaks and the hand report pick them up when it is saved);
 // Hand replay guesses are kept with the other grades and join the rating as one extra group (replayGuessFact).
@@ -25,8 +24,6 @@ function guessGateHTML(h,solved,q,body){
  const shows=solved?!!solved.supported:displayPolicyReady(q);if(!shows||!guessGateOn()||!h||h.done)return body();
  const at=h.actionLog.length;
  if((h.unlocked||[]).includes(at)){const g=h.guessReveal?.at===at?h.guessReveal:null;return(g?guessRevealHTML(g):'')+body();}
- const study=typeof studioInterface!=='undefined'&&studioInterface.area==='study';
- if(h.actor===state.hero&&!$('controlAll').checked&&!study)return'<div class="guess-lock guess-wait">'+GUESS_LOCK+'<span>Analysis after you act</span><button type="button" class="guess-peek" data-guess-skip>Peek</button></div>';
  const actions=solved?.supported?solved.actions:q.actions;
  return'<div class="guess-lock"><div class="guess-blur" aria-hidden="true"></div><div class="guess-q">'+GUESS_LOCK+' Your play?</div>'+guessButtonsHTML(actions,h,'data-guess')+'</div>';}
 function guessUnlock(h,at){if(!(h.unlocked||[]).includes(at))h.unlocked=[...(h.unlocked||[]),at];}
