@@ -103,7 +103,7 @@ const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,M
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
 // with --name (tools/local-solver/link.cjs) beats as 'solver-<name>' and takes jobs while idle at its own rate.
-const CLOUD_SOLVER={url:'',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
+const CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
 function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{}return v!=='off';}
 function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
 // Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
