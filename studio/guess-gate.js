@@ -15,7 +15,8 @@ function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,han
 // The grade's cost line and the rating change it makes now (only when it counts toward the rating).
 function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
  const chart=!!row.referenceSource&&Number.isFinite(row.referenceFrequency),solved=!!row.rated&&Number.isFinite(row.loss),mistake=gradeMistake(row),cost=gradeCost(row);
- const text=solved?(cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play'):chart?fmt(row.referenceFrequency*100,0)+'% in chart':'Not graded';
+ const top=Math.max(0,...(row.options||[]).map(o=>Number.isFinite(o.f)?o.f:0)),pct=fmt(row.referenceFrequency*100,row.referenceFrequency<.1?1:0)+'%';
+ const text=solved?(cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play'):chart?(mistake?'Rare · solver plays it '+pct:row.referenceFrequency>=top-1e-9?'Best play · '+pct:'Mixed · solver plays it '+pct):'Not graded';
  let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,s=PokerRating.score({mistake,cost:solved?cost:null});elo=Math.round((r.n<PokerRating.PROVISIONAL?40:16)*(s-PokerRating.expected(now,PokerRating.SPOT[row.street]??1500)));}catch{}}
  return{text,elo,cls:!(chart||solved)?'none':!mistake?'good':solved&&cost<1?'ok':'bad'};}
 function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
