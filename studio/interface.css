@@ -180,6 +180,7 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 /* New spot builder (spot-builder.js): players, stack, seat, hand and board in one sheet. */
 .sb-context-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 body:not([data-ui-route=solve]) .sb-open{display:none!important}
+body:not([data-ui-route=solve]) #replaySame{display:none!important}.ui-session-line #replaySame{margin-left:8px}
 .sb-dialog .ui-dialog-content{display:grid;gap:14px}
 .sb-head-actions{display:flex;gap:8px}
 .sb-row{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:10px}

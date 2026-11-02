@@ -163,6 +163,10 @@ function spotAnalyseStep(k){const b=spotBuilder;if(state.busy){spotError('A calc
  try{const {hand:h}=spotLineHand(),rec=H.record(h,{hero:Math.max(0,spotHero()),revealAll:true});b.dialog.close();loadHistory(rec);
   state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();
   setTimeout(()=>{const a=$('reviewAnalyze');if(a&&!a.disabled)a.click();},0);}catch(e){spotError(e.message);if(!b.dialog.open)status(e.message,true);}}
+function spotReplaySame(){const h=state.hand;if(!h?.done)return;const live=spotBuilder.live?.dealId===h.dealId?spotBuilder.live:null;
+ spotBuilder.pending={holes:h.holes.map(c=>c.slice()),runout:h.board.slice()};if(!deal(false)){spotBuilder.pending=null;return;}
+ const n=state.hand;n.assisted=true;if(!live)return;spotBuilder.live={dealId:n.dealId,out:live.out.slice()};
+ let folded=false;while(!n.done&&n.street===0&&live.out.includes(n.actor)){n.act({id:'f',kind:'fold',label:'Fold'});folded=true;}if(folded){saveLiveSession();renderAll();}}
 function dealBuiltSpot(withLine){
  const b=spotBuilder,d=b.dialog;if(!withLine&&!spotCheck())return;if(withLine&&state.busy){spotError('A calculation is running. Cancel it first.');return;}
  try{
@@ -226,6 +230,9 @@ function initSpotBuilder(){
  const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New hand';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
  // Hand replay shows the ICM call card under the step too.
  const baseReview=renderReview;renderReview=function(...args){const out=baseReview.apply(this,args);try{const fb=$('reviewFeedback');if(fb){let box=$('reviewIcm');if(!box){box=document.createElement('div');box.id='reviewIcm';fb.after(box);}const f=state.reviewFrames[state.reviewIndex];box.innerHTML=f&&!f.done&&f.holes?.[f.actor]?.length?icmCallHTML(f,null):'';}}catch{}return out;};
+ // Replay hand (Solve only): deals the finished hand again from the start with the same seats, hole cards and board.
+ const next=$('deal');if(next){const again=document.createElement('button');again.type='button';again.className='btn secondary';again.id='replaySame';again.textContent='Replay hand';again.onclick=spotReplaySame;next.after(again);
+  const sync=()=>{again.hidden=next.hidden||!state.hand?.done;again.disabled=next.disabled;};new MutationObserver(sync).observe(next,{attributes:true,attributeFilter:['hidden','disabled']});sync();}
  studioInterface.openSpotBuilder=openSpotBuilder;
 }
 // Tournament all-ins under ICM. Facing a bet that puts you or them all-in heads-up, the payouts change how much
