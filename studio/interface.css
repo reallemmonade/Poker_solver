@@ -223,7 +223,7 @@ body:not([data-ui-route=solve]) .sb-open{display:none!important}
 .sb-street{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin-top:4px}
 .sb-street .sb-slot{width:26px;height:36px}.sb-later{opacity:.55}.sb-later:has(.active){opacity:1}.sb-street .sb-pip{font-size:14px}
 .sb-act{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;background:var(--panel2);border:1px solid var(--line)}
-.sb-act b{color:var(--gold)}.sb-act.auto{opacity:.5}
+.sb-act b{color:var(--gold)}.sb-act.auto{opacity:.5}button.sb-act{color:var(--ink);font-family:inherit;cursor:pointer}button.sb-act:active{border-color:var(--gold)}
 .sb-turn{border:1.5px solid var(--gold);border-radius:14px;padding:12px;display:grid;gap:10px;background:var(--panel2)}
 .sb-turn-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-turn-head>span:last-child{margin-left:auto}
 .sb-turn-cards{display:inline-flex;gap:3px}.sb-turn-cards .sb-pip{background:#f1f0e6;border-radius:4px;padding:2px 3px;font-size:13px}

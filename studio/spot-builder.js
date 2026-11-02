@@ -21,9 +21,10 @@ function spotHero(){return spotBuilder.roles.indexOf('you');}
 function openSpotBuilder(){
  if(state.busy){status('A calculation is running. Cancel it first.',true);return;}
  const b=spotBuilder,c=state.config||{},hole=spotHoleCount(),seats=spotSeatOptions();
- b.format=studyFormatOf(c);b.step='setup';b.line=[];b.frozen=null;
+ const keepLine=!!(b.step==='line'&&b.frozen&&b.roles?.length===b.n);
+ b.format=studyFormatOf(c);if(!keepLine){b.step='setup';b.line=[];b.frozen=null;}
  // Reopening keeps the sheet as you left it while the table still matches it; otherwise it starts from the table.
- const same=b.roles?.length&&b.roles.length===c.seats&&c.button===0&&b.hands?.[0]?.length===hole;
+ const same=keepLine||b.roles?.length&&b.roles.length===c.seats&&c.button===0&&b.hands?.[0]?.length===hole;
  if(!same){b.n=seats.includes(c.seats)?c.seats:seats.includes(6)?6:seats[0];const hero=c.seats===b.n&&Number.isInteger(state.hero)?((state.hero-(c.button||0))%b.n+b.n)%b.n:0;spotResetSeats(hero);b.stack=c.stacks?.[state.hero??0]||STUDY_FORMATS[b.format].stack;}
  if(b.board?.length!==5)b.board=Array(5).fill(null);
  if(b.pick?.length!==b.n)b.pick=Array(b.n).fill(false);
@@ -73,9 +74,10 @@ function spotLineHand(){const b=spotBuilder,h=new G.Hand(spotConfig(),{holes:b.f
 function renderSpotLine(){
  const b=spotBuilder,d=b.dialog,{hand:h,steps}=spotLineHand(),names=G.positions(b.n,0),hero=spotHero();
  d.querySelector('h2').textContent='New hand · Line';
+ steps.forEach((x,k)=>x.k=k);
  let log='';for(let st=0;st<=h.street;st++){const acts=steps.filter(x=>x.street===st),cards=st?h.board.slice(0,st+2):[];if(!acts.length&&st===h.street&&st&&h.done)continue;
   log+='<div class="sb-street"><span>'+['Preflop','Flop','Turn','River'][st]+'</span>'+(st?'<span class="sb-slots">'+cards.slice(st===1?0:st+1,st+2).map((c,k)=>{const i=st===1?k:st+1;return spotSlotHTML(-1,i,c,['Flop','Flop','Flop','Turn','River'][i]);}).join('')+'</span>':'')+'</div>'+
-  '<div class="sb-chips">'+acts.map(x=>'<span class="sb-act'+(x.auto?' auto':'')+'"><b>'+names[x.seat]+'</b> '+esc(x.label)+'</span>').join('')+'</div>';}
+  '<div class="sb-chips">'+acts.map(x=>x.auto?'<span class="sb-act auto"><b>'+names[x.seat]+'</b> '+esc(x.label)+'</span>':'<button type="button" class="sb-act" data-sb-step="'+x.k+'" aria-label="Analyse '+names[x.seat]+' '+esc(x.label)+'"><b>'+names[x.seat]+'</b> '+esc(x.label)+'</button>').join('')+'</div>';}
  // Streets still to come show dimmed with their board cards, so it's clear the line carries on once this street closes.
  // Their cards can be picked here too, in order (flop, then turn, then river).
  let later='';if(!h.done){const known=spotRunout().length;for(let st=h.street+1;st<=3;st++){const from=st===1?0:st+1;if(known<from)break;
@@ -128,6 +130,7 @@ function spotBuilderClick(event){
  else if('sbUndo' in t.dataset)b.line.pop();
  else if('sbDeal' in t.dataset){dealBuiltSpot(false);return;}
  else if('sbStudy' in t.dataset){dealBuiltSpot(true);return;}
+ else if(t.dataset.sbStep){spotAnalyseStep(+t.dataset.sbStep);return;}
  else return;
  renderSpotBuilder();
 }
@@ -139,6 +142,12 @@ function spotCheck(){const b=spotBuilder,stack=+($('sbStack')?.value||b.stack);
  b.stack=stack;return true;}
 // Deals the spot into Train › Decision. With a line, the hand is replayed to its last action (the replay shows every
 // earlier decision in History, and a finished line opens in Hand replay so each step can be analysed).
+// Tapping an action in the line opens the whole line in Hand replay at that decision and starts its analysis.
+// The sheet keeps the line, so reopening it lets you pick another decision.
+function spotAnalyseStep(k){const b=spotBuilder;if(state.busy){spotError('A calculation is running. Cancel it first.');return;}
+ try{const {hand:h}=spotLineHand(),rec=H.record(h,{hero:Math.max(0,spotHero()),revealAll:true});b.dialog.close();loadHistory(rec);
+  state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();
+  setTimeout(()=>{const a=$('reviewAnalyze');if(a&&!a.disabled)a.click();},0);}catch(e){spotError(e.message);if(!b.dialog.open)status(e.message,true);}}
 function dealBuiltSpot(withLine){
  const b=spotBuilder,d=b.dialog;if(!withLine&&!spotCheck())return;if(withLine&&state.busy){spotError('A calculation is running. Cancel it first.');return;}
  try{
