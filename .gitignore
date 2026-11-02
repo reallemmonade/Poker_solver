@@ -1,6 +1,7 @@
 *
 !/.gitignore
 !/README.md
+!/CLAUDE.md
 !/render.yaml
 !/.github/
 !/.github/workflows/
