@@ -72,8 +72,8 @@ function clearCustomBetError(){if(state.customError&&$('status').textContent===s
 // Looking at the analysis while it is your turn (on screen with a strategy in it: studioInterface.analysisOnScreen, or
 // Study open on the live hand) instead marks that decision peeked: its grade counts as a mistake, so the spot shows up
 // in your leaks. Looking after you act or after the hand, or auto-analyze running unseen, changes nothing.
-function markAssisted(){const h=state.hand;if(!h||h.done)return;const study=typeof studioInterface!=='undefined'&&studioInterface.area==='study';
- if(!h.assisted&&($('reveal').checked||$('controlAll').checked&&!study)){h.assisted=true;saveLiveSession();}
+function markAssisted(){const h=state.hand;if(!h||h.done)return;const study=typeof studioInterface!=='undefined'&&studioInterface.area==='study',solving=study&&studioInterface.tab==='solve';
+ if(!h.assisted&&(solving||$('reveal').checked||$('controlAll').checked&&!study)){h.assisted=true;saveLiveSession();}
  const at=h.actionLog.length;if(h.actor===state.hero&&!(h.peeks||[]).includes(at)&&!(h.guessed||[]).includes(at)&&typeof studioInterface!=='undefined'&&studioInterface.analysisOnScreen?.()){h.peeks=[...(h.peeks||[]),at];saveLiveSession();}}
 function chooseAction(action){if(!state.hand||state.hand.done||playBusy()||tableView.playing)return;clearCustomBetError();if(state.hand.actor===state.hero)markAssisted();const hand=state.hand,before=hand.clone(),baseKey=PokerSpot.publicKey(observedData(hand)),chart=hand.street===0?preflopReference(hand):null,solved=activeSpotResult(hand)||(chart?.supported?chart:null),task=state.pending?.automatic&&state.pending.baseKey===baseKey?state.pending:null,pending=hand.pendingGuess?.at===hand.actionLog.length?hand.pendingGuess:null,item={kind:'play',action:pending?pending.action:action,background:true,hand:before,live:hand,baseKey,peeked:(hand.peeks||[]).includes(hand.actionLog.length),guessed:!pending&&(hand.guessed||[]).includes(hand.actionLog.length)};
  applyPlayAction(action);
