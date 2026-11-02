@@ -16,7 +16,7 @@ function leakDecisions(facts=factsOf(state.histories),guesses=true){const out=[]
  // Guesses made in Hand replay belong to no live hand, so they join as one extra group (guess-gate.js).
  if(guesses&&typeof replayGuessFact==='function')facts=facts.concat(replayGuessFact());
  for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
-  const chart=!!g.referenceSource&&!g.approximate&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
+  const chart=!!g.referenceSource&&!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
   out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved&&!g.peeked?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
  return out;}

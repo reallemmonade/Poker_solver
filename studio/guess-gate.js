@@ -13,12 +13,19 @@ const GUESS_LOCK='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="t
 function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,hand);
  return'<div class="guess-btns">'+actions.map((a,i)=>'<button type="button" class="guess-btn" '+attr+'="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],hand).replace(/ · .*/,''))+'</button>').join('')+'<button type="button" class="guess-btn guess-skip" '+attr+'-skip>Skip</button></div>';}
 // The grade's cost line and the rating change it makes now (only when it counts toward the rating).
+// Same rules as the rating (leakDecisions + gradeMistake): solves with EVs grade by bb lost vs the best action; frequency
+// answers grade the exact action, correct when the solver plays it at least 5% of the time. A size the chart doesn't have
+// (an approximate grade) and chip-EV charts don't count, so they show no rating change.
 function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
- const chart=!!row.referenceSource&&Number.isFinite(row.referenceFrequency),solved=!!row.rated&&Number.isFinite(row.loss),mistake=gradeMistake(row),cost=gradeCost(row);
- const top=Math.max(0,...(row.options||[]).map(o=>Number.isFinite(o.f)?o.f:0)),pct=fmt(row.referenceFrequency*100,row.referenceFrequency<.1?1:0)+'%';
- const text=solved?(cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play'):chart?(mistake?'Rare · solver plays it '+pct:row.referenceFrequency>=top-1e-9?'Best play · '+pct:'Mixed · solver plays it '+pct):'Not graded';
+ const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=!!row.rated&&Number.isFinite(row.loss),offSize=!!row.referenceSource&&freq!==null&&!!row.approximate,
+  chart=!!row.referenceSource&&freq!==null&&!row.approximate&&!/chip-EV chart/.test(row.referenceSource.name||''),mistake=gradeMistake(row),cost=gradeCost(row);
+ const opts=(row.options||[]).filter(o=>Number.isFinite(o.f)),top=Math.max(0,...opts.map(o=>o.f)),pc=x=>fmt(x*100,x<.1?1:0)+'%',word=l=>String(l||'').split(' ')[0].toLowerCase();
+ let text='Not graded';
+ if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
+ else if(offSize){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text=same&&same.f>=chartMistakeFrequency?'Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')':'Size not in the chart · not graded';}
+ else if(chart)text=mistake?'Rare · solver plays it '+pc(freq):freq>=top-1e-9?'Best play · '+pc(freq):'Mixed · solver plays it '+pc(freq);
  let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,s=PokerRating.score({mistake,cost:solved?cost:null});elo=Math.round((r.n<PokerRating.PROVISIONAL?40:16)*(s-PokerRating.expected(now,PokerRating.SPOT[row.street]??1500)));}catch{}}
- return{text,elo,cls:!(chart||solved)?'none':!mistake?'good':solved&&cost<1?'ok':'bad'};}
+ return{text,elo,cls:!(chart||solved)?(offSize?'ok':'none'):!mistake?'good':solved&&cost<1?'ok':'bad'};}
 function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
 // renderPlay asks for the analysis pane's content through this. body() builds the normal content.
 function guessGateHTML(h,solved,q,body){
