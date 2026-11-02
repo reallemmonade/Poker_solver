@@ -25,7 +25,8 @@ const ActionBar=(()=>{
     // minimum bet (1/3 of a small limped pot) shows at the minimum rather than dropping out; sizes at or above the all-in fold into it.
     // (Pot when a pot limit caps the bet below the all-in).
     const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).map(([t,label])=>[Math.max(t,r.min),label]).filter(([t])=>snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
-    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
+    // Facing a bet, a size that lands on the minimum raise reads "Min" (with a short stack 1/3 pot is often exactly the min raise).
+    return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i).map(p=>r.kind==='raise'&&!r.preflop&&Math.abs(p.target-r.min)<.005?{...p,label:'Min'}:p),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=r.allIn-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
   // o: {key, fold, check, toCall, callAllIn, raise:{kind,min,max,allIn,effective,pot,currentBet,toCall,preflop,bb}|null, disabled, note,
