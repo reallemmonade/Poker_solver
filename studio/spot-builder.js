@@ -59,7 +59,7 @@ function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return rende
   '<p class="ui-dialog-error sb-error" role="alert" hidden></p>'+
   '<div class="sb-foot"><button type="button" class="btn secondary" data-sb-deal>Deal spot</button><button type="button" class="btn" data-sb-line>Enter the line</button></div>';
 }
-// The line: every action in order, on any street. Out seats fold by themselves. Random hands are fixed when the line
+// The line: every action in order, on any street. Out seats fold by themselves; In seats and You never fold preflop (they reach the flop), so the line offers no Fold there. Random hands are fixed when the line
 // starts (so the board picker can avoid them), and the random board cards come from a fixed shuffle until you pick them.
 function spotFreeze(){const b=spotBuilder,known=new Set(spotKnownCards().keys()),rng=G.rng(b.seed),deck=Array.from({length:52},(_,i)=>i).filter(c=>!known.has(c));
  for(let i=deck.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]];}
@@ -84,7 +84,7 @@ function renderSpotLine(){
  if(h.done)panel='<p class="muted small">The hand is over. Undo to stop earlier.</p>';
  else{const acts=G.modelActions(h,state.abstraction),tones=actionTones(acts,h),l=h.legal(),me=h.actor===hero,hand=b.frozen[h.actor];
   panel='<div class="sb-turn"><div class="sb-turn-head"><b>'+names[h.actor]+(me?' · You':'')+'</b><span class="sb-turn-cards">'+(b.randomSeats.includes(h.actor)?'<span class="muted small">random</span>':hand.map(spotCardLabel).join(''))+'</span><span class="muted small">'+(l.toCall?'to call '+fmt(G.bb(l.callCost))+' · ':'')+'pot '+fmt(G.bb(h.pot))+'</span></div>'+
-   '<div class="sb-acts">'+acts.map((a,i)=>'<button type="button" class="sb-actbtn" data-sb-act="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],h).replace(/ · .*/,''))+'</button>').join('')+'</div>'+
+   '<div class="sb-acts">'+acts.map((a,i)=>h.street===0&&a.kind==='fold'?'':'<button type="button" class="sb-actbtn" data-sb-act="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],h).replace(/ · .*/,''))+'</button>').join('')+'</div>'+
    (l.canRaise?'<div class="sb-custom"><input class="input" id="sbCustom" type="number" inputmode="decimal" min="0" step="0.1" placeholder="'+(h.currentBet?'Raise to':'Bet')+' (bb total)"><button type="button" class="btn secondary" data-sb-custom>'+(h.currentBet?'Raise':'Bet')+'</button></div>':'')+'</div>';}
  const boardPick=b.target?.seat===-1;
  d.querySelector('.ui-dialog-content').innerHTML=
