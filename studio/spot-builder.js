@@ -10,15 +10,6 @@ function studyFormatFields(c,format){
  if(studyFormatOf(c)===format)return{};
  return format==='mtt'?{mode:'icm',ante:c?.startStreet?0:1,anteMode:'bigblind',payouts:[1],otherStacks:[],rakePct:0}:{mode:'cash',ante:0,bounties:Array(c?.seats||2).fill(0)};
 }
-function syncStudyFormat(c){const box=$('uiStudyFormat');if(!box||!c)return;const f=studyFormatOf(c);box.querySelectorAll('[data-study-format]').forEach(b=>{const on=b.dataset.studyFormat===f;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on);});}
-// Switching the format on Study this decision deals a fresh hand in that format; equal default stacks follow it.
-function setStudyFormat(format){
- const c=state.config;if(!c||studyFormatOf(c)===format)return;
- if(state.busy){status('A calculation is running. Cancel it first.',true);return;}
- const from=STUDY_FORMATS[studyFormatOf(c)].stack,stacks=c.stacks.every(x=>x===from)?Array(c.seats).fill(STUDY_FORMATS[format].stack):c.stacks;
- try{const config=G.normalize({...c,...studyFormatFields(c,format),stacks});stopTableMotion();writeForm(config,state.abstraction);markDirty();if(!deal(false))return;}
- catch(e){status(e.message,true);}
-}
 function spotSeatsInOrder(n,button){return n===2?[button,(button+1)%n]:Array.from({length:n},(_,k)=>(button+3+k)%n);}
 function spotHoleCount(){return state.config?.rules?.hole||2;}
 function spotCardLabel(c){const s=C.cardName(c);return'<span class="sb-pip suit-'+s[1]+'">'+s[0]+'<i>'+{c:'♣',d:'♦',h:'♥',s:'♠'}[s[1]]+'</i></span>';}
@@ -201,8 +192,5 @@ function initSpotBuilder(){
   box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep,r.classList.contains('ed-open'));});
   const baseRender=renderPlay;renderPlay=function(...args){const out=baseRender.apply(this,args);try{renderEveryDecision();}catch{}return out;};}
  const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New spot';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
- const heading=document.querySelector('.ui-page-heading');if(heading){const box=document.createElement('div');box.className='sb-chips study-format';box.id='uiStudyFormat';box.setAttribute('role','group');box.setAttribute('aria-label','Game');
-  box.innerHTML=Object.entries(STUDY_FORMATS).map(([k,f])=>'<button type="button" class="sb-chip" data-study-format="'+k+'" aria-pressed="false">'+f.label+'</button>').join('');
-  box.onclick=e=>{const t=e.target.closest('[data-study-format]');if(t)setStudyFormat(t.dataset.studyFormat);};heading.querySelector('h1').after(box);syncStudyFormat(state.config);}
  studioInterface.openSpotBuilder=openSpotBuilder;
 }
