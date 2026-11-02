@@ -217,13 +217,13 @@ function initInterface(){
  // The hand in progress, one row per street: board cards, then the actions as coloured pills (Maxam's History redesign, option C).
  function renderHandStreets(h){const box=document.querySelector('.hs-box');if(!box)return;const show=ui.area==='play'&&!!h&&(h.log||[]).some(e=>e.type==='action'||e.type==='street');box.hidden=!show;if(!show)return;
   const pos=G.positions(h.n,h.button),you=state.hero,rows=[];let row=null,raises=0,folds=0,inHand=new Set();
-  const flush=()=>{if(folds){row.acts.push('<span class="hs-fold">'+folds+' fold'+(folds>1?'s':'')+'</span>');folds=0;}};
+  const flush=()=>{if(folds){folds=0;}};
   const start=(street,cards)=>{if(row)flush();row={street,cards,acts:[]};rows.push(row);raises=0;};
   start(h.config?.startStreet||0,[]);
   for(const e of h.log||[]){if(e.type==='street'){const prev=e.street===1?0:e.street===2?3:4;start(e.street,e.board.slice(prev));continue;}if(e.type!=='action')continue;
    const me=e.seat===you;if(e.kind==='fold'&&!me&&!inHand.has(e.seat)){folds++;continue;}flush();if(e.kind!=='check'&&e.kind!=='fold')inHand.add(e.seat);
    const big=e.kind==='bet'||e.kind==='raise';if(big)raises++;const cls=e.allIn&&e.kind!=='fold'?'ai':e.kind==='fold'?'f':big?'b'+Math.min(raises,3):'p',what=big?fmt(G.bb(e.target)):e.kind;
-   row.acts.push('<span class="hs-act hs-'+cls+(me?' hs-you':'')+'">'+esc(me?(big?e.kind+' '+what:what):pos[e.seat]+' '+what)+'</span>');}
+   row.acts.push('<span class="hs-act hs-'+cls+(me?' hs-you':'')+'">'+esc(pos[e.seat]+' '+what)+'</span>');}
   flush();const cards=cs=>cs.map(c=>cardHTML(c)).join('');let html=rows.map(r=>'<div class="hs-row"><span class="hs-st">'+G.STREET[r.street]+'</span><div>'+(r.cards.length?'<span class="hs-cards">'+cards(r.cards)+'</span>':'')+'<div class="hs-acts">'+r.acts.join('')+'</div></div></div>').join('');
   if(h.done){const shown=h.foldWinner===null?h.living().filter(i=>i!==you):[],net=h.returns?.[you];html+='<div class="hs-row hs-end"><span class="hs-st">'+(shown.length?'Show':'Result')+'</span><div class="hs-acts">'+shown.map(i=>'<span class="hs-show">'+esc(pos[i])+' <span class="hs-cards">'+cards(h.holes[i])+'</span></span>').join('')+(net!=null?'<b class="'+(net>0?'hdb-up':net<0?'hdb-down':'')+'">'+signed(net,1)+'</b>':'')+'</div></div>';}
   box.querySelector('.hs-body').innerHTML=html;}
