@@ -108,8 +108,11 @@ function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{
 function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
 // Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
 // it waits for your Mac. Preflop lines that reach a 3-way flop take hours, so they wait for the Mac.
-function solveTarget(heavy){
+// where: 'cloud' or 'mac' when you picked one (the Mac/Cloud switch), else the cheapest that's ready.
+function solveTarget(heavy,where=null){
  const now=Date.now(),mac=spotUI.mac,macQueue=[...spotUI.jobs.values()].some(j=>jobPending(j)&&(j.target||'mac')==='mac');
+ if(where==='cloud'&&!heavy&&cloudReady())return{target:'modal',threads:CLOUD_SOLVER.threads,load:0,rate:CLOUD_SOLVER.rate,boot:CLOUD_SOLVER.boot,cloud:true};
+ if(where==='mac')return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
  if(mac?.seen&&now-mac.seen<MAC_OFFLINE_MS&&!mac.busy&&!macQueue)return{target:'mac',threads:mac.threads,load:mac.load,rate:0};
  for(const s of spotUI.servers.values())if(s.seen&&now-s.seen<SERVER_OFFLINE_MS&&!s.busy&&!(s.load>.5)&&![...spotUI.jobs.values()].some(j=>jobPending(j)&&j.target===s.name))return{target:s.name,threads:s.threads,load:0,rate:Number(s.rate)||0,server:true};
  if(!heavy&&cloudReady())return{target:'modal',threads:CLOUD_SOLVER.threads,load:0,rate:CLOUD_SOLVER.rate,boot:CLOUD_SOLVER.boot,cloud:true};
@@ -133,7 +136,9 @@ function benchScore(){const n=1<<16,a=new Float64Array(n),b=new Float64Array(n),
 function deviceSpeed(){try{const saved=JSON.parse(localStorage.getItem(BENCH_KEY)||'null');if(saved?.score>0&&Date.now()-saved.at<7*864e5)return saved.score;}catch{}const score=benchScore();try{localStorage.setItem(BENCH_KEY,JSON.stringify({score,at:Date.now()}))}catch{}return score;}
 function deviceSlowdown(){return Math.min(8,Math.max(.25,BENCH_REFERENCE/Math.max(.1,deviceSpeed())));}
 function onDeviceRoute(plan){return plan?.route==='river'||plan?.route==='plo-river';}
-function spotPlan(hand){
+// You can pick the Mac or the cloud whenever both could take the solve; the pick lasts for this visit (spotUI.where).
+function macOnline(){const m=spotUI.mac;return!!m?.seen&&Date.now()-m.seen<MAC_OFFLINE_MS;}
+function spotPlan(hand,where=spotUI.where){
  if(!hand||hand.done)return null;
  const c=hand.config,live=hand.living(),simple=!c.rules.low&&!c.bounties.some(x=>x>0),small=typeof smallMemoryDevice==='function'&&smallMemoryDevice();
  const pre=hand.street===0;
@@ -143,11 +148,11 @@ function spotPlan(hand){
  const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
  if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
-  const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
+  const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0,where),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
   const base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&dest.target==='mac'&&learnedFlopReady(hand);
-  plan={route:bridge?'texas':'mac',target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
+  plan={route:bridge?'texas':'mac',choices:!bridge&&three===0&&cloudReady()&&macOnline(),target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
   // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.
   // A bridge that can update itself does it from a tap, here or on your phone; an older one shows the setup command
   // on the Mac, and the phone sends you there.
@@ -161,7 +166,7 @@ function spotPlan(hand){
  // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
  // can't be sent, so it isn't offered (the solve would only stop with that error).
  if(!pre&&(plan.route==='mac'||plan.route==='texas')&&noChartRanges(hand))return{route:'none',street:hand.street,reason:'No chart covers how this hand got here, so it can\'t be solved.'};
- plan.street=hand.street;plan.kind=kind;const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
+ plan.street=hand.street;plan.kind=kind;Object.defineProperty(plan,'hand',{value:hand});const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
 // True only when charts are loaded, you typed no ranges and none of them covers this hand's preflop line.
 const chartLineMemo=new WeakMap();
@@ -193,18 +198,25 @@ function solveSpotClick(skipReference=false){
  if(!skipReference&&spotReferenceReady(h)){analyzeSpot(h,{kind:'inspect',expectReference:true});return;}if(!plan){analyzeSpot(h,{kind:'inspect'});return;}
  if(job?.status==='done'){deliverSolveJob(true);return;}
  const box=$('spotConfirm');if(!box)return;
- const show=()=>{box.classList.remove('hide');box.querySelectorAll('[data-solve-effort]').forEach(b=>b.onclick=()=>{hideSolveConfirm();if(state.hand===h&&!h.done)analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.solveEffort});});box.querySelector('[data-solve-cancel]').onclick=hideSolveConfirm;};
+ const show=()=>{box.classList.remove('hide');box.querySelectorAll('[data-solve-effort]').forEach(b=>b.onclick=()=>{hideSolveConfirm();const p=b.dataset.where?spotPlan(h,b.dataset.where):plan;if(state.hand===h&&!h.done&&p&&!p.blocked)analyzeSpot(h,{kind:'inspect',plan:p,effort:b.dataset.solveEffort});});box.querySelectorAll('[data-solve-where]').forEach(b=>b.onclick=()=>{spotUI.where=b.dataset.solveWhere;solveSpotClick(skipReference);});box.querySelector('[data-solve-cancel]').onclick=hideSolveConfirm;};
  const block=job&&(jobPending(job)||job.status==='done')?jobText(job):plan.route==='none'?plan.reason:plan.blocked;
  if(block){box.innerHTML='<p>'+esc(block)+'</p><div class="row"><button type="button" class="btn secondary" data-solve-cancel>OK</button></div>';show();return;}
- if(!plan.efforts&&plan.seconds<=10&&!plan.note){analyzeSpot(h,{kind:'inspect',plan});return;}
+ if(!plan.efforts&&plan.seconds<=10&&!plan.note&&!plan.choices){analyzeSpot(h,{kind:'inspect',plan});return;}
  const note=(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+(plan.mayStop?'<p class="small muted">May stop without an answer.</p>':'');
- box.innerHTML=plan.efforts?'<p><strong>Solve '+planPlace(plan)+'</strong></p>'+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':'<p><strong>Solve '+planPlace(plan)+'</strong> · '+planTimeText(plan)+'</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
+ box.innerHTML=plan.efforts?(plan.choices?solveWhereHTML(h,plan):'<p><strong>Solve '+planPlace(plan)+'</strong></p>')+note+'<div class="row">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn'+(id==='standard'?'':' secondary')+'" data-solve-effort="'+id+'">'+e.label+' · '+planTimeText(plan,e.factor).replace(/^about /,'')+'</button>').join('')+'<button type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>':(plan.choices?'<p><strong>Solve</strong></p>'+note+'<div class="row">'+solveChoices(h,plan).map(([w,p])=>'<button type="button" class="btn'+(w==='mac'?' secondary':'')+'" data-solve-effort="standard" data-where="'+w+'">'+(w==='cloud'?'Cloud':'Mac')+' · '+planTimeText(p).replace(/^about /,'')+'</button>').join('')+'<button':'<p><strong>Solve '+planPlace(plan)+'</strong> · '+planTimeText(plan)+'</p>'+note+'<div class="row"><button type="button" class="btn" data-solve-effort="standard">Solve</button><button')+' type="button" class="btn secondary" data-solve-cancel>Cancel</button></div>';
  show();
 }
 // The solve choice shown straight in the analysis panel when the spot has no stored answer and the solve isn't instant:
 // where it runs and how long, with one button per effort.
-function solvePromptHTML(plan){const off=state.busy?' disabled':'',time=f=>planTimeText(plan,f).replace(/^about /,'');return'<div class="solve-inline">'+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+'</div>';}
-document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve});});
+// Both places with their time and price at the effort shown (Standard), Mac first.
+function solveChoices(hand,plan){const other=spotPlan(hand,plan.cloud?'mac':'cloud'),cloud=plan.cloud?plan:other,mac=plan.cloud?other:plan;return[['mac',mac],['cloud',cloud]];}
+// The Mac/Cloud switch above effort buttons: the one picked is pressed, and the efforts below are for it.
+function solveWhereHTML(hand,plan){return'<div class="solve-where" role="group" aria-label="Where to solve">'+solveChoices(hand,plan).map(([w,p])=>'<button type="button" class="solve-where-pick'+((w==='cloud')===!!plan.cloud?' on':'')+'" aria-pressed="'+((w==='cloud')===!!plan.cloud)+'" data-solve-where="'+w+'"><span>'+(w==='cloud'?'Cloud':'Mac')+'</span><span>'+planTimeText(p).replace(/^about /,'')+'</span></button>').join('')+'</div>';}
+function solvePromptHTML(plan){const off=state.busy?' disabled':'',time=f=>planTimeText(plan,f).replace(/^about /,''),h=plan.hand||state.hand;
+ if(plan.choices&&!plan.efforts)return'<div class="solve-inline">'+solveChoices(h,plan).map(([w,p])=>'<button type="button" class="btn solve-cta'+(w==='mac'?' secondary':'')+'" data-inline-solve="standard" data-where="'+w+'"'+off+'><span>Solve '+planPlace(p)+'</span><span>'+planTimeText(p).replace(/^about /,'')+'</span></button>').join('')+'</div>';
+ return'<div class="solve-inline">'+(plan.choices?solveWhereHTML(h,plan):'')+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+'</div>';}
+document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h,b.dataset.where||spotUI.where);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve});});
+document.addEventListener('click',event=>{const b=event.target.closest('.solve-inline [data-solve-where]');if(!b)return;spotUI.where=b.dataset.solveWhere;spotUI.last=null;if(state.hand)renderPlay();});
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
@@ -255,7 +267,15 @@ function jobState(j){
 function jobText(j){return jobState(j).text;}
 // A pending solve takes the Solve button's place (.solve-job hides #analyze): the bar fills as it runs, ✕ cancels,
 // striped while queued. Anything that needs words (waiting for the Mac, no progress reports) stays a notice.
-function jobNoticeHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
+// A solve still queued for your Mac can go to the cloud instead: the same row, now for the cloud.
+function canMoveToCloud(j){return j.status==='queued'&&(j.target||'mac')==='mac'&&(j.kind!=='preflop'||(j.seconds||0)<1800)&&cloudReady();}
+function cloudMoveSeconds(j){return Math.max(5,j.seconds||60)+CLOUD_SOLVER.boot;}
+async function moveJobToCloud(id){const j=spotUI.jobs.get(id);if(!j||!canMoveToCloud(j))return;const estimate=Math.round(cloudMoveSeconds(j)/3600*CLOUD_SOLVER.rate*1e5)/1e5;
+ const value={...j,target:'modal',rate:CLOUD_SOLVER.rate,estimate,createdAt:Date.now()};await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
+document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cloud-job]');if(b){e.preventDefault();moveJobToCloud(b.dataset.cloudJob);}});
+function jobNoticeHTML(j){const bar=jobBarHTML(j);if(!canMoveToCloud(j))return bar;const id='solvejob-'+hash(j.key);
+ return'<div class="solve-job-stack" id="solveJobNotice">'+bar.replace(' id="solveJobNotice"','')+'<button type="button" class="btn secondary solve-cta" data-cloud-job="'+esc(id)+'"><span>Solve in the cloud</span><span>'+solveTimeText(cloudMoveSeconds(j)).replace(/^about /,'')+' · '+centsText(cloudMoveSeconds(j)/3600*CLOUD_SOLVER.rate)+'</span></button></div>';}
+function jobBarHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
  if(jobPending(j)&&st.label)return'<div class="solve-job'+(st.queued?' queued':'')+'" id="solveJobNotice" role="progressbar" aria-label="'+esc(st.text)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div class="solve-job-fill" style="width:'+(st.queued?100:Math.max(2,Math.min(100,st.p*100))).toFixed(1)+'%"></div><span>'+esc(st.label)+'</span><span>'+esc(st.time)+'</span>'+cancel()+'</div>';
  return'<div class="notice'+(jobPending(j)?' solve-job-wait':'')+'" id="solveJobNotice">'+(jobPending(j)?cancel('Cancel'):'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
 setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
