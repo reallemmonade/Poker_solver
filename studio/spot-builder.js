@@ -76,6 +76,10 @@ function renderSpotLine(){
  let log='';for(let st=0;st<=h.street;st++){const acts=steps.filter(x=>x.street===st),cards=st?h.board.slice(0,st+2):[];if(!acts.length&&st===h.street&&st&&h.done)continue;
   log+='<div class="sb-street"><span>'+['Preflop','Flop','Turn','River'][st]+'</span>'+(st?'<span class="sb-slots">'+cards.slice(st===1?0:st+1,st+2).map((c,k)=>{const i=st===1?k:st+1;return spotSlotHTML(-1,i,c,['Flop','Flop','Flop','Turn','River'][i]);}).join('')+'</span>':'')+'</div>'+
   '<div class="sb-chips">'+acts.map(x=>'<span class="sb-act'+(x.auto?' auto':'')+'"><b>'+names[x.seat]+'</b> '+esc(x.label)+'</span>').join('')+'</div>';}
+ // Streets still to come show dimmed with their board cards, so it's clear the line carries on once this street closes.
+ // Their cards can be picked here too, in order (flop, then turn, then river).
+ let later='';if(!h.done){const known=spotRunout().length;for(let st=h.street+1;st<=3;st++){const from=st===1?0:st+1;if(known<from)break;
+  later+='<div class="sb-street sb-later"><span>'+['Preflop','Flop','Turn','River'][st]+'</span><span class="sb-slots">'+[0,1,2,3,4].slice(from,st+2).map(i=>spotSlotHTML(-1,i,b.board[i],['Flop','Flop','Flop','Turn','River'][i])).join('')+'</span></div>';}}
  let panel='';
  if(h.done)panel='<p class="muted small">The hand is over. Undo to stop earlier.</p>';
  else{const acts=G.modelActions(h,state.abstraction),tones=actionTones(acts,h),l=h.legal(),me=h.actor===hero,hand=b.frozen[h.actor];
@@ -85,7 +89,7 @@ function renderSpotLine(){
  const boardPick=b.target?.seat===-1;
  d.querySelector('.ui-dialog-content').innerHTML=
   '<div class="sb-chips"><button type="button" class="sb-chip" data-sb-back>1 Players &amp; hands</button><span class="sb-chip on">2 Line</span></div>'+
-  '<div class="sb-log">'+log+'</div>'+panel+
+  '<div class="sb-log">'+log+'</div>'+panel+(later?'<div class="sb-log">'+later+'</div>':'')+
   (boardPick?'<p class="muted small">Pick the board card, or leave it random.</p>'+spotGridHTML():'<p class="muted small">Tap each action in order. Tap a board card to change it. Stop on the decision you want to study.</p>')+
   '<p class="ui-dialog-error sb-error" role="alert" hidden></p>'+
   '<div class="sb-foot"><button type="button" class="btn secondary" data-sb-undo'+(b.line.length?'':' disabled')+'>Undo</button><button type="button" class="btn" data-sb-study>'+(h.done?'Replay this hand':'Study this decision')+'</button></div>';
@@ -94,8 +98,9 @@ function spotError(m){const e=spotBuilder.dialog.querySelector('.sb-error');if(e
 function spotPickCard(card){const b=spotBuilder,t=b.target;if(!t)return;let known=spotKnownCards();
  if(b.frozen){const owner=b.frozen.findIndex(h=>h.includes(card));if(owner>=0){spotError('That card is in '+G.positions(b.n,0)[owner]+'’s hand.');return;}}
  if(t.seat===-1){if(b.frozen){const shown=spotLineHand().hand.board;for(let i=0;i<t.i;i++)if(b.board[i]===null)b.board[i]=shown[i]??null;known=spotKnownCards();}
+  const dealt=b.frozen?spotLineHand().hand.board.length:0,later=b.frozen&&t.i>=dealt;if(later)t.i=Math.max(dealt,Math.min(t.i,spotRunout().length));
   const at=known.get(card);if(at&&at.seat===-1&&at.i!==t.i)b.board[at.i]=null;else if(at&&at.seat!==-1)b.hands[at.seat][at.i]=null;b.board[t.i]=card;
-  if(b.frozen){b.target=null;spotTrimLine();return;}const next=b.board.findIndex((c,i)=>c===null&&i>t.i);b.target=next>=0?{seat:-1,i:next}:null;return;}
+  if(b.frozen){const next=later&&t.i<2?b.board.findIndex((c,i)=>c===null&&i>t.i&&i<3):-1;b.target=next>=0?{seat:-1,i:next}:null;spotTrimLine();return;}const next=b.board.findIndex((c,i)=>c===null&&i>t.i);b.target=next>=0?{seat:-1,i:next}:null;return;}
  const at=known.get(card);if(at){if(at.seat===-1)b.board[at.i]=null;else b.hands[at.seat][at.i]=null;}
  if(b.roles[t.seat]==='out')b.roles[t.seat]='in';b.hands[t.seat][t.i]=card;const next=b.hands[t.seat].findIndex(c=>c===null);b.target=next>=0?{seat:t.seat,i:next}:null;}
 // A board change can make a later action illegal (an all-in already ran it out, say): keep the line up to there.
@@ -105,7 +110,7 @@ function spotBuilderClick(event){
  if($('sbStack'))b.stack=+$('sbStack').value||b.stack;spotError('');
  if(t.dataset.sbFormat){const f=t.dataset.sbFormat;if(f!==b.format&&b.stack===STUDY_FORMATS[b.format].stack)b.stack=STUDY_FORMATS[f].stack;b.format=f;}
  else if(t.dataset.sbN){const hero=Math.max(0,spotHero());b.n=+t.dataset.sbN;spotResetSeats(hero<b.n?hero:0);}
- else if(t.dataset.sbRole){const [seat,role]=t.dataset.sbRole.split(':');const s=+seat;if(role==='you'){const old=spotHero();if(old>=0&&old!==s)b.roles[old]='in';}else if(b.roles[s]==='you'){status('Pick another seat as You first.');return;}
+ else if(t.dataset.sbRole){const [seat,role]=t.dataset.sbRole.split(':');const s=+seat;if(role==='you'){const old=spotHero();if(old>=0&&old!==s)b.roles[old]='in';}
   b.roles[s]=role;if(role==='out'){b.hands[s].fill(null);b.pick[s]=false;if(b.target?.seat===s)b.target=null;}if(b.roles.filter(r=>r!=='out').length<2){b.roles[s]='in';spotError('A hand needs at least two players.');}}
  else if(t.dataset.sbSlot){const [seat,i]=t.dataset.sbSlot.split(':').map(Number),same=b.target&&b.target.seat===seat&&b.target.i===i;
   b.target=same?null:{seat,i};}
@@ -113,6 +118,7 @@ function spotBuilderClick(event){
  else if(t.dataset.sbMode){const [seat,mode]=t.dataset.sbMode.split(':'),s=+seat;b.pick[s]=mode==='cards';
   if(mode==='cards'){const i=b.hands[s].findIndex(c=>c===null);b.target={seat:s,i:i<0?0:i};}else{b.hands[s].fill(null);if(b.target?.seat===s)b.target=null;}}
  else if(t.dataset.sbCard)spotPickCard(+t.dataset.sbCard);
+ else if('sbReset' in t.dataset){b.stack=STUDY_FORMATS[b.format].stack;b.board=Array(5).fill(null);spotResetSeats(0);b.step='setup';b.line=[];b.frozen=null;}
  else if('sbLine' in t.dataset){if(!spotCheck())return;b.seed=1+Math.floor(Math.random()*1e9);spotFreeze();b.line=[];b.target=null;b.step='line';}
  else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target=null;}
  else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=G.modelActions(h,state.abstraction)[+t.dataset.sbAct];if(a)b.line.push(a);}
@@ -126,6 +132,7 @@ function spotBuilderClick(event){
  renderSpotBuilder();
 }
 function spotCheck(){const b=spotBuilder,stack=+($('sbStack')?.value||b.stack);
+ if(spotHero()<0){spotError('Tap You on your seat.');return false;}
  if(!(stack>=1&&stack<=1e6)){spotError('Stack needs to be at least 1 bb.');return false;}
  const half=b.hands.findIndex(h=>h.some(c=>c===null)&&h.some(c=>c!==null));if(half>=0){spotError('Pick both of '+G.positions(b.n,0)[half]+'’s cards, or none for a random hand.');return false;}
  if(state.busy){spotError('A calculation is running. Cancel it first.');return false;}
@@ -176,7 +183,7 @@ function spotShowReplay(){requestAnimationFrame(()=>$('reviewTable')?.scrollInto
 function openDecisionStep(k,solve=false){const h=state.hand;if(!h)return;try{loadHistory(H.record(h,{hero:state.hero,revealAll:true}));state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();if(solve)setTimeout(()=>{const b=$('reviewAnalyze');if(b&&!b.disabled)b.click();},0);}catch(e){status(e.message,true);}}
 function initSpotBuilder(){
  const d=document.createElement('dialog');d.className='ui-dialog sb-dialog';d.id='uiSpotDialog';d.setAttribute('aria-label','New spot');
- d.innerHTML='<div class="ui-dialog-head"><h2>New spot</h2><button type="button" class="btn secondary" data-close-dialog>Close</button></div><div class="ui-dialog-content"></div>';
+ d.innerHTML='<div class="ui-dialog-head"><h2>New spot</h2><div class="sb-head-actions"><button type="button" class="btn secondary" data-sb-reset>Reset</button><button type="button" class="btn secondary" data-close-dialog>Close</button></div></div><div class="ui-dialog-content"></div>';
  (document.querySelector('.shell')||document.body).append(d);spotBuilder.dialog=d;
  d.querySelector('[data-close-dialog]').onclick=()=>d.close();
  d.addEventListener('click',event=>{if(event.target===d){const r=d.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)d.close();return;}spotBuilderClick(event);});
