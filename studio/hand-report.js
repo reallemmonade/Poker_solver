@@ -5,7 +5,8 @@
 // Solver rows carry every option's EV (grade.options); chart rows carry frequencies only, so they read "In chart" or a miss.
 // It only appears once the hand is over: showing it mid-hand would hand you the analysis while you still act.
 const handReport={open:false,row:null,hand:null,key:'guava-hand-report',wait:null};
-function handReportOn(){try{return localStorage.getItem(handReport.key)==='1'}catch{return false}}
+// On unless turned off, so a new device or the phone preview shows the grade without a trip to Settings.
+function handReportOn(){try{return localStorage.getItem(handReport.key)!=='0'}catch{return true}}
 function handReportScore(g){return!gradeMistake(g)?1:gradeCost(g)>0?Math.exp(-gradeCost(g)):0;}
 // Hero decisions in order, each matched to its grade by the action-log index it was made at.
 function handReportDecisions(rec){const hero=rec.hero??0,grades=(rec.grading||[]).filter(g=>g.hero===undefined||g.hero===hero),out=[];
@@ -69,7 +70,7 @@ function initHandReport(){const style=document.createElement('style');style.text
 .hr-pill.hr-bad{color:var(--hr-bad);background:color-mix(in srgb,var(--hr-bad) 16%,transparent)}
 .hr-pill.hr-none{color:var(--muted);background:color-mix(in srgb,var(--ink) 8%,transparent)}
 .hr-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}`;document.head.append(style);
- // Setting: lives with Decision recording (the jump target "recording"), off by default.
+ // Setting: lives with Decision recording (the jump target "recording"), on by default and synced with the account.
  const add=()=>{const near=$('gradeEvery')?.closest('label');if(!near||$('handReportOn'))return;const label=document.createElement('label');label.className=near.className;label.innerHTML='<input type="checkbox" id="handReportOn"> Rate each hand when it ends';near.after(label);const box=$('handReportOn');box.checked=handReportOn();box.onchange=()=>{try{localStorage.setItem(handReport.key,box.checked?'1':'0')}catch{}if(!box.checked)handReportClose();};};
  add();setTimeout(add,0);addEventListener('resize',()=>{if(handReport.open)handReportPlace($('handReport'));});}
 if(typeof document!=='undefined')initHandReport();
