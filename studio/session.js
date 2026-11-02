@@ -45,7 +45,7 @@ function nextPersistentSessionConfig(){
  const config={...h.config,startStreet:0,board:'',boardCards:[],pot:0,seats:alive.length,stacks:alive.map(i=>G.bb(stacks[i])),button:alive.indexOf(nextButton),bounties:alive.map(i=>h.bounties[i]),payouts:h.config.payouts.slice(0,alive.length+h.config.otherStacks.length)};
  state.hero=alive.indexOf(state.hero);remapBotSeats(alive);liveSession.rootSeats=liveSession.rootSeats&&alive.map(i=>liveSession.rootSeats[i]);
  let level='';if(config.mode==='icm'&&$('sessionBlindLevels').checked&&state.sessionHands%Math.max(1,+$('levelHands').value)===0){const factor=Math.max(1,+$('levelFactor').value||1);if(factor>1)level='Blinds up ×'+fmt(factor,2)+' · level '+(1+state.sessionHands/Math.max(1,+$('levelHands').value));const scaled=scaleChips([...config.stacks,...config.otherStacks],factor);config.stacks=scaled.slice(0,config.stacks.length);config.otherStacks=scaled.slice(config.stacks.length);}
- liveSession.level=level;liveSession.message=[level,h.n-alive.length?h.n-alive.length+' opponent(s) eliminated':''].filter(Boolean).join(' · ');
+ liveSession.level=level;liveSession.message=level;
  // Rebuys show on the seats as the next hand is dealt (table.js playSeatRebuys), not as a line of text.
  const next=G.normalize(config);liveSession.rebuys={config:next,seats:stacks.map((amount,seat)=>amount!==h.stacks[seat]?{seat:alive.indexOf(seat),from:G.bb(h.stacks[seat]),to:G.bb(amount)}:null).filter(Boolean)};return next;
 }
