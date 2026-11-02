@@ -103,7 +103,7 @@ const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,M
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
 // with --name (tools/local-solver/link.cjs) beats as 'solver-<name>' and takes jobs while idle at its own rate.
-const CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
+const CLOUD_STUCK_MS=3*60e3,CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
 function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{}return v!=='off';}
 function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
 // Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
@@ -146,7 +146,8 @@ function spotPlan(hand,where=spotUI.where){
  if(pre&&preflopFlopPlayers(hand)>3)return{route:'none',street:0,reason:'No chart covers this preflop line, and it can reach the flop four or more ways, which can\'t be solved yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
  const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
- if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
+ // A phone solves rivers itself only when neither your Mac nor the cloud can take them.
+ if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small)&&!(small&&(macOnline()||cloudReady())))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
  else{
   const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0,where),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
@@ -221,7 +222,7 @@ function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add
 // Solves sent to the Mac. Each is a 'solvejob-<hash>' meta row that syncs through the account: the Mac's bridge
 // marks it running, then done (writing the answer as the saved spot rowId) or failed. 'macsolver' is the
 // bridge's heartbeat: when it was last seen, its threads and how busy the Mac is.
-spotUI.jobs=new Map();spotUI.mac=null;spotUI.servers=new Map();spotUI.jobTimer=0;spotUI.macUpdate=null;
+spotUI.jobs=new Map();spotUI.mac=null;spotUI.servers=new Map();spotUI.gradeWaits=new Map();spotUI.jobTimer=0;spotUI.macUpdate=null;
 // Updating the Mac's solver: straight to the bridge on the Mac itself, else a 'macupdate' row it picks up within the sync time.
 const UPDATE_MS=10*60e3;
 async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.value;
@@ -239,9 +240,10 @@ function jobPending(j){return j.status==='queued'||j.status==='running';}
 function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){id=Math.random().toString(36).slice(2,12);localStorage.setItem('citrus-device-id',id);}return id;}catch{return'';}}
 // Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
 async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j))return;const value={...j,status:'cancelled',cancelledAt:Date.now()};spotUI.jobs.set(id,value);try{await dbPut('meta',{id,value});}catch{}citrusAccount.run();watchSolveJobs();if(state.hand)renderPlay();}
-// A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made.
+// A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made. With
+// Record an assessment on, it keeps going instead: its answer grades the decision you made (gradeFromJobs).
 // Not before the saved hand is back after a reload: until then the table holds a placeholder deal.
-function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
+function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||spotUI.gradeWaits.has(j.baseKey)||$('gradeEvery')?.checked)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
@@ -258,7 +260,8 @@ function jobState(j){
   return g.phase==='preparing'?{text:'Preparing ranges…',label:'Preparing',time:cost.slice(3),p:g.p}:{text:'Solving · '+Math.floor(g.p*100)+'% · '+(g.left>=5?solveTimeText(g.left)+' left':'almost done')+cost,label:'Solving '+Math.floor(g.p*100)+'%',time:(g.left>=5?solveTimeText(g.left).replace('about ',''):'almost done')+cost,p:g.p};}
  const sync=typeof citrusAccount!=='undefined'?citrusAccount.status:'',mac=spotUI.mac;
  if(['offline','off','expired','signedOut'].includes(sync))return{text:'Not sent yet: this device can\'t reach your account. It sends when the connection is back.'};
- if(j.target==='modal')return{text:'Starting in the cloud',label:'Starting',time:'~'+CLOUD_SOLVER.boot+'\u00a0sec',p:0,queued:true};
+ // A cloud container reports within a minute or two of the tap; one that hasn't after CLOUD_STUCK_MS likely never started.
+ if(j.target==='modal'){const waited=Date.now()-(j.createdAt||Date.now());if(waited>CLOUD_STUCK_MS)return{text:'The cloud hasn\'t started ('+agoText(waited).replace(' ago','')+').',retry:true};return{text:'Starting in the cloud',label:'Starting in the cloud',time:(j.estimate>0?centsText(j.estimate):''),p:0,queued:true};}
  if(j.target&&j.target!=='mac'){const s=spotUI.servers.get('solver-'+j.target);if(!s?.seen||Date.now()-s.seen>SERVER_OFFLINE_MS)return{text:'Waiting for your server'+(s?.seen?' · last seen '+agoText(Date.now()-s.seen):'')};return{text:'Queued on your server',label:'Queued',time:'',p:0,queued:true};}
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
  if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
@@ -273,7 +276,9 @@ function cloudMoveSeconds(j){return Math.max(5,j.seconds||60)+CLOUD_SOLVER.boot;
 async function moveJobToCloud(id){const j=spotUI.jobs.get(id);if(!j||!canMoveToCloud(j))return;const estimate=Math.round(cloudMoveSeconds(j)/3600*CLOUD_SOLVER.rate*1e5)/1e5;
  const value={...j,target:'modal',rate:CLOUD_SOLVER.rate,estimate,createdAt:Date.now()};await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cloud-job]');if(b){e.preventDefault();moveJobToCloud(b.dataset.cloudJob);}});
-function jobNoticeHTML(j){const bar=jobBarHTML(j);if(!canMoveToCloud(j))return bar;const id='solvejob-'+hash(j.key);
+async function retryCloudJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j)||j.target!=='modal')return;const value={...j,createdAt:Date.now()};await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
+document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cloud-retry]');if(b){e.preventDefault();retryCloudJob(b.dataset.cloudRetry);}});
+function jobNoticeHTML(j){const bar=jobBarHTML(j),st=jobState(j);if(st.retry){const id='solvejob-'+hash(j.key);return'<div class="solve-job-stack" id="solveJobNotice">'+bar.replace(' id="solveJobNotice"','')+'<button type="button" class="btn solve-cta" data-cloud-retry="'+esc(id)+'"><span>Try the cloud again</span><span></span></button></div>';}if(!canMoveToCloud(j))return bar;const id='solvejob-'+hash(j.key);
  return'<div class="solve-job-stack" id="solveJobNotice">'+bar.replace(' id="solveJobNotice"','')+'<button type="button" class="btn secondary solve-cta" data-cloud-job="'+esc(id)+'"><span>Solve in the cloud</span><span>'+solveTimeText(cloudMoveSeconds(j)).replace(/^about /,'')+' · '+centsText(cloudMoveSeconds(j)/3600*CLOUD_SOLVER.rate)+'</span></button></div>';}
 function jobBarHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
  if(jobPending(j)&&st.label)return'<div class="solve-job'+(st.queued?' queued':'')+'" id="solveJobNotice" role="progressbar" aria-label="'+esc(st.text)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div class="solve-job-fill" style="width:'+(st.queued?100:Math.max(2,Math.min(100,st.p*100))).toFixed(1)+'%"></div><span>'+esc(st.label)+'</span><span>'+esc(st.time)+'</span>'+cancel()+'</div>';
@@ -306,7 +311,11 @@ async function deliverSolveJob(force=false){
  if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
 }
-addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{deliverSolveJob();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
+// Decisions waiting on a Mac or cloud solve (see analyzeSpot) are graded once its answer syncs in.
+async function gradeFromJobs(){for(const [key,item] of [...spotUI.gradeWaits]){const j=[...spotUI.jobs.values()].filter(x=>x.baseKey===key).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];if(!j||j.status==='failed'||j.status==='cancelled'){spotUI.gradeWaits.delete(key);continue;}if(j.status!=='done')continue;
+ let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
+ if(!row||!validSpotResult(row.result))continue;spotUI.gradeWaits.delete(key);spotUI.cache.set(j.key,row.result);try{finishAnalysis(row.result,{...item,cacheKey:j.key,solveOptions:j.options});}catch{}}}
+addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{gradeFromJobs();deliverSolveJob();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
 function spotSourceStamp(snapshot){return JSON.stringify([snapshot?.format,snapshot?.id,snapshot?.episodes,snapshot?.decisions,snapshot?.createdAt,snapshot?.seedState,snapshot?.config,snapshot?.abstraction]);}
 function spotCacheKey(observed,options,extraAction,snapshot){const parts=['spot-v3',PokerSpot.publicKey(observed),options,extraAction],automatic=options.rangeMode==='auto'&&Array.from({length:observed.config.seats},(_,i)=>String(options.ranges[i]||'').trim()).some(text=>!text||/^auto$/i.test(text));if(automatic&&snapshot?.episodes>0&&observed.actions.length)parts.push(spotSourceStamp(snapshot));return JSON.stringify(parts);}
 function validSpotResult(r){
@@ -329,7 +338,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   const reference=pending.referenceModel?{model:pending.referenceModel,snapshot:pending.referenceSnapshot||pending.referenceModel.snapshot()}:studyReference(hand),opts=spotSettings(hand,{...pending,referenceModel:reference.model}),observed=observedData(hand),baseKey=PokerSpot.publicKey(observed),sourceStamp=spotSourceStamp(reference.snapshot);
   const regular=PokerSpot.actionsAt(hand,hand,opts,null);if(extraAction&&T.matchAction(regular,extraAction)>=0)extraAction=null;
   let cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot),task={...pending,hand:hand.clone(),referenceModel:reference.model,referenceSnapshot:reference.snapshot,cacheKey,baseKey,solveOptions:opts};state.pending=task;lock('spotSolve');status('Preparing player ranges and the continuation betting tree…');
-  if(!['quiz','quizPrepare'].includes(pending.kind))$(pending.kind==='review'?'reviewFeedback':'playFeedback').innerHTML='<h3>Solving this position…</h3><p id="spotInlineProgress" role="status">Preparing player ranges and legal bet sizes.</p><p class="help">The calculation uses the public history and your cards. You can cancel without changing the hand.</p>';
+  if(!['quiz','quizPrepare'].includes(pending.kind))$(pending.kind==='review'?'reviewFeedback':'playFeedback').innerHTML='<h3>Solving…</h3><p id="spotInlineProgress" role="status">Preparing ranges.</p>';
   if(bundleLoading&&!spotReferenceReady(hand)){await bundleReady.catch(()=>{});if(state.pending!==task)return;}
   if(bundleManifest&&smallMemoryDevice()){await ensurePhoneLibraries(state.hand===hand?hand:task.hand);if(state.pending!==task)return;}
   const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack)||(hand.street===0&&!pending.quizQuestion?learnedPreflop(hand):null);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
@@ -344,6 +353,10 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   // A stored answer expected at the click was not there after all: ask about a real solve instead of running one
   // that can't finish here.
   if(pending.expectReference){const plan=spotPlan(hand);if(plan&&!onDeviceRoute(plan)){state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(!pending.automatic)solveSpotClick(true);return;}}
+  // Grading a decision you already made never runs a solve on this device when the spot belongs on your Mac or the
+  // cloud: a solve already sent there for this decision grades it when its answer lands (gradeFromJobs), and keeps
+  // running after you act; otherwise the decision goes ungraded.
+  if(pending.background&&!onDeviceRoute(spotPlan(hand))){const job=[...spotUI.jobs.values()].find(j=>j.baseKey===baseKey&&(jobPending(j)||j.status==='done'));if(job)spotUI.gradeWaits.set(baseKey,{...task});state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(job)gradeFromJobs();if(typeof pumpGrades==='function')pumpGrades();return;}
   if(task.plan?.route==='mac'){await sendToMac(task,observed,opts,extraAction);if(state.pending!==task)return;state.pending=null;lock();const el=$('playFeedback');if(el)el.innerHTML='';status(task.plan.cloud?'Sent to the cloud.':task.plan.server?'Sent to your server.':'Sent to your Mac.');return;}
   const worker=ensureWorker();if(spotUI.workerStamp!==sourceStamp){worker.postMessage({type:'load',snapshot:reference.snapshot});spotUI.workerStamp=sourceStamp;state.workerVersion=0;}
   task.dispatched=true;task.started=Date.now();worker.postMessage({type:'solve',observed,options:opts,extraAction,tag:pending.kind});
