@@ -10,13 +10,17 @@
 //   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"]
 //   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2]
 //   node tools/preflop/level2.cjs moved --old charts.json.gz --new charts.json.gz --spots per-spot-6max [--threshold .05]
+//   node tools/preflop/level2.cjs compare --a m0.json.gz --b dir|m.json.gz
+// compare (a diagnostic) prints, per line both measured and per side, the combo-weighted mean share
+// of the classes in a's range (5% or more) in a and in b, the mean share in b of classes a never had,
+// and the share of b's opponent range those extra classes make up; then the means by pot type.
 // extract keeps only the shares (a few hundred kB), to move solves between computers. fit keeps
 // for every line the last --keep measurements given (in --measure order) and writes them into the
 // base calibration (a set from calibrate.cjs --depths, or one fit). moved prints the flop lines
 // whose ranges moved more than --threshold (total variation over combos, either player) between
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
-const args={cmd:process.argv[2]||'help',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
+const args={cmd:process.argv[2]||'help',a:'',b:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
@@ -63,10 +67,31 @@ function moved(){
  console.log(out.join(','));
 }
 
+// A side's mean share over its whole solved range, by combos.
+function whole(m,side){const n=c=>c.length===2?6:c[2]==='s'?4:12,own=side==='ip'?m.rangeIp:m.rangeOop;let w=0,x=0;for(const [c,v]of Object.entries(m[side])){const r=own[c]||0;w+=r*n(c);x+=r*n(c)*v;}return w?x/w:NaN;}
+function compare(){
+ const n=c=>c.length===2?6:c[2]==='s'?4:12,A=new Map(measurements(args.a).map(m=>[m.chart+'|'+m.key,m])),sum={};
+ const kind=key=>['limp/srp','srp','3-bet','4-bet','5-bet'][Math.min(4,(key.match(/:raise:/g)||[]).length)];
+ for(const b of measurements(args.b)){const a=A.get(b.chart+'|'+b.key);if(!a)continue;
+  for(const side of ['ip','oop']){
+   const own=side==='ip'?a.rangeIp:a.rangeOop,oppB=side==='ip'?b.rangeOop:b.rangeIp,oppA=side==='ip'?a.rangeOop:a.rangeIp;let wa=0,sa=0,sb=0,wj=0,sj=0,extra=0,tot=0;
+   for(const [c,w]of Object.entries(own))if(w>=.05&&a[side][c]>0&&b[side][c]>0){wa+=w*n(c);sa+=w*n(c)*a[side][c];sb+=w*n(c)*b[side][c];}
+   for(const [c,x]of Object.entries(b[side]))if(!(own[c]>=.005)){wj+=n(c);sj+=n(c)*x;}
+   for(const [c,w]of Object.entries(oppB)){tot+=w*n(c);if(!(oppA[c]>=.005))extra+=w*n(c);}
+   if(!wa)continue;const k=kind(b.key),row={a:sa/wa,b:sb/wa,junk:wj?sj/wj:NaN,extra:extra/tot,whole:whole(b,side)};
+   (sum[k+' '+side]=sum[k+' '+side]||[]).push(row);
+   console.log(`${k.padEnd(8)} ${side.padEnd(3)} ${(b.id||'').padEnd(16)} in-range ${row.a.toFixed(3)} -> ${row.b.toFixed(3)}  extra classes ${isNaN(row.junk)?'  -  ':row.junk.toFixed(3)}  extra share of opp range ${(100*row.extra).toFixed(1)}%  whole range ${row.whole.toFixed(3)}`);
+  }}
+ console.log('\nMeans by pot type and side:');
+ for(const [k,rows]of Object.entries(sum)){const m=f=>rows.reduce((s,r)=>s+(isNaN(r[f])?0:r[f]),0)/rows.filter(r=>!isNaN(r[f])).length;console.log(`${k.padEnd(14)} ${rows.length} lines: in-range ${m('a').toFixed(3)} -> ${m('b').toFixed(3)}, extra classes ${m('junk').toFixed(3)}, extra opp range ${(100*m('extra')).toFixed(1)}%, whole range ${m('whole').toFixed(3)}`);}
+ console.log('A side\'s whole-range mean share; ip and oop of one line should add to about 1 (zero-sum flop), up to card removal.');
+}
+
 if(require.main===module){
  if(args.cmd==='extract'){const m=extract(args.work,args.chart),buf=Buffer.from(JSON.stringify(m));fs.writeFileSync(args.out,/\.gz$/.test(args.out)?zlib.gzipSync(buf):buf);console.log(`Wrote ${args.out}: ${m.length} lines, ${m.reduce((s,x)=>s+x.flops,0)} flops.`);}
  else if(args.cmd==='fit')fit();
  else if(args.cmd==='moved')moved();
+ else if(args.cmd==='compare')compare();
  else console.log(fs.readFileSync(__filename,'utf8').split('\n').slice(2,17).join('\n'));
 }
 module.exports={extract};
