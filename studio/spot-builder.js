@@ -1,28 +1,36 @@
 // New hand (Solve tab): pick players, stack, your seat, your hand and any board cards, then the hand starts in Solve
 // with every seat under your control. Play the line, and the analysis pane solves it through the usual routes
 // (preflop charts, flop library, Mac bridge with its progress bar).
-const spotBuilder={n:6,stack:100,format:'cash',step:'setup',roles:[],hands:[],board:[],target:null,line:[],frozen:null,randomSeats:[],seed:1,pending:null,live:null,dialog:null};
-// Cash or tournament. Tournament spots are chip EV with a 1 bb big-blind ante, the game the bundled MTT charts are
-// solved for (one paid place makes ICM equal chip EV). Bubble and final-table ICM still come from Edit game payouts.
+const spotBuilder={n:6,stack:100,stacks:[],prize:'chip',left:0,pay:[],format:'cash',step:'setup',roles:[],hands:[],board:[],target:null,line:[],frozen:null,randomSeats:[],seed:1,pending:null,live:null,dialog:null};
+// Cash or tournament. Tournament spots have a 1 bb big-blind ante. Prizes: Chip EV (one paid place, the game the
+// bundled MTT charts are solved for), or ICM from players left and the payouts (Bubble and Final table fill those in).
+// Players left beyond the table get the table's average stack; exact ICM takes up to 12 players.
 const STUDY_FORMATS={cash:{label:'Cash',stack:100},mtt:{label:'Tournament',stack:25}};
 const studyFormatOf=c=>c?.mode==='icm'?'mtt':'cash';
 function studyFormatFields(c,format){
  if(studyFormatOf(c)===format)return{};
  return format==='mtt'?{mode:'icm',ante:c?.startStreet?0:1,anteMode:'bigblind',payouts:[1],otherStacks:[],rakePct:0}:{mode:'cash',ante:0,bounties:Array(c?.seats||2).fill(0)};
 }
+const SB_FT_PAY=[25,17,12.5,9.5,7.5,6,5,4,3.5,3,2.5,2];
+const SB_PRIZES={chip:'Chip EV',bubble:'Bubble',ft:'Final table'};
+function spotPrizePreset(key){const b=spotBuilder;b.prize=key;if(key==='bubble'){b.left=Math.min(12,b.n+1);b.pay=SB_FT_PAY.slice(0,b.left-1);}else if(key==='ft'){b.left=b.n;b.pay=SB_FT_PAY.slice(0,b.n);}}
+function spotStacks(){const b=spotBuilder;return Array.from({length:b.n},(_,s)=>b.stacks[s]>0?b.stacks[s]:b.stack);}
+function spotPrizeFields(){const b=spotBuilder;if(b.format!=='mtt')return{};if(b.prize==='chip')return{payouts:[1],otherStacks:[]};
+ const stacks=spotStacks(),left=Math.max(b.n,Math.min(12,Math.round(b.left)||b.n)),avg=stacks.reduce((s,x)=>s+x,0)/b.n,pay=b.pay.filter(x=>x>0).sort((x,y)=>y-x).slice(0,left);
+ return{payouts:pay.length?pay:[1],otherStacks:Array(left-b.n).fill(Math.round(avg*10)/10)};}
 function spotSeatsInOrder(n,button){return n===2?[button,(button+1)%n]:Array.from({length:n},(_,k)=>(button+3+k)%n);}
 function spotHoleCount(){return state.config?.rules?.hole||2;}
 function spotCardLabel(c){const s=C.cardName(c);return'<span class="sb-pip suit-'+s[1]+'">'+s[0]+'<i>'+{c:'♣',d:'♦',h:'♥',s:'♠'}[s[1]]+'</i></span>';}
 function spotSeatOptions(){return[...$('seats').options].filter(o=>!o.disabled).map(o=>+o.value);}
 // Seats: each one is out (folds preflop by itself), in the hand, or you. Hands: exact cards, or none for a random hand
 // (that seat's whole range is what the strategy is about anyway). Seat 0 is always the button.
-function spotResetSeats(hero){const b=spotBuilder,hole=spotHoleCount();b.roles=Array(b.n).fill('in');b.roles[Math.min(hero??0,b.n-1)]='you';b.hands=Array.from({length:b.n},()=>Array(hole).fill(null));b.pick=Array(b.n).fill(false);b.target=null;}
+function spotResetSeats(hero){const b=spotBuilder,hole=spotHoleCount();b.roles=Array(b.n).fill('in');b.roles[Math.min(hero??0,b.n-1)]='you';b.hands=Array.from({length:b.n},()=>Array(hole).fill(null));b.pick=Array(b.n).fill(false);b.stacks=Array(b.n).fill(null);b.target=null;if(b.prize!=='chip')spotPrizePreset(b.prize);}
 function spotHero(){return spotBuilder.roles.indexOf('you');}
 function openSpotBuilder(){
  if(state.busy){status('A calculation is running. Cancel it first.',true);return;}
  const b=spotBuilder,c=state.config||{},hole=spotHoleCount(),seats=spotSeatOptions();
  const keepLine=!!(b.step==='line'&&b.frozen&&b.roles?.length===b.n);
- b.format=studyFormatOf(c);if(!keepLine){b.step='setup';b.line=[];b.frozen=null;}
+ b.format=studyFormatOf(c);if(b.stacks?.length!==b.n)b.stacks=Array(b.n).fill(null);if(!keepLine){b.step='setup';b.line=[];b.frozen=null;}
  // Reopening keeps the sheet as you left it while the table still matches it; otherwise it starts from the table.
  const same=keepLine||b.roles?.length&&b.roles.length===c.seats&&c.button===0&&b.hands?.[0]?.length===hole;
  if(!same){b.n=seats.includes(c.seats)?c.seats:seats.includes(6)?6:seats[0];const hero=c.seats===b.n&&Number.isInteger(state.hero)?((state.hero-(c.button||0))%b.n+b.n)%b.n:0;spotResetSeats(hero);b.stack=c.stacks?.[state.hero??0]||STUDY_FORMATS[b.format].stack;}
@@ -30,7 +38,7 @@ function openSpotBuilder(){
  if(b.pick?.length!==b.n)b.pick=Array(b.n).fill(false);
  renderSpotBuilder();const d=b.dialog;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}
 }
-function spotConfig(){const b=spotBuilder,base={...state.config,seats:b.n,startStreet:0};return G.normalize({...base,...studyFormatFields(base,b.format),seats:b.n,button:0,stacks:Array(b.n).fill(b.stack),bounties:Array(b.n).fill(0),startStreet:0,board:'',pot:0});}
+function spotConfig(){const b=spotBuilder,base={...state.config,seats:b.n,startStreet:0};return G.normalize({...base,...studyFormatFields(base,b.format),seats:b.n,button:0,...spotPrizeFields(),stacks:spotStacks(),bounties:Array(b.n).fill(0),startStreet:0,board:'',pot:0});}
 function spotKnownCards(){const b=spotBuilder;return new Map([...b.hands.flatMap((h,seat)=>h.map((c,i)=>[c,{seat,i}])),...b.board.map((c,i)=>[c,{seat:-1,i}])].filter(([c])=>c!==null));}
 function spotGridHTML(){const used=spotKnownCards();if(spotBuilder.frozen)spotBuilder.frozen.forEach((h,seat)=>h.forEach((c,i)=>{if(!used.has(c))used.set(c,{seat,i})}));let grid='';
  for(const suit of[3,2,1,0])for(let r=12;r>=0;r--){const card=r*4+suit,taken=used.has(card);grid+='<button type="button" class="sb-card'+(taken?' taken':'')+'" data-sb-card="'+card+'" aria-label="'+cardSpeech(card)+'">'+spotCardLabel(card)+'</button>';}
@@ -51,10 +59,12 @@ function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return rende
   '<div class="sb-row"><span class="sb-label">Game</span><div class="sb-chips">'+Object.entries(STUDY_FORMATS).map(([k,f])=>chip('data-sb-format="'+k+'"',f.label,k===b.format)).join('')+'</div></div>'+
   '<div class="sb-row"><span class="sb-label">Table</span><div class="sb-chips">'+spotSeatOptions().map(n=>chip('data-sb-n="'+n+'"',n,n===b.n)).join('')+'</div></div>'+
   '<div class="sb-row"><label class="sb-label" for="sbStack">Stack</label><div class="sb-chips"><input class="input sb-stack" id="sbStack" type="number" inputmode="decimal" min="1" step="1" value="'+b.stack+'"><span class="muted small">bb</span></div></div>'+
+  (b.format==='mtt'?'<div class="sb-row"><span class="sb-label">Prizes</span><div class="sb-chips">'+Object.entries(SB_PRIZES).map(([k,l])=>chip('data-sb-prize="'+k+'"',l,k===b.prize)).join('')+'</div></div>'+
+   (b.prize==='chip'?'':'<div class="sb-row"><span class="sb-label"></span><div class="sb-chips sb-prize"><label>Left <input class="input" id="sbLeft" type="number" inputmode="numeric" min="'+b.n+'" max="12" step="1" value="'+b.left+'"></label><label>Paid <input class="input" id="sbPay" inputmode="decimal" value="'+b.pay.join(' ')+'" placeholder="50 30 20"></label></div></div>'):'')+
   '<div class="sb-row"><span class="sb-label">Board</span><div class="sb-slots">'+spotBoardHTML()+'</div></div>'+(b.target?.seat===-1?spotGridHTML():'')+
   '<div class="sb-head"><strong>Players · '+inHand+' in the hand</strong></div>'+
   '<div class="sb-seats">'+order.map(seat=>{const role=b.roles[seat],h=b.hands[seat],pick=spotPicking(seat),t=b.target?.seat===seat;
-   return'<div class="sb-seat'+(role==='out'?' out':'')+'"><b>'+names[seat]+'</b><div class="sb-seg" role="group" aria-label="'+names[seat]+'">'+[['out','Out'],['in','In'],['you','You']].map(([k,l])=>'<button type="button" class="'+(role===k?'on':'')+'" data-sb-role="'+seat+':'+k+'" aria-pressed="'+(role===k)+'">'+l+'</button>').join('')+'</div>'+
+   return'<div class="sb-seat'+(role==='out'?' out':'')+'"><span class="sb-pos"><b>'+names[seat]+'</b><input class="input sb-seat-stack" type="number" inputmode="decimal" min="0.1" step="any" data-sb-seat-stack="'+seat+'" value="'+(b.stacks[seat]>0?b.stacks[seat]:'')+'" placeholder="'+fmt(b.stack)+'" aria-label="'+names[seat]+' stack in bb"></span><div class="sb-seg" role="group" aria-label="'+names[seat]+'">'+[['out','Out'],['in','In'],['you','You']].map(([k,l])=>'<button type="button" class="'+(role===k?'on':'')+'" data-sb-role="'+seat+':'+k+'" aria-pressed="'+(role===k)+'">'+l+'</button>').join('')+'</div>'+
    '<div class="sb-hand">'+(role==='out'?'<span class="muted small">folds preflop</span>':(pick?h.map((c,i)=>spotSlotHTML(seat,i,c,names[seat]+' card '+(i+1))).join(''):'')+
     '<div class="sb-seg sb-mode" role="group" aria-label="'+names[seat]+' hand">'+[['random',SB_DICE,'Random hand'],['cards',SB_CARDS,'Pick cards']].map(([k,icon,l])=>{const on=(k==='cards')===pick;return'<button type="button" class="'+(on?'on':'')+'" data-sb-mode="'+seat+':'+k+'" aria-pressed="'+on+'" aria-label="'+l+'" title="'+l+'">'+icon+'</button>';}).join('')+'</div>')+'</div></div>'+(t&&role!=='out'?spotGridHTML():'');}).join('')+'</div>'+
   '<p class="ui-dialog-error sb-error" role="alert" hidden></p>'+
@@ -109,8 +119,9 @@ function spotPickCard(card){const b=spotBuilder,t=b.target;if(!t)return;let know
 function spotTrimLine(){const b=spotBuilder;for(let k=b.line.length;k>=0;k--){const keep=b.line.slice(0,k);try{const saved=b.line;b.line=keep;spotLineHand();if(k<saved.length)spotError('Later actions were removed: they no longer fit.');return;}catch{}}}
 function spotBuilderClick(event){
  const b=spotBuilder,t=event.target.closest('button');if(!t||t.disabled)return;const hole=spotHoleCount();
- if($('sbStack'))b.stack=+$('sbStack').value||b.stack;spotError('');
- if(t.dataset.sbFormat){const f=t.dataset.sbFormat;if(f!==b.format&&b.stack===STUDY_FORMATS[b.format].stack)b.stack=STUDY_FORMATS[f].stack;b.format=f;}
+ spotReadInputs();spotError('');
+ if(t.dataset.sbPrize)spotPrizePreset(t.dataset.sbPrize);
+ else if(t.dataset.sbFormat){const f=t.dataset.sbFormat;if(f!==b.format&&b.stack===STUDY_FORMATS[b.format].stack)b.stack=STUDY_FORMATS[f].stack;b.format=f;}
  else if(t.dataset.sbN){const hero=Math.max(0,spotHero());b.n=+t.dataset.sbN;spotResetSeats(hero<b.n?hero:0);}
  else if(t.dataset.sbRole){const [seat,role]=t.dataset.sbRole.split(':');const s=+seat;if(role==='you'){const old=spotHero();if(old>=0&&old!==s)b.roles[old]='in';}
   b.roles[s]=role;if(role==='out'){b.hands[s].fill(null);b.pick[s]=false;if(b.target?.seat===s)b.target=null;}if(b.roles.filter(r=>r!=='out').length<2){b.roles[s]='in';spotError('A hand needs at least two players.');}}
@@ -120,7 +131,7 @@ function spotBuilderClick(event){
  else if(t.dataset.sbMode){const [seat,mode]=t.dataset.sbMode.split(':'),s=+seat;b.pick[s]=mode==='cards';
   if(mode==='cards'){const i=b.hands[s].findIndex(c=>c===null);b.target={seat:s,i:i<0?0:i};}else{b.hands[s].fill(null);if(b.target?.seat===s)b.target=null;}}
  else if(t.dataset.sbCard)spotPickCard(+t.dataset.sbCard);
- else if('sbReset' in t.dataset){b.stack=STUDY_FORMATS[b.format].stack;b.board=Array(5).fill(null);spotResetSeats(0);b.step='setup';b.line=[];b.frozen=null;}
+ else if('sbReset' in t.dataset){b.stack=STUDY_FORMATS[b.format].stack;b.prize='chip';b.board=Array(5).fill(null);spotResetSeats(0);b.step='setup';b.line=[];b.frozen=null;}
  else if('sbLine' in t.dataset){if(!spotCheck())return;b.seed=1+Math.floor(Math.random()*1e9);spotFreeze();b.line=[];b.target=null;b.step='line';}
  else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target=null;}
  else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=G.modelActions(h,state.abstraction)[+t.dataset.sbAct];if(a)b.line.push(a);}
@@ -134,10 +145,14 @@ function spotBuilderClick(event){
  else return;
  renderSpotBuilder();
 }
-function spotCheck(){const b=spotBuilder,stack=+($('sbStack')?.value||b.stack);
+function spotReadInputs(){const b=spotBuilder,d=b.dialog;if($('sbStack'))b.stack=+$('sbStack').value||b.stack;
+ d?.querySelectorAll('[data-sb-seat-stack]').forEach(x=>{const v=+x.value;b.stacks[+x.dataset.sbSeatStack]=x.value.trim()&&v>0?v:null;});
+ if($('sbLeft'))b.left=+$('sbLeft').value||b.left;if($('sbPay'))b.pay=$('sbPay').value.split(/[\s,;/]+/).map(Number).filter(x=>x>0);}
+function spotCheck(){spotReadInputs();const b=spotBuilder,stack=+($('sbStack')?.value||b.stack);
  if(spotHero()<0){spotError('Tap You on your seat.');return false;}
  if(!(stack>=1&&stack<=1e6)){spotError('Stack needs to be at least 1 bb.');return false;}
  const half=b.hands.findIndex(h=>h.some(c=>c===null)&&h.some(c=>c!==null));if(half>=0){spotError('Pick both of '+G.positions(b.n,0)[half]+'’s cards, or none for a random hand.');return false;}
+ if(b.format==='mtt'&&b.prize!=='chip'){if(!(b.left>=b.n&&b.left<=12)){spotError('Players left: '+b.n+' to 12.');return false;}if(!b.pay.length){spotError('Enter the payouts, first place first.');return false;}}
  if(state.busy){spotError('A calculation is running. Cancel it first.');return false;}
  b.stack=stack;return true;}
 // Deals the spot into Train › Decision. With a line, the hand is replayed to its last action (the replay shows every
@@ -196,7 +211,8 @@ function initSpotBuilder(){
  (document.querySelector('.shell')||document.body).append(d);spotBuilder.dialog=d;
  d.querySelector('[data-close-dialog]').onclick=()=>d.close();
  d.addEventListener('click',event=>{if(event.target===d){const r=d.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)d.close();return;}spotBuilderClick(event);});
- d.addEventListener('change',event=>{if(event.target.id==='sbStack')spotBuilder.stack=+event.target.value||spotBuilder.stack;});
+ d.addEventListener('input',event=>{if(event.target.id==='sbStack'){spotBuilder.stack=+event.target.value||spotBuilder.stack;d.querySelectorAll('[data-sb-seat-stack]').forEach(x=>x.placeholder=fmt(spotBuilder.stack));}});
+ d.addEventListener('change',()=>spotReadInputs());
  d.addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.id==='sbCustom'){event.preventDefault();d.querySelector('[data-sb-custom]')?.click();}});
  d.addEventListener('close',()=>{if(![...document.querySelectorAll('dialog')].some(n=>n.open))document.body.classList.remove('ui-dialog-open');});
  // The planned board rides on the next deal only.
@@ -208,5 +224,45 @@ function initSpotBuilder(){
   box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep,r.classList.contains('ed-open'));});
   const baseRender=renderPlay;renderPlay=function(...args){const out=baseRender.apply(this,args);try{renderEveryDecision();}catch{}return out;};}
  const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New hand';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
+ // Hand replay shows the ICM call card under the step too.
+ const baseReview=renderReview;renderReview=function(...args){const out=baseReview.apply(this,args);try{const fb=$('reviewFeedback');if(fb){let box=$('reviewIcm');if(!box){box=document.createElement('div');box.id='reviewIcm';fb.after(box);}const f=state.reviewFrames[state.reviewIndex];box.innerHTML=f&&!f.done&&f.holes?.[f.actor]?.length?icmCallHTML(f,null):'';}}catch{}return out;};
  studioInterface.openSpotBuilder=openSpotBuilder;
 }
+// Tournament all-ins under ICM. Facing a bet that puts you or them all-in heads-up, the payouts change how much
+// equity a call needs: losing your chips costs more prize money than winning theirs gains. This works from the
+// table's stacks, players left (other-table stacks) and payouts, so it is exact for the call itself; the solver's
+// frequencies (charts, flop library, TexasSolver on your Mac or the cloud) stay chip EV.
+function icmPaid(c){return c?.mode==='icm'&&c.payouts?.filter(x=>x>0).length>1;}
+function icmCallSpot(h){
+ if(!h||h.done||!icmPaid(h.config))return null;const me=h.actor,l=h.legal(),live=h.living().filter(i=>i!==me);
+ if(!(l.callCost>0)||live.length!==1)return null;const v=live[0];if(!(h.stacks[v]===0||l.callCost>=h.stacks[me]))return null;
+ const c=h.config,S=h.stacks.map(G.bb),C=h.total.map(G.bb),dead=G.bb(h.deadPot),call=G.bb(l.callCost),others=c.otherStacks||[];
+ const before=[...h.initial.map(x=>G.bb(x)+c.pot/h.n),...others],after=C.slice();after[me]+=call;const total=after.reduce((s,x)=>s+x,0)+dead,layer=k=>after.reduce((s,x)=>s+Math.min(x,k),0);
+ const out=(heroGets,vilGets)=>{const s=S.slice();s[me]-=call;s[me]+=heroGets;s[v]+=vilGets;return s;};
+ const fold=S.slice();fold[v]+=G.bb(h.pot);const winHero=layer(after[me])+dead,loseVil=layer(after[v])+dead,win=out(winHero,total-winHero),lose=out(total-loseVil,loseVil);
+ const ev=s=>G.terminalICM([...s.map(x=>Math.max(0,Math.round(x*1e6)/1e6)),...others],before,c.payouts)[me];
+ const need=(f,w,x)=>w>x?Math.min(1,Math.max(0,(f-x)/(w-x))):null,icm=need(ev(fold),ev(win),ev(lose)),chip=need(fold[me],win[me],lose[me]);
+ return icm===null||chip===null?null:{me,v,icm,chip};}
+// Your equity against their range (sampled, seeded so the number is steady). The range is the one the analysis
+// shows: on later streets that is their range before this all-in, which is wider than the hands they shove.
+const icmEquityCache=new Map();
+function icmEquity(h,seat,v,range){
+ const hole=h.holes[seat];if(!range||!hole?.length||/^All legal hands/.test(range))return null;const key=hole.join()+'|'+h.board.join()+'|'+range;if(icmEquityCache.has(key))return icmEquityCache.get(key);
+ let rows;try{rows=PokerSpot.parseRange(range,h.rules,h.board)||[];}catch{return null;}rows=rows.filter(r=>r.weight>0&&!r.cards.some(x=>hole.includes(x)));if(!rows.length)return null;
+ const wsum=rows.reduce((s,r)=>s+r.weight,0),rng=G.rng(rows.length*7919+h.board.length),need=5-h.board.length,N=need?6000:Math.min(6000,rows.length*4);let won=0,n=0;
+ for(let k=0;k<N;k++){let t=rng()*wsum,r=rows[0];for(const x of rows){t-=x.weight;if(t<=0){r=x;break;}}
+  const used=new Set([...hole,...r.cards,...h.board]),board=h.board.slice();while(board.length<5){const c=Math.floor(rng()*52);if(!used.has(c)){used.add(c);board.push(c);}}
+  const a=G.evaluate(hole,board,h.rules).high,b=G.evaluate(r.cards,board,h.rules).high;won+=a>b?1:a===b?.5:0;n++;}
+ const eq=won/n;if(icmEquityCache.size>200)icmEquityCache.clear();icmEquityCache.set(key,eq);return eq;}
+// Their range from the answer shown, else from the preflop chart (at the node preflop, entering the street after).
+const icmRangeMemo=new WeakMap();
+function icmRange(h,v,result){const pick=r=>(r?.solve?.rangeAssumptions||r?.rangeAssumptions||[]).find(x=>x.seat===v)?.range;let range=pick(result);if(range)return range;
+ const n=h.actionLog.length+'|'+preflopLibrary.packs.length,m=icmRangeMemo.get(h);if(m&&m.n===n)return m.range;
+ try{if(!h.street)range=pick(preflopReference(h));else{const pr=PokerPreflop.postflopRanges(preflopLibrary.packs,h.config,observedData(h).actions);if(pr?.game==='NLH'&&pr.seats[v])range=PokerPreflop.classRangeText(pr.seats[v]);}}catch{}
+ icmRangeMemo.set(h,{n,range:range||null});return range||null;}
+function icmCallHTML(h,result){
+ const s=icmCallSpot(h);if(!s)return'';const pct=x=>Math.round(x*100)+'%';
+ const range=icmRange(h,s.v,result),eq=icmEquity(h,s.me,s.v,range);
+ const verdict=eq===null?'':'<div class="icm-row"><span>'+(s.me===state.hero?'You have':G.positions(h.n,h.button)[s.me]+' has')+' <b>'+pct(eq)+'</b> vs their range'+(h.street?' before the all-in':'')+'</span><b class="icm-verdict '+(eq>=s.icm?'call':'fold')+'">'+(eq>=s.icm?'Call':'Fold')+'</b></div>';
+ const exact=['exact-river','exact-postflop','exact-multiway'].includes(result?.solve?.method);
+ return'<div class="icm-card"><div class="icm-row"><span><b>ICM</b> call needs <b>'+pct(s.icm)+'</b></span><span class="muted">chip EV '+pct(s.chip)+'</span></div>'+verdict+(result&&!exact?'<div class="muted small">Solver mix is chip EV.</div>':'')+'</div>';}

@@ -287,3 +287,15 @@ html .ui-pane-tabs.glide-dragging .glide-hot{color:var(--ink)!important}
 .ui-app[data-area=study] [data-pane-friends]{visibility:hidden}
 @media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app[data-area=study] #uiEditGame{display:none}.ui-mobile-nav [data-area]{font-size:10.5px}}
 @media(min-width:801px) and (max-width:1080px){.ui-primary [data-area] span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+/* New hand: per-seat stacks and tournament prizes; ICM call card in the analysis (spot-builder.js). */
+.sb-pos{display:grid;gap:4px;justify-items:start}
+.sb-seat-stack{width:52px;padding:3px 6px;font-size:12px;min-height:0}
+.sb-prize{gap:10px}.sb-prize label{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:var(--muted)}
+#sbLeft{width:56px}#sbPay{width:130px}
+.icm-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 10px;display:grid;gap:6px;background:var(--panel2);font-size:13px}
+.icm-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.icm-verdict{padding:2px 10px;border-radius:999px;font-size:12px}
+.icm-verdict.call{background:var(--act-passive);color:#13201a}.icm-verdict.fold{background:var(--act-fold);color:#13201a}
+.sb-seat .sb-pos .sb-seat-stack{width:52px;height:26px;min-height:26px;padding:2px 4px;font-size:12px;text-align:center;border-radius:7px;box-sizing:border-box}
+.sb-prize{flex-wrap:nowrap}.sb-prize label:last-child{flex:1;min-width:0}
+.sb-prize .input{height:34px;min-height:34px;padding:4px 8px;font-size:14px;box-sizing:border-box}#sbPay{flex:1;min-width:0;width:100%}.sb-row>div{min-width:0}
