@@ -6,7 +6,7 @@ const citrusAccount=(()=>{
  const API_ORIGIN='__MULTIPLAYER_API_ORIGIN__',API=/^https?:\/\//.test(API_ORIGIN)?API_ORIGIN:/^https?:$/.test(location.protocol)?location.origin:'';
  const ACCOUNT='citrus-account-v1',OWNER='citrus-device-owner-v1',LEGACY_DB='range-lab-poker-studio',ROW_MAX=250000,BATCH_BYTES=2500000,BATCH_ROWS=200;
  const STUDY=['hands','grades','solves','meta'],META=new Set(['spotSizing','spotDealBudget','autoAnalyze','gradeEvery','preflopPreferred-v1']);
- const PREFS=['range-lab-theme','citrus-look','citrus-felt','range-lab-four-color','range-lab-table-motion','range-lab-opponents','range-lab-quiz-filters','range-lab-bot-rebuy','range-lab-key-shortcuts','citrus-friend-stats-v1'];
+ const PREFS=['range-lab-theme','citrus-look','citrus-felt','range-lab-four-color','range-lab-table-motion','range-lab-opponents','range-lab-quiz-filters','range-lab-bot-rebuy','range-lab-key-shortcuts','citrus-friend-stats-v1','guava-hand-report','guava-guess-gate','citrus-sounds','citrus-cloud-solves'];
  const read=(key,fallback)=>{try{const v=JSON.parse(localStorage.getItem(key)||'null');return v??fallback}catch{return fallback}};
  const write=(key,value)=>{try{value===null?localStorage.removeItem(key):localStorage.setItem(key,JSON.stringify(value))}catch{}};
  let account=read(ACCOUNT,null);if(!account?.token||!account?.user?.id)account=null;
