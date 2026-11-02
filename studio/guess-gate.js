@@ -8,7 +8,7 @@
 // Live-hand guesses join that hand's grades (so the rating, leaks and the hand report pick them up when it is saved);
 // Hand replay guesses are kept with the other grades and join the rating as one extra group (replayGuessFact).
 const guessGate={key:'guava-guess-gate',replay:null};
-function guessGateOn(){try{return localStorage.getItem(guessGate.key)!=='0'}catch{return true}}
+function guessGateOn(){if(typeof studioInterface!=='undefined'&&studioInterface.tab==='solve')return false;try{return localStorage.getItem(guessGate.key)!=='0'}catch{return true}}
 const GUESS_LOCK='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
 function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,hand);
  return'<div class="guess-btns">'+actions.map((a,i)=>'<button type="button" class="guess-btn" '+attr+'="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],hand).replace(/ · .*/,''))+'</button>').join('')+'<button type="button" class="guess-btn guess-skip" '+attr+'-skip>Skip</button></div>';}
