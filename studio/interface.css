@@ -203,7 +203,7 @@ body:not([data-area=study]) .sb-open{display:none!important}
 .sb-foot{display:flex;justify-content:space-between;gap:10px}
 .sb-foot .btn{flex:1}
 
-.study-format{display:none;margin-right:auto}.ui-app[data-ui-route=study] .study-format{display:flex}.ui-app[data-ui-route=study] #uiPageHint{display:none}.ui-app[data-ui-route=study] .ui-page-heading{flex-wrap:wrap}
+.ui-app[data-ui-route=study] #uiPageHint{display:none}.ui-app[data-ui-route=study] .ui-page-heading{flex-wrap:wrap}
 /* New spot: seat rows (Out / In / You and a hand) and the line builder. */
 .sb-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .sb-seats{display:grid}
