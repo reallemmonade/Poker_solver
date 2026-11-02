@@ -39,10 +39,11 @@ function handReportPlace(box){const nav=document.querySelector('.ui-mobile-nav')
 function handReportRender(){if(!handReport.open||!handReport.row)return;const box=handReportBox();box.innerHTML=handReportHTML(handReport.row);handReportPlace(box);}
 function handReportShow(row,hand){const box=handReportBox();handReport.row=row;handReport.hand=hand;handReport.open=true;cancelSessionNext();box.hidden=false;handReportRender();requestAnimationFrame(()=>box.classList.add('hr-in'));}
 function handReportClose(){clearTimeout(handReport.wait);handReport.wait=null;if(!handReport.open)return;handReport.open=false;const box=$('handReport');if(box){box.classList.remove('hr-in');box.hidden=true;}}
-// Called once a live hand is saved: waits for the table to finish showing the hand, then opens the sheet.
-function handReportOnEnd(row){handReportClose();if(!handReportOn()||typeof studioInterface!=='undefined'&&studioInterface.area==='study'||!handReportWorth(row.record))return;const hand=state.hand,t0=Date.now(),tick=()=>{handReport.wait=null;if(state.hand!==hand||!hand.done)return;if(tableView.playing&&Date.now()-t0<10000){handReport.wait=setTimeout(tick,200);return;}handReportShow(row,hand);};handReport.wait=setTimeout(tick,600);}
+// Called once a live hand is saved: waits for the table to finish showing the hand, then puts the grade medal on the felt
+// (hand-grade.js); tapping the medal opens this sheet.
+function handReportOnEnd(row){handReportClose();if(!handReportOn()||typeof studioInterface!=='undefined'&&studioInterface.area==='study'||!handReportWorth(row.record))return;const hand=state.hand,t0=Date.now(),tick=()=>{handReport.wait=null;if(state.hand!==hand||!hand.done)return;if(tableView.playing&&Date.now()-t0<10000){handReport.wait=setTimeout(tick,200);return;}if(typeof handGradeShow==='function')handGradeShow(row,hand);else handReportShow(row,hand);};handReport.wait=setTimeout(tick,600);}
 // A late grade for the hand on screen refreshes the sheet.
-function handReportGraded(row){if(handReport.open&&handReport.row===row)handReportRender();}
+function handReportGraded(row){if(handReport.open&&handReport.row===row)handReportRender();if(typeof handGradeUpdate==='function')handGradeUpdate(row);}
 function initHandReport(){const style=document.createElement('style');style.textContent=`
 .hr-sheet{--hr-good:#3d8a44;--hr-ok:#a8720f;--hr-bad:#c23b2c}html:not(.light) .hr-sheet{--hr-good:#6fcf8a;--hr-ok:#e0c35c;--hr-bad:#ff7a6e}
 .hr-sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;max-width:440px;margin:0 auto;max-height:72svh;overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;padding:10px 16px 14px;box-shadow:0 -12px 32px #0009;transform:translateY(16px);opacity:0;transition:transform .22s ease,opacity .22s ease}

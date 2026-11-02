@@ -105,6 +105,7 @@
 !/studio/rating.js
 !/studio/performance.js
 !/studio/hand-report.js
+!/studio/hand-grade.js
 !/studio/guess-gate.js
 !/studio/settings-ui.js
 !/studio/verify-rating.cjs
