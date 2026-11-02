@@ -25,7 +25,7 @@ function spotCardLabel(c){const s=C.cardName(c);return'<span class="sb-pip suit-
 function spotSeatOptions(){return[...$('seats').options].filter(o=>!o.disabled).map(o=>+o.value);}
 // Seats: each one is out (folds preflop by itself), in the hand, or you. Hands: exact cards, or none for a random hand
 // (that seat's whole range is what the strategy is about anyway). Seat 0 is always the button.
-function spotResetSeats(hero){const b=spotBuilder,hole=spotHoleCount();b.roles=Array(b.n).fill('in');b.roles[Math.min(hero??0,b.n-1)]='you';b.hands=Array.from({length:b.n},()=>Array(hole).fill(null));b.target={seat:Math.min(hero??0,b.n-1),i:0};}
+function spotResetSeats(hero){const b=spotBuilder,hole=spotHoleCount();b.roles=Array(b.n).fill('in');b.roles[Math.min(hero??0,b.n-1)]='you';b.hands=Array.from({length:b.n},()=>Array(hole).fill(null));b.pick=Array(b.n).fill(false);b.target=null;}
 function spotHero(){return spotBuilder.roles.indexOf('you');}
 function openSpotBuilder(){
  if(state.busy){status('A calculation is running. Cancel it first.',true);return;}
@@ -35,6 +35,7 @@ function openSpotBuilder(){
  const same=b.roles?.length&&b.roles.length===c.seats&&c.button===0&&b.hands?.[0]?.length===hole;
  if(!same){b.n=seats.includes(c.seats)?c.seats:seats.includes(6)?6:seats[0];const hero=c.seats===b.n&&Number.isInteger(state.hero)?((state.hero-(c.button||0))%b.n+b.n)%b.n:0;spotResetSeats(hero);b.stack=c.stacks?.[state.hero??0]||STUDY_FORMATS[b.format].stack;}
  if(b.board?.length!==5)b.board=Array(5).fill(null);
+ if(b.pick?.length!==b.n)b.pick=Array(b.n).fill(false);
  renderSpotBuilder();const d=b.dialog;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}
 }
 function spotConfig(){const b=spotBuilder,base={...state.config,seats:b.n,startStreet:0};return G.normalize({...base,...studyFormatFields(base,b.format),seats:b.n,button:0,stacks:Array(b.n).fill(b.stack),bounties:Array(b.n).fill(0),startStreet:0,board:'',pot:0});}
@@ -42,7 +43,13 @@ function spotKnownCards(){const b=spotBuilder;return new Map([...b.hands.flatMap
 function spotGridHTML(){const used=spotKnownCards();if(spotBuilder.frozen)spotBuilder.frozen.forEach((h,seat)=>h.forEach((c,i)=>{if(!used.has(c))used.set(c,{seat,i})}));let grid='';
  for(const suit of[3,2,1,0])for(let r=12;r>=0;r--){const card=r*4+suit,taken=used.has(card);grid+='<button type="button" class="sb-card'+(taken?' taken':'')+'" data-sb-card="'+card+'" aria-label="'+cardSpeech(card)+'">'+spotCardLabel(card)+'</button>';}
  return'<div class="sb-grid" role="group" aria-label="Pick a card">'+grid+'</div>';}
-function spotSlotHTML(seat,i,card,label){const t=spotBuilder.target,on=t&&t.seat===seat&&t.i===i;return'<button type="button" class="sb-slot'+(on?' active':'')+(card===null?'':' filled')+'" data-sb-slot="'+seat+':'+i+'" aria-label="'+label+'">'+(card===null?'':spotCardLabel(card))+'</button>';}
+// A picked card you tap gets a small x at its top-right corner that takes it off (pick another card to replace it instead).
+function spotSlotHTML(seat,i,card,label){const t=spotBuilder.target,on=t&&t.seat===seat&&t.i===i,slot='<button type="button" class="sb-slot'+(on?' active':'')+(card===null?'':' filled')+'" data-sb-slot="'+seat+':'+i+'" aria-label="'+label+'">'+(card===null?'':spotCardLabel(card))+'</button>';
+ return on&&card!==null&&!spotBuilder.frozen?'<span class="sb-slot-wrap">'+slot+'<button type="button" class="sb-x" data-sb-clear="'+seat+':'+i+'" aria-label="Remove '+label+'">×</button></span>':slot;}
+// Each player's hand is Random or specific Cards.
+const SB_DICE='<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="10.5" cy="10.5" r="1.2" fill="currentColor"/></svg>';
+const SB_CARDS='<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3.2" width="7.4" height="10.4" rx="1.6" transform="rotate(-10 5.5 8.4)" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="6.6" y="2.6" width="7.4" height="10.4" rx="1.6" transform="rotate(8 10.3 7.8)" fill="var(--panel2)" stroke="currentColor" stroke-width="1.5"/></svg>';
+function spotPicking(seat){const b=spotBuilder;return!!(b.pick?.[seat]||b.hands[seat]?.some(c=>c!==null));}
 function spotBoardHTML(){const b=spotBuilder;return b.board.map((c,i)=>spotSlotHTML(-1,i,c,['Flop','Flop','Flop','Turn','River'][i])).join('');}
 function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return renderSpotLine();
  const d=b.dialog,hole=spotHoleCount(),order=spotSeatsInOrder(b.n,0),names=G.positions(b.n,0),inHand=b.roles.filter(r=>r!=='out').length;
@@ -52,12 +59,12 @@ function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return rende
   '<div class="sb-row"><span class="sb-label">Game</span><div class="sb-chips">'+Object.entries(STUDY_FORMATS).map(([k,f])=>chip('data-sb-format="'+k+'"',f.label,k===b.format)).join('')+'</div></div>'+
   '<div class="sb-row"><span class="sb-label">Table</span><div class="sb-chips">'+spotSeatOptions().map(n=>chip('data-sb-n="'+n+'"',n,n===b.n)).join('')+'</div></div>'+
   '<div class="sb-row"><label class="sb-label" for="sbStack">Stack</label><div class="sb-chips"><input class="input sb-stack" id="sbStack" type="number" inputmode="decimal" min="1" step="1" value="'+b.stack+'"><span class="muted small">bb</span></div></div>'+
-  '<div class="sb-row"><span class="sb-label">Board</span><div class="sb-slots">'+spotBoardHTML()+'</div></div>'+
+  '<div class="sb-row"><span class="sb-label">Board</span><div class="sb-slots">'+spotBoardHTML()+'</div></div>'+(b.target?.seat===-1?spotGridHTML():'')+
   '<div class="sb-head"><strong>Players · '+inHand+' in the hand</strong><button type="button" class="sb-chip" data-sb-allin>Everyone in · random</button></div>'+
-  '<div class="sb-seats">'+order.map(seat=>{const role=b.roles[seat],h=b.hands[seat],empty=h.every(c=>c===null),t=b.target?.seat===seat;
+  '<div class="sb-seats">'+order.map(seat=>{const role=b.roles[seat],h=b.hands[seat],pick=spotPicking(seat),t=b.target?.seat===seat;
    return'<div class="sb-seat'+(role==='out'?' out':'')+'"><b>'+names[seat]+'</b><div class="sb-seg" role="group" aria-label="'+names[seat]+'">'+[['out','Out'],['in','In'],['you','You']].map(([k,l])=>'<button type="button" class="'+(role===k?'on':'')+'" data-sb-role="'+seat+':'+k+'" aria-pressed="'+(role===k)+'">'+l+'</button>').join('')+'</div>'+
-   '<div class="sb-hand">'+(role==='out'?'<span class="muted small">folds preflop</span>':empty&&!t?'<button type="button" class="sb-chip sb-random" data-sb-slot="'+seat+':0">Random</button>':h.map((c,i)=>spotSlotHTML(seat,i,c,names[seat]+' card '+(i+1))).join(''))+'</div></div>';}).join('')+'</div>'+
-  spotGridHTML()+
+   '<div class="sb-hand">'+(role==='out'?'<span class="muted small">folds preflop</span>':(pick?h.map((c,i)=>spotSlotHTML(seat,i,c,names[seat]+' card '+(i+1))).join(''):'')+
+    '<div class="sb-seg sb-mode" role="group" aria-label="'+names[seat]+' hand">'+[['random',SB_DICE,'Random hand'],['cards',SB_CARDS,'Pick cards']].map(([k,icon,l])=>{const on=(k==='cards')===pick;return'<button type="button" class="'+(on?'on':'')+'" data-sb-mode="'+seat+':'+k+'" aria-pressed="'+on+'" aria-label="'+l+'" title="'+l+'">'+icon+'</button>';}).join('')+'</div>')+'</div></div>'+(t&&role!=='out'?spotGridHTML():'');}).join('')+'</div>'+
   '<p class="ui-dialog-error sb-error" role="alert" hidden></p>'+
   '<div class="sb-foot"><button type="button" class="btn secondary" data-sb-deal>Deal spot</button><button type="button" class="btn" data-sb-line>Enter the line</button></div>';
 }
@@ -108,13 +115,16 @@ function spotBuilderClick(event){
  if(t.dataset.sbFormat){const f=t.dataset.sbFormat;if(f!==b.format&&b.stack===STUDY_FORMATS[b.format].stack)b.stack=STUDY_FORMATS[f].stack;b.format=f;}
  else if(t.dataset.sbN){const hero=Math.max(0,spotHero());b.n=+t.dataset.sbN;spotResetSeats(hero<b.n?hero:0);}
  else if(t.dataset.sbRole){const [seat,role]=t.dataset.sbRole.split(':');const s=+seat;if(role==='you'){const old=spotHero();if(old>=0&&old!==s)b.roles[old]='in';}else if(b.roles[s]==='you'){status('Pick another seat as You first.');return;}
-  b.roles[s]=role;if(role==='out'){b.hands[s].fill(null);if(b.target?.seat===s)b.target=null;}if(b.roles.filter(r=>r!=='out').length<2){b.roles[s]='in';spotError('A hand needs at least two players.');}}
- else if(t.dataset.sbSlot){const [seat,i]=t.dataset.sbSlot.split(':').map(Number),cur=seat===-1?b.board[i]:b.hands[seat][i],same=b.target&&b.target.seat===seat&&b.target.i===i;
-  if(same&&cur!==null&&!b.frozen){if(seat===-1)b.board[i]=null;else b.hands[seat][i]=null;}else if(same&&b.frozen){b.target=null;}else b.target={seat,i};}
+  b.roles[s]=role;if(role==='out'){b.hands[s].fill(null);b.pick[s]=false;if(b.target?.seat===s)b.target=null;}if(b.roles.filter(r=>r!=='out').length<2){b.roles[s]='in';spotError('A hand needs at least two players.');}}
+ else if(t.dataset.sbSlot){const [seat,i]=t.dataset.sbSlot.split(':').map(Number),same=b.target&&b.target.seat===seat&&b.target.i===i;
+  b.target=same?null:{seat,i};}
+ else if(t.dataset.sbClear){const [seat,i]=t.dataset.sbClear.split(':').map(Number);if(seat===-1)b.board[i]=null;else b.hands[seat][i]=null;b.target={seat,i};}
+ else if(t.dataset.sbMode){const [seat,mode]=t.dataset.sbMode.split(':'),s=+seat;b.pick[s]=mode==='cards';
+  if(mode==='cards'){const i=b.hands[s].findIndex(c=>c===null);b.target={seat:s,i:i<0?0:i};}else{b.hands[s].fill(null);if(b.target?.seat===s)b.target=null;}}
  else if(t.dataset.sbCard)spotPickCard(+t.dataset.sbCard);
- else if('sbAllin' in t.dataset){b.roles=b.roles.map(r=>r==='you'?r:'in');b.hands.forEach((h,s)=>{if(b.roles[s]!=='you')h.fill(null);});}
+ else if('sbAllin' in t.dataset){b.roles=b.roles.map(r=>r==='you'?r:'in');b.hands.forEach((h,s)=>{if(b.roles[s]!=='you'){h.fill(null);b.pick[s]=false;}});if(b.target&&b.target.seat>=0&&b.roles[b.target.seat]!=='you')b.target=null;}
  else if('sbLine' in t.dataset){if(!spotCheck())return;b.seed=1+Math.floor(Math.random()*1e9);spotFreeze();b.line=[];b.target=null;b.step='line';}
- else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target={seat:Math.max(0,spotHero()),i:0};}
+ else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target=null;}
  else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=G.modelActions(h,state.abstraction)[+t.dataset.sbAct];if(a)b.line.push(a);}
  else if('sbCustom' in t.dataset){const {hand:h}=spotLineHand(),l=h.legal(),v=+$('sbCustom').value,target=Math.min(G.units(v),l.maxRaiseTo);
   if(!(v>0)||target<=h.currentBet||target<l.minRaiseTo&&target!==l.allInTo){spotError('Enter the street total in bb: at least '+fmt(G.bb(Math.min(l.minRaiseTo,l.maxRaiseTo)))+', at most '+fmt(G.bb(l.maxRaiseTo))+'.');return;}
