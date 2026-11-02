@@ -60,7 +60,7 @@ function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return rende
   '<div class="sb-row"><span class="sb-label">Table</span><div class="sb-chips">'+spotSeatOptions().map(n=>chip('data-sb-n="'+n+'"',n,n===b.n)).join('')+'</div></div>'+
   '<div class="sb-row"><label class="sb-label" for="sbStack">Stack</label><div class="sb-chips"><input class="input sb-stack" id="sbStack" type="number" inputmode="decimal" min="1" step="1" value="'+b.stack+'"><span class="muted small">bb</span></div></div>'+
   '<div class="sb-row"><span class="sb-label">Board</span><div class="sb-slots">'+spotBoardHTML()+'</div></div>'+(b.target?.seat===-1?spotGridHTML():'')+
-  '<div class="sb-head"><strong>Players · '+inHand+' in the hand</strong><button type="button" class="sb-chip" data-sb-allin>Everyone in · random</button></div>'+
+  '<div class="sb-head"><strong>Players · '+inHand+' in the hand</strong></div>'+
   '<div class="sb-seats">'+order.map(seat=>{const role=b.roles[seat],h=b.hands[seat],pick=spotPicking(seat),t=b.target?.seat===seat;
    return'<div class="sb-seat'+(role==='out'?' out':'')+'"><b>'+names[seat]+'</b><div class="sb-seg" role="group" aria-label="'+names[seat]+'">'+[['out','Out'],['in','In'],['you','You']].map(([k,l])=>'<button type="button" class="'+(role===k?'on':'')+'" data-sb-role="'+seat+':'+k+'" aria-pressed="'+(role===k)+'">'+l+'</button>').join('')+'</div>'+
    '<div class="sb-hand">'+(role==='out'?'<span class="muted small">folds preflop</span>':(pick?h.map((c,i)=>spotSlotHTML(seat,i,c,names[seat]+' card '+(i+1))).join(''):'')+
@@ -122,7 +122,6 @@ function spotBuilderClick(event){
  else if(t.dataset.sbMode){const [seat,mode]=t.dataset.sbMode.split(':'),s=+seat;b.pick[s]=mode==='cards';
   if(mode==='cards'){const i=b.hands[s].findIndex(c=>c===null);b.target={seat:s,i:i<0?0:i};}else{b.hands[s].fill(null);if(b.target?.seat===s)b.target=null;}}
  else if(t.dataset.sbCard)spotPickCard(+t.dataset.sbCard);
- else if('sbAllin' in t.dataset){b.roles=b.roles.map(r=>r==='you'?r:'in');b.hands.forEach((h,s)=>{if(b.roles[s]!=='you'){h.fill(null);b.pick[s]=false;}});if(b.target&&b.target.seat>=0&&b.roles[b.target.seat]!=='you')b.target=null;}
  else if('sbLine' in t.dataset){if(!spotCheck())return;b.seed=1+Math.floor(Math.random()*1e9);spotFreeze();b.line=[];b.target=null;b.step='line';}
  else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target=null;}
  else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=G.modelActions(h,state.abstraction)[+t.dataset.sbAct];if(a)b.line.push(a);}
