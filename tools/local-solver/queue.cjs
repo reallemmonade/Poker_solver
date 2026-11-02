@@ -90,7 +90,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
    if(updateWant?.status==='wanted'&&!busy()){const {t,...w}=updateWant;updateWant=null;let row={...w,status:'updating',startedAt:Date.now()};try{if(!update)throw Error('This computer can\'t update from the app.');update();log('Updating, as asked from your account.');}catch(e){row={...w,status:'failed',message:e.message};}await api('POST','/api/sync',{rows:[meta('macupdate',row,(t||Date.now())+1)]});if(row.status==='updating')return;}
    if(!busy())await runNext();
    if(!busy()&&!learning&&![...jobs.values()].some(j=>j.status==='queued'||j.status==='running'))learnNext();
-  }catch(e){if(once){log('Cloud solve: '+e.message);onIdle?.();}else if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
+  }catch(e){if(once){log('Cloud solve: '+e.message);const j=jobs.get(once.id);if(j)await api('POST','/api/sync',{rows:[meta(once.id,{...j,status:'failed',worker:name,message:'The cloud worker stopped: '+e.message},(Number(once.t)||Date.now())+5000)]}).catch(()=>{});onIdle?.();}else if(e.status===401){log('The account link expired. Open the app on this computer, signed in, to link it again.');link=null;try{fs.unlinkSync(FILE)}catch{}}else log('Solve queue: '+e.message);}
   finally{running=null;}})();
   return running;
  }

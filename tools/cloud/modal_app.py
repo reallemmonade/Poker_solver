@@ -52,10 +52,29 @@ def solve(job: dict):
         path = os.path.join(tmp, "job.json")
         with open(path, "w") as f:
             json.dump(job, f)
-        subprocess.run(
+        print("Cloud solve", job["id"], "for", job["link"]["user"])
+        run = subprocess.run(
             ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(RATE), "--once", path,
              "--threads", str(CORES * 2), "--memory", str(int(MEMORY_MB * 0.8)), "--timeout", "3300"],
-            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json")}, check=False)
+            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json")},
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        print(run.stdout[-4000:])
+        # The worker reports its own failures on the job. If it crashed before it could, say so here, so the phone
+        # shows why instead of waiting.
+        if run.returncode != 0:
+            lines = [l for l in run.stdout.strip().splitlines() if l.strip()]
+            fail(job, "The cloud worker stopped" + (": " + lines[-1][:200] if lines else "."))
+
+
+def fail(job: dict, message: str):
+    link, value = job["link"], {**job["job"], "status": "failed", "message": message, "worker": "modal"}
+    row = {"store": "meta", "id": job["id"], "t": int(job.get("t") or 0) + 5000, "data": {"id": job["id"], "value": value}}
+    req = urllib.request.Request(link["api"] + "/api/sync", data=json.dumps({"rows": [row]}).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + link["token"]})
+    try:
+        urllib.request.urlopen(req, timeout=60).read()
+    except Exception as e:
+        print("Could not report the failure:", e)
 
 
 def account_user(api: str, token: str):
@@ -95,7 +114,7 @@ def web():
             raise HTTPException(403, "This account can't start cloud solves.")
         if job.get("target") != "modal":
             raise HTTPException(400, "This job isn't for the cloud.")
-        solve.spawn({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
+        await solve.spawn.aio({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
                      "link": {"api": origin, "token": token, "user": user["id"]}})
         return {"started": True, "rate": RATE}
 
