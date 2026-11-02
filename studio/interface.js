@@ -27,11 +27,11 @@ function initInterface(){
  const context=create('section','ui-context','<div><strong id="uiGameSummary"></strong><div class="small muted" id="uiGameContext"></div></div>'+button('Edit game','id="uiEditGame" aria-haspopup="dialog"'));
  context.id='uiContext';layout.before(context);
  const notices=create('div','ui-notices');notices.id='uiNotices';notices.setAttribute('role','status');context.after(notices);
- const subnav=create('nav','ui-subnav');subnav.id='uiSubnav';subnav.setAttribute('aria-label','Current activity');workspace.prepend(subnav);
+ const subnav=create('nav','ui-subnav');subnav.id='uiSubnav';subnav.setAttribute('aria-label','Current activity');context.before(subnav);// Feature tabs sit at the top edge, right under the header, above the game info row.
  // Tabs cut off at either edge fade out, so a half-visible tab reads as "scroll for more" rather than a clipped label.
  ui.subnavEdges=()=>{const max=subnav.scrollWidth-subnav.clientWidth;subnav.dataset.edge=(subnav.scrollLeft>2?'l':'')+(subnav.scrollLeft<max-2?'r':'');};subnav.addEventListener('scroll',ui.subnavEdges,{passive:true});tabGlide(subnav,{items:'.btn'});addEventListener('resize',ui.subnavEdges);
  document.querySelector('.tabs').classList.add('ui-legacy-tabs');
- const pageHeading=create('div','ui-page-heading','<h1 id="uiPageTitle">Your table</h1><span class="small muted" id="uiPageHint"></span>');subnav.after(pageHeading);
+ const pageHeading=create('div','ui-page-heading','<h1 id="uiPageTitle">Your table</h1><span class="small muted" id="uiPageHint"></span>');workspace.prepend(pageHeading);
  function dialog(id,title){const d=create('dialog','ui-dialog','<div class="ui-dialog-head"><h2>'+title+'</h2>'+button('Close','data-close-dialog')+'</div><div class="ui-dialog-content"></div>');d.id=id;d.setAttribute('aria-label',title);shell.append(d);d.querySelector('[data-close-dialog]').onclick=()=>d.close();d.addEventListener('click',event=>{if(event.target===d){const r=d.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)d.close();}});d.addEventListener('close',()=>{if(![...document.querySelectorAll('dialog')].some(n=>n.open))document.body.classList.remove('ui-dialog-open');ui.lastFocus?.focus({preventScroll:true});});return d;}
  const gameDialog=dialog('uiGameDialog','Edit game'),settingsDialog=dialog('uiSettingsDialog','Settings & help');
  gameDialog.querySelector('.ui-dialog-content').append(setup);setup.classList.remove('card');setup.querySelector('.eyebrow').remove();setup.querySelector('h2').remove();
