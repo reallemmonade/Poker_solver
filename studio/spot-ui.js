@@ -103,7 +103,7 @@ const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,M
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
 // with --name (tools/local-solver/link.cjs) beats as 'solver-<name>' and takes jobs while idle at its own rate.
-const CLOUD_STUCK_MS=3*60e3,CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
+const CLOUD_STUCK_MS=3*60e3,CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',api:'https://range-lab-live-rooms.onrender.com',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
 function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{}return v!=='off';}
 function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
 // Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
@@ -291,11 +291,13 @@ async function sendToMac(task,observed,opts,extraAction){
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
 }
+// The cloud only talks to the main accounts server. A preview build shares its database, so the same session
+// works there and the answer still syncs back here.
 // The cloud worker gets the job itself (it may start before this device's sync lands) with your session and this
 // device's sync cursor, so it pulls only what changed since: a cancel from here. Its rows are stamped after t.
 async function startCloudSolve(id,job,t){
  const link=citrusAccount.link;let error='';
- try{const r=await fetch(CLOUD_SOLVER.url.replace(/\/$/,'')+'/solve',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+link.token},body:JSON.stringify({api:link.api,id,job,t,cursor:citrusAccount.cursor})}),b=await r.json().catch(()=>({}));if(!r.ok)error=String(b.detail||b.error||'Error '+r.status+'.');}
+ try{const r=await fetch(CLOUD_SOLVER.url.replace(/\/$/,'')+'/solve',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+link.token},body:JSON.stringify({api:CLOUD_SOLVER.api||link.api,id,job,t,cursor:citrusAccount.cursor})}),b=await r.json().catch(()=>({}));if(!r.ok)error=String(b.detail||b.error||'Error '+r.status+'.');}
  catch(e){error=e?.name==='TypeError'?'No connection.':String(e?.message||e);}
  if(!error)return;const cur=spotUI.jobs.get(id);if(!cur||!jobPending(cur))return;
  // It never started, so it's marked failed and costs nothing; Solve this spot is offered again after.

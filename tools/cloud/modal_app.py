@@ -104,8 +104,12 @@ def web():
         token = auth[7:] if auth.startswith("Bearer ") else ""
         origin = str(body.get("api", "")).rstrip("/")
         job_id, job = str(body.get("id", "")), body.get("job")
-        if origin not in ALLOWED_APIS or not token or not job_id.startswith("solvejob-") or not isinstance(job, dict):
-            raise HTTPException(400, "Malformed cloud solve.")
+        if origin not in ALLOWED_APIS:
+            raise HTTPException(400, "Cloud solves only run for the main Guava Poker server. Update the app and try again.")
+        if not token:
+            raise HTTPException(401, "Sign in again.")
+        if not job_id.startswith("solvejob-") or not isinstance(job, dict):
+            raise HTTPException(400, "This solve request was incomplete. Update the app and try again.")
         try:
             user = account_user(origin, token)
         except Exception:
