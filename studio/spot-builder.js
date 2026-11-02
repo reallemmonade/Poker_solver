@@ -1,4 +1,4 @@
-// New spot: pick players, stack, your seat, your hand and any board cards, then the hand starts in Train › Decision
+// New hand (Solve tab): pick players, stack, your seat, your hand and any board cards, then the hand starts in Solve
 // with every seat under your control. Play the line, and the analysis pane solves it through the usual routes
 // (preflop charts, flop library, Mac bridge with its progress bar).
 const spotBuilder={n:6,stack:100,format:'cash',step:'setup',roles:[],hands:[],board:[],target:null,line:[],frozen:null,randomSeats:[],seed:1,pending:null,live:null,dialog:null};
@@ -45,7 +45,7 @@ function spotBoardHTML(){const b=spotBuilder;return b.board.map((c,i)=>spotSlotH
 function renderSpotBuilder(){const b=spotBuilder;if(b.step==='line')return renderSpotLine();
  const d=b.dialog,hole=spotHoleCount(),order=spotSeatsInOrder(b.n,0),names=G.positions(b.n,0),inHand=b.roles.filter(r=>r!=='out').length;
  const chip=(attr,label,on)=>'<button type="button" class="sb-chip'+(on?' on':'')+'" '+attr+' aria-pressed="'+on+'">'+label+'</button>';
- d.querySelector('h2').textContent='New spot';
+ d.querySelector('h2').textContent='New hand';
  d.querySelector('.ui-dialog-content').innerHTML=
   '<div class="sb-row"><span class="sb-label">Game</span><div class="sb-chips">'+Object.entries(STUDY_FORMATS).map(([k,f])=>chip('data-sb-format="'+k+'"',f.label,k===b.format)).join('')+'</div></div>'+
   '<div class="sb-row"><span class="sb-label">Table</span><div class="sb-chips">'+spotSeatOptions().map(n=>chip('data-sb-n="'+n+'"',n,n===b.n)).join('')+'</div></div>'+
@@ -72,7 +72,7 @@ function spotLineHand(){const b=spotBuilder,h=new G.Hand(spotConfig(),{holes:b.f
  return{hand:h,steps};}
 function renderSpotLine(){
  const b=spotBuilder,d=b.dialog,{hand:h,steps}=spotLineHand(),names=G.positions(b.n,0),hero=spotHero();
- d.querySelector('h2').textContent='New spot · Line';
+ d.querySelector('h2').textContent='New hand · Line';
  let log='';for(let st=0;st<=h.street;st++){const acts=steps.filter(x=>x.street===st),cards=st?h.board.slice(0,st+2):[];if(!acts.length&&st===h.street&&st&&h.done)continue;
   log+='<div class="sb-street"><span>'+['Preflop','Flop','Turn','River'][st]+'</span>'+(st?'<span class="sb-slots">'+cards.slice(st===1?0:st+1,st+2).map((c,k)=>{const i=st===1?k:st+1;return spotSlotHTML(-1,i,c,['Flop','Flop','Flop','Turn','River'][i]);}).join('')+'</span>':'')+'</div>'+
   '<div class="sb-chips">'+acts.map(x=>'<span class="sb-act'+(x.auto?' auto':'')+'"><b>'+names[x.seat]+'</b> '+esc(x.label)+'</span>').join('')+'</div>';}
@@ -88,7 +88,7 @@ function renderSpotLine(){
   '<div class="sb-log">'+log+'</div>'+panel+
   (boardPick?'<p class="muted small">Pick the board card, or leave it random.</p>'+spotGridHTML():'<p class="muted small">Tap each action in order. Tap a board card to change it. Stop on the decision you want to study.</p>')+
   '<p class="ui-dialog-error sb-error" role="alert" hidden></p>'+
-  '<div class="sb-foot"><button type="button" class="btn secondary" data-sb-undo'+(b.line.length?'':' disabled')+'>Undo</button><button type="button" class="btn" data-sb-study>'+(h.done?'Replay this hand':'Study this decision')+'</button></div>';
+  '<div class="sb-foot"><button type="button" class="btn secondary" data-sb-undo'+(b.line.length?'':' disabled')+'>Undo</button><button type="button" class="btn" data-sb-study>'+(h.done?'Replay this hand':'Solve this spot')+'</button></div>';
 }
 function spotError(m){const e=spotBuilder.dialog.querySelector('.sb-error');if(e){e.textContent=m;e.hidden=!m;}}
 function spotPickCard(card){const b=spotBuilder,t=b.target;if(!t)return;let known=spotKnownCards();
@@ -140,7 +140,7 @@ function dealBuiltSpot(withLine){
   stopTableMotion();writeForm(config,state.abstraction);$('hero').value=String(hero);
   const mine=withLine?b.frozen[hero]:b.hands[hero];$('heroCards').value=mine.some(c=>c===null)?'':mine.map(c=>C.cardName(c)).join(' ');markDirty();
   spotBuilder.pending={holes:withLine?b.frozen.map((h,s)=>b.roles[s]==='out'&&!b.hands[s].some(c=>c!==null)?null:h.slice()):b.hands.map(h=>h.some(c=>c===null)?null:h.slice()),runout:withLine?line.hand.board.concat(spotRunout().slice(line.hand.board.length)):spotRunout()};
-  d.close();studioInterface.navigate?.('study');
+  d.close();studioInterface.navigate?.('solve');
   if(!deal(false)){spotBuilder.pending=null;return;}
   const h=state.hand;h.assisted=true;spotBuilder.live={dealId:h.dealId,out:b.roles.map((r,s)=>r==='out'?s:-1).filter(s=>s>=0)};
   const steps=withLine?line.steps:[];if(!withLine){const tmp=[];spotAutoFold(h.clone(),tmp);steps.push(...tmp);}
@@ -175,8 +175,8 @@ function spotShowReplay(){requestAnimationFrame(()=>$('reviewTable')?.scrollInto
 // A row with no chart or library answer starts the replay's analysis straight away.
 function openDecisionStep(k,solve=false){const h=state.hand;if(!h)return;try{loadHistory(H.record(h,{hero:state.hero,revealAll:true}));state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();if(solve)setTimeout(()=>{const b=$('reviewAnalyze');if(b&&!b.disabled)b.click();},0);}catch(e){status(e.message,true);}}
 function initSpotBuilder(){
- const d=document.createElement('dialog');d.className='ui-dialog sb-dialog';d.id='uiSpotDialog';d.setAttribute('aria-label','New spot');
- d.innerHTML='<div class="ui-dialog-head"><h2>New spot</h2><button type="button" class="btn secondary" data-close-dialog>Close</button></div><div class="ui-dialog-content"></div>';
+ const d=document.createElement('dialog');d.className='ui-dialog sb-dialog';d.id='uiSpotDialog';d.setAttribute('aria-label','New hand');
+ d.innerHTML='<div class="ui-dialog-head"><h2>New hand</h2><button type="button" class="btn secondary" data-close-dialog>Close</button></div><div class="ui-dialog-content"></div>';
  (document.querySelector('.shell')||document.body).append(d);spotBuilder.dialog=d;
  d.querySelector('[data-close-dialog]').onclick=()=>d.close();
  d.addEventListener('click',event=>{if(event.target===d){const r=d.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)d.close();return;}spotBuilderClick(event);});
@@ -191,6 +191,6 @@ function initSpotBuilder(){
  const pane=$('uiHistoryPane'),log=$('handLog');if(pane&&log){const box=document.createElement('section');box.id='uiEveryDecision';box.className='ed-box';box.hidden=true;box.innerHTML='<h2>Every decision</h2><div class="ed-body"></div>';log.before(box);
   box.addEventListener('click',e=>{const r=e.target.closest('[data-ed-step]');if(r)openDecisionStep(+r.dataset.edStep,r.classList.contains('ed-open'));});
   const baseRender=renderPlay;renderPlay=function(...args){const out=baseRender.apply(this,args);try{renderEveryDecision();}catch{}return out;};}
- const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New spot';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
+ const edit=$('uiEditGame');if(edit){const btn=document.createElement('button');btn.type='button';btn.className='btn secondary sb-open';btn.id='uiNewSpot';btn.textContent='New hand';btn.setAttribute('aria-haspopup','dialog');btn.onclick=openSpotBuilder;edit.before(btn);const wrap=document.createElement('div');wrap.className='sb-context-actions';btn.before(wrap);wrap.append(btn,edit);}
  studioInterface.openSpotBuilder=openSpotBuilder;
 }
