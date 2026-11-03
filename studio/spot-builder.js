@@ -172,10 +172,10 @@ function dealBuiltSpot(withLine){
  try{
   const config=spotConfig(),hero=Math.max(0,spotHero()),line=withLine?spotLineHand():null;
   if(line?.hand.done){const rec=H.record(line.hand,{hero,revealAll:true});d.close();loadHistory(rec);state.reviewIndex=0;renderReview();studioInterface.navigate?.('review');spotShowReplay();return;}
+  d.close();studioInterface.navigate?.('solve');// Solve's own table first, so the Play setup is never touched
   stopTableMotion();writeForm(config,state.abstraction);$('hero').value=String(hero);
   const mine=withLine?b.frozen[hero]:b.hands[hero];$('heroCards').value=mine.some(c=>c===null)?'':mine.map(c=>C.cardName(c)).join(' ');markDirty();
   spotBuilder.pending={holes:withLine?b.frozen.map((h,s)=>b.roles[s]==='out'&&!b.hands[s].some(c=>c!==null)?null:h.slice()):b.hands.map(h=>h.some(c=>c===null)?null:h.slice()),runout:withLine?line.hand.board.concat(spotRunout().slice(line.hand.board.length)):spotRunout()};
-  d.close();studioInterface.navigate?.('solve');
   if(!deal(false)){spotBuilder.pending=null;return;}
   const h=state.hand;h.assisted=true;spotBuilder.live={dealId:h.dealId,out:b.roles.map((r,s)=>r==='out'?s:-1).filter(s=>s>=0)};
   const steps=withLine?line.steps:[];if(!withLine){const tmp=[];spotAutoFold(h.clone(),tmp);steps.push(...tmp);}

@@ -51,6 +51,24 @@ function nextPersistentSessionConfig(){
 }
 function beforeLiveDeal(carry){cancelSessionNext();if(!carry||!liveSession.rootConfig)beginLiveSession();liveSession.handNumber++;}
 function captureSessionTransition(){return{config:state.config,hero:state.hero,hand:state.hand,handSaved:state.handSaved,currentGrades:state.currentGrades,completedHands:state.sessionHands,bots:botSettings.seats.slice(),session:{rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots?.slice(),rootSeats:liveSession.rootSeats?.slice(),round:liveSession.round,handNumber:liveSession.handNumber,message:liveSession.message}};}
+// Solve has its own table: entering the Solve tab parks the Play game (hand, setup, session, bots, model, fixed hole cards)
+// and leaving puts it back, so a hand built or solved there never becomes the game being played. Only the Play table is
+// saved as the live session; a newer session synced from elsewhere while Solve is open is adopted when Play returns.
+const tableSlots={owner:'play',parked:null,remote:null};
+function captureTable(){return{...captureSessionTransition(),level:liveSession.level,abstraction:state.abstraction,snapshot:state.snapshot,heroCards:$('heroCards').value,feedback:$('playFeedback').innerHTML};}
+function restoreTable(saved){
+ state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);liveSession.level=saved.level;botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();
+ state.abstraction=saved.abstraction;if(saved.snapshot&&saved.snapshot!==state.snapshot)setModel(saved.snapshot);state.dirty=false;
+ if(state.config)writeForm(state.config,state.abstraction);$('hero').value=state.hero;$('heroCards').value=saved.heroCards;$('playFeedback').innerHTML=saved.feedback;
+}
+function swapTable(to){
+ if(to===tableSlots.owner)return;cancelSessionNext();stopTableMotion();if(typeof handReportClose==='function')handReportClose();if(typeof handGradeHide==='function')handGradeHide();
+ const back=tableSlots.parked;tableSlots.parked=captureTable();tableSlots.owner=to;
+ if(back)restoreTable(back);else{state.hand=null;state.handSaved=false;state.currentGrades=[];state.dirty=false;}
+ if(to!=='play'){renderAll();return;}
+ const remote=tableSlots.remote;tableSlots.remote=null;if(remote){restoreLiveSession(remote,true);return;}
+ if(state.hand)saveLiveSession();resumeLive();
+}
 function rollbackSessionTransition(saved){state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();renderAll();}
 function renderSessionStatus(){
  if(liveSession.passive&&!$('sessionElsewhere')){const line=$('sessionStatus').closest('.ui-session-line')||$('sessionStatus');line.insertAdjacentHTML('afterend','<div id="sessionElsewhere" class="result" role="status"><span id="sessionElsewhereText"></span> <button class="btn secondary" id="takeOverSession">Continue here</button></div>');$('takeOverSession').onclick=takeOverSession;}
@@ -70,7 +88,7 @@ function sessionHandEnded(){
  saveLiveSession();renderSessionStatus();scheduleSessionNext();
 }
 function saveLiveSession(){
- if(!liveSession.ready||liveSession.passive||liveSession.hold||!state.hand||!liveSession.rootConfig)return;
+ if(tableSlots.owner!=='play'||!liveSession.ready||liveSession.passive||liveSession.hold||!state.hand||!liveSession.rootConfig)return;
  const h=state.hand;liveSession.stamp={at:Date.now(),device:studioDevice};
  const value={version:1,at:liveSession.stamp.at,device:studioDevice,rootConfig:liveSession.rootConfig,rootHero:liveSession.rootHero,rootBots:liveSession.rootBots,rootSeats:liveSession.rootSeats,round:liveSession.round,handNumber:liveSession.handNumber,completedHands:state.sessionHands,hero:state.hero,bots:botSettings.seats.slice(),autoNext:$('autoNextHand').checked,blindLevels:$('sessionBlindLevels').checked,levelHands:+$('levelHands').value,levelFactor:+$('levelFactor').value,hand:{config:h.config,holes:h.holes.map(cards=>cards.slice()),board:h.board.slice(),actions:h.actionLog.map(a=>({...a})),deck:h.deck.slice(),plannedBoard:h.plannedBoard.slice(),burns:h.burns.slice(),endingStacks:h.stacks.slice(),dealId:h.dealId,assisted:!!h.assisted,peeks:(h.peeks||[]).slice(),guessed:(h.guessed||[]).slice(),pendingGuess:h.pendingGuess||null,guessReveal:h.guessReveal||null,unlocked:(h.unlocked||[]).slice(),grades:state.currentGrades,done:h.done,saved:state.handSaved}};
  dbPut('meta',{id:'liveSession',value}).catch(saveFailed);postStudio({type:'session'});
@@ -78,6 +96,7 @@ function saveLiveSession(){
 // adopt: continue a session saved elsewhere (another tab or device) and take it over; otherwise this is the load-time restore.
 function restoreLiveSession(value,adopt=false){
  try{
+  if(tableSlots.owner!=='play'){tableSlots.remote=value;return;}
   if(value?.version===1){
    const c=G.normalize(value.hand.config),root=G.normalize(value.rootConfig);if(!Number.isInteger(value.hero)||value.hero<0||value.hero>=c.seats||!Number.isInteger(value.rootHero)||value.rootHero<0||value.rootHero>=root.seats)throw Error('Invalid saved seat.');
    if(!Array.isArray(value.hand.actions)||value.hand.actions.length>300)throw Error('Invalid saved actions.');
