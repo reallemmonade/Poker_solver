@@ -177,32 +177,64 @@
    const live=this.seats||this.rootHand.living(),n=hand.n,base=hand.stacks.map((stack,i)=>stack-sum(hand.pots.map(p=>p.paid[i]))),before=[...hand.initial.map(v=>G.bb(v)+hand.config.pot/n),...hand.config.otherStacks],baseline=hand.config.mode==='icm'?G.terminalICM(before,before,hand.config.payouts):null;
    return[0,1,2].map(outcome=>{const stacks=base.slice();for(const pot of hand.pots){const winners=hand.foldWinner!==null?[hand.foldWinner]:pot.eligible.length===1?pot.eligible:outcome===2?pot.eligible:[live[outcome]];const each=Math.floor(pot.net/winners.length),order=winners.slice().sort((a,b)=>((a-hand.button-1+n)%n)-((b-hand.button-1+n)%n));for(let i=0;i<order.length;i++)stacks[order[i]]+=each+(i<pot.net-each*order.length?1:0);}if(hand.config.mode==='cash')return stacks.map((v,i)=>G.bb(v-this.rootHand.stacks[i]));const equity=G.terminalICM([...stacks.map(G.bb),...hand.config.otherStacks],before,hand.config.payouts);return stacks.map((_,i)=>equity[i]-baseline[i]);});
   }
+  // Flat per-hand arrays for the sweeps below: both cards, range weight, the
+  // same combination's index in the other range, and where the other range's
+  // weaker and tied hands end (both ranges are sorted by showdown rank).
+  prepare(){
+   if(this.flat)return;const f=this.flat={card:[],prob:[],same:[],below:[],upto:[]};
+   for(let p=0;p<2;p++){const own=this.hands[p],opp=this.hands[1-p],H=own.length,a=new Uint8Array(2*H),prob=new Float64Array(H),same=new Int32Array(H),below=new Int32Array(H),upto=new Int32Array(H);let lo=0,hi=0;
+    for(let i=0;i<H;i++){const h=own[i];a[2*i]=h.cards[0];a[2*i+1]=h.cards[1]??0;prob[i]=h.prob;const j=this.lookups[1-p].get(h.key);same[i]=j===undefined?-1:j;while(lo<opp.length&&opp[lo].rank<h.rank)lo++;if(hi<lo)hi=lo;while(hi<opp.length&&opp[hi].rank<=h.rank)hi++;below[i]=lo;upto[i]=hi;}
+    f.card.push(a);f.prob.push(prob);f.same.push(same);f.below.push(below);f.upto.push(upto);}
+   f.weights=this.sizes.map(s=>new Float64Array(s));f.cards=new Float64Array(52);f.side=new Float64Array(52);
+  }
   build(hand){
-   assert(this.nodes.length<2000,'The selected river bet tree exceeds the local tree budget.');const n={hand,actor:hand.actor,v:this.sizes.map(s=>new Float64Array(s))};this.nodes.push(n);if(hand.done){const values=this.terminalValues(hand);n.utility=[0,1].map(i=>values.map(v=>v[i]));this.leaves.push(n);return n;}
+   this.prepare();assert(this.nodes.length<2000,'The selected river bet tree exceeds the local tree budget.');const n={hand,actor:hand.actor,v:this.sizes.map(s=>new Float64Array(s))};this.nodes.push(n);if(hand.done){const values=this.terminalValues(hand);n.utility=[0,1].map(i=>values.map(v=>v[i]));n.fold=values[0].every((v,i)=>v===values[1][i]&&v===values[2][i]);this.leaves.push(n);return n;}
    n.actions=actionsAt(hand,this.rootHand,this.options,this.extra);n.children=n.actions.map(a=>{const h=hand.clone();h.act(a);return this.build(h);});const len=this.sizes[n.actor]*n.actions.length;n.regrets=new Float64Array(len);n.average=new Float64Array(len);n.strategy=new Float64Array(len);n.reaches=n.actions.map(()=>new Float64Array(this.sizes[n.actor]));return n;
   }
-  setStrategy(average=false){const floor=1e-9*(this.iterations+1)**2;for(const n of this.nodes){if(n.utility)continue;const A=n.actions.length;for(let h=0;h<this.sizes[n.actor];h++){let source=average?n.average:n.regrets,total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);if(average&&total<=floor){source=n.regrets;total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);}for(let a=0;a<A;a++)n.strategy[h*A+a]=total?Math.max(0,source[h*A+a])/total:1/A;}}}
-  aggregate(player,reach,u){
-   const own=this.hands[player],opp=this.hands[1-player],out=new Float64Array(own.length);if(!this.fast){for(const pair of this.pairs){const i=player===0?pair.i:pair.j,j=player===0?pair.j:pair.i;out[i]+=pair.w/this.normalizer*reach[j]*u[pair.o];}return out;}
-   const totalCards=new Float64Array(52),lowerCards=new Float64Array(52),tieCards=new Float64Array(52);let total=0,lower=0,j=0;const weights=opp.map((h,i)=>h.prob*reach[i]);for(let k=0;k<opp.length;k++){const w=weights[k];total+=w;for(const c of opp[k].cards)totalCards[c]+=w;}
-   let groupRank=null,tie=0,tieEnd=0;
-   for(let i=0;i<own.length;i++){
-    const h=own[i];if(h.rank!==groupRank){while(j<opp.length&&opp[j].rank<h.rank){const w=weights[j];lower+=w;for(const c of opp[j].cards)lowerCards[c]+=w;j++;}tieCards.fill(0);tie=0;tieEnd=j;while(tieEnd<opp.length&&opp[tieEnd].rank===h.rank){const w=weights[tieEnd];tie+=w;for(const c of opp[tieEnd].cards)tieCards[c]+=w;tieEnd++;}groupRank=h.rank;}
-    const [a,b]=h.cards,same=this.lookups[1-player].get(h.key),identical=same===undefined?0:weights[same],lo=Math.max(0,lower-lowerCards[a]-lowerCards[b]),eq=Math.max(0,tie-tieCards[a]-tieCards[b]+identical),all=Math.max(0,total-totalCards[a]-totalCards[b]+identical),hi=Math.max(0,all-lo-eq);out[i]=h.prob/this.normalizer*(lo*u[player]+eq*u[2]+hi*u[1-player]);
-   }return out;
+  setStrategy(average=false){const floor=2e-9*(this.averageMass||1);for(const n of this.nodes){if(n.utility)continue;const A=n.actions.length;for(let h=0;h<this.sizes[n.actor];h++){let source=average?n.average:n.regrets,total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);if(average&&total<=floor){source=n.regrets;total=0;for(let a=0;a<A;a++)total+=Math.max(0,source[h*A+a]);}for(let a=0;a<A;a++)n.strategy[h*A+a]=total?Math.max(0,source[h*A+a])/total:1/A;}}}
+  // Values of the player's hands at a terminal against the opponent's reach,
+  // with card removal. Showdowns sweep once up and once down the rank order.
+  aggregate(player,reach,u,out=new Float64Array(this.sizes[player])){
+   if(!this.fast){out.fill(0);for(const pair of this.pairs){const i=player===0?pair.i:pair.j,j=player===0?pair.j:pair.i;out[i]+=pair.w/this.normalizer*reach[j]*u[pair.o];}return out;}
+   const f=this.flat,opp=1-player,oc=f.card[opp],w=f.weights[opp],op=f.prob[opp],O=w.length,mc=f.card[player],mp=f.prob[player],same=f.same[player],H=out.length,cards=f.cards,side=f.side,scale=1/this.normalizer;
+   cards.fill(0);let total=0;for(let k=0;k<O;k++){const x=w[k]=op[k]*reach[k];total+=x;cards[oc[2*k]]+=x;cards[oc[2*k+1]]+=x;}
+   const fold=u[0]===u[1]&&u[1]===u[2];
+   for(let i=0;i<H;i++){const s=same[i],all=total-cards[mc[2*i]]-cards[mc[2*i+1]]+(s>=0?w[s]:0);out[i]=mp[i]*scale*Math.max(0,all);}
+   if(fold){const v=u[0];for(let i=0;i<H;i++)out[i]*=v;return out;}
+   // out holds each hand's compatible opposing mass; split it into wins, ties and losses.
+   const win=u[player],lose=u[opp],tie=u[2],below=f.below[player],upto=f.upto[player];
+   side.fill(0);let lower=0,k=0;
+   for(let i=0;i<H;i++){const end=below[i];while(k<end){const x=w[k];lower+=x;side[oc[2*k]]+=x;side[oc[2*k+1]]+=x;k++;}const lo=Math.max(0,lower-side[mc[2*i]]-side[mc[2*i+1]])*mp[i]*scale;out[i]=out[i]*tie+lo*(win-tie);}
+   side.fill(0);let higher=0;k=O-1;
+   for(let i=H-1;i>=0;i--){const start=upto[i];while(k>=start){const x=w[k];higher+=x;side[oc[2*k]]+=x;side[oc[2*k+1]]+=x;k--;}const hi=Math.max(0,higher-side[mc[2*i]]-side[mc[2*i+1]])*mp[i]*scale;out[i]+=hi*(lose-tie);}
+   return out;
   }
-  walk(n,r0,r1,update=-1,averageWeight=0){
-   if(n.utility){n.v[0]=this.aggregate(0,r1,n.utility[0]);n.v[1]=this.aggregate(1,r0,n.utility[1]);return;}
-   const actor=n.actor,A=n.actions.length,H=this.sizes[actor],own=actor===0?r0:r1;n.v[0].fill(0);n.v[1].fill(0);
-   for(let a=0;a<A;a++){const reach=n.reaches[a];for(let h=0;h<H;h++)reach[h]=own[h]*n.strategy[h*A+a];const child=n.children[a];this.walk(child,actor===0?reach:r0,actor===1?reach:r1,update,averageWeight);for(let p=0;p<2;p++)for(let h=0;h<this.sizes[p];h++)n.v[p][h]+=child.v[p][h]*(p===actor?n.strategy[h*A+a]:1);}
-   if(update===actor)for(let h=0;h<H;h++)for(let a=0;a<A;a++){const k=h*A+a;n.regrets[k]=Math.max(0,n.regrets[k]+n.children[a].v[actor][h]-n.v[actor][h]);}
-   if(averageWeight)for(let h=0;h<H;h++)for(let a=0;a<A;a++)n.average[h*A+a]+=averageWeight*own[h]*n.strategy[h*A+a];
+  // One traversal for one player: its counterfactual values at every node
+  // (written to node.v[player]) against the opponent's current reach. With
+  // update, it also updates that player's regrets and average strategy.
+  traverse(p,n,mine,theirs,update=false,weight=0){
+   const v=n.v[p];if(n.utility)return this.aggregate(p,theirs,n.utility[p],v);
+   const A=n.actions.length,H=this.sizes[n.actor],s=n.strategy;
+   if(n.actor!==p){v.fill(0);for(let a=0;a<A;a++){const r=n.reaches[a];for(let h=0;h<H;h++)r[h]=theirs[h]*s[h*A+a];const c=this.traverse(p,n.children[a],mine,r,update,weight);for(let h=0;h<v.length;h++)v[h]+=c[h];}return v;}
+   v.fill(0);for(let a=0;a<A;a++){const r=n.reaches[a];for(let h=0;h<H;h++)r[h]=mine[h]*s[h*A+a];const c=this.traverse(p,n.children[a],r,theirs,update,weight);for(let h=0;h<H;h++)v[h]+=c[h]*s[h*A+a];}
+   if(update){const g=n.regrets,avg=n.average;for(let a=0;a<A;a++){const c=n.children[a].v[p];for(let h=0;h<H;h++){const k=h*A+a;g[k]+=c[h]-v[h];avg[k]+=weight*mine[h]*s[k];}}}
+   return v;
   }
   bestResponse(player,n=this.root,opponentReach=this.ones[1-player]){
    if(n.utility)return this.aggregate(player,opponentReach,n.utility[player]);const out=new Float64Array(this.sizes[player]);if(n.actor===player){out.fill(-Infinity);for(const child of n.children){const value=this.bestResponse(player,child,opponentReach);for(let h=0;h<out.length;h++)out[h]=Math.max(out[h],value[h]);}}else for(let a=0;a<n.actions.length;a++){const reach=opponentReach.map((r,h)=>r*n.strategy[h*n.actions.length+a]),value=this.bestResponse(player,n.children[a],reach);for(let h=0;h<out.length;h++)out[h]+=value[h];}return out;
   }
-  measure(){this.setStrategy(true);this.walk(this.root,...this.ones);const ev=this.root.v.map(v=>sum(v)),br=[0,1].map(p=>sum(this.bestResponse(p))),gain=br.map((v,p)=>Math.max(0,v-ev[p]));const player=this.data.actor,index=this.heroIndex,A=this.root.actions.length,den=this.aggregate(player,this.ones[1-player],[1,1,1])[index],values=this.root.children.map(n=>n.v[player][index]/den),mixed=values.reduce((s,v,a)=>s+v*this.root.strategy[index*A+a],0);this.diagnostic={ev,bestResponse:br,deviationGain:gain,nashConv:sum(gain),handRegret:Math.max(0,Math.max(...values)-mixed),exploitability:this.constantSum?sum(gain)/2:null,constantSum:this.constantSum};return this.diagnostic;}
-  step(){if(this.complete)return;this.setStrategy();this.walk(this.root,...this.ones,0);this.setStrategy();this.walk(this.root,...this.ones,1);this.setStrategy();this.walk(this.root,...this.ones,-1,this.iterations+1);this.iterations++;if(this.iterations%20===0){const d=this.measure();if(d.nashConv<=this.threshold&&d.handRegret<=this.handThreshold)this.complete=true;}if(this.iterations>=this.options.iterations||clock()-this.started>=this.options.milliseconds)this.complete=true;}
+  measure(){this.setStrategy(true);const ev=[0,1].map(p=>sum(this.traverse(p,this.root,this.ones[p],this.ones[1-p]))),br=[0,1].map(p=>sum(this.bestResponse(p))),gain=br.map((v,p)=>Math.max(0,v-ev[p]));const player=this.data.actor,index=this.heroIndex,A=this.root.actions.length;this.traverse(player,this.root,this.ones[player],this.ones[1-player]);const den=this.aggregate(player,this.ones[1-player],[1,1,1])[index],values=this.root.children.map(n=>n.v[player][index]/den),mixed=values.reduce((s,v,a)=>s+v*this.root.strategy[index*A+a],0);this.diagnostic={ev,bestResponse:br,deviationGain:gain,nashConv:sum(gain),handRegret:Math.max(0,Math.max(...values)-mixed),exploitability:this.constantSum?sum(gain)/2:null,constantSum:this.constantSum};return this.diagnostic;}
+  // Discounted CFR (alpha 1.5, beta 0, gamma 2) with alternating updates: positive regrets keep t^1.5/(t^1.5+1) of
+  // their size each iteration, negative ones half, and the average weights iteration t by about t^2. It reaches the
+  // gap in about half of CFR+'s iterations, and a line nobody in your range takes is answered the way the opponent
+  // would answer your whole range taking it (CFR+ left the opponent punishing the one hand shown).
+  step(){if(this.complete)return;const t=this.iterations+1,ta=Math.pow(t-1,1.5),pos=ta/(ta+1),gamma=Math.pow((t-1)/t,2);
+   for(const n of this.nodes)if(!n.utility){const g=n.regrets,avg=n.average;for(let k=0;k<g.length;k++){g[k]*=g[k]>0?pos:.5;avg[k]*=gamma;}}this.averageMass=(this.averageMass||0)*gamma+1;
+   for(let p=0;p<2;p++){this.setStrategy();this.traverse(p,this.root,this.ones[p],this.ones[1-p],true,1);}
+   this.iterations++;
+   // The gap check costs about two iterations, so it runs every 10 iterations at first and every eighth of the
+   // iterations so far later on (the solve overshoots its target by at most that eighth).
+   if(this.iterations>=(this.nextCheck||10)){this.nextCheck=this.iterations+Math.max(10,Math.round(this.iterations/8));const d=this.measure();if(d.nashConv<=this.threshold&&d.handRegret<=this.handThreshold)this.complete=true;}if(this.iterations>=this.options.iterations||clock()-this.started>=this.options.milliseconds)this.complete=true;}
   progress(){return{method:'exact-river',phase:'solving',done:this.iterations,total:this.options.iterations,states:this.nodes.length,gap:this.diagnostic?.nashConv??null,tolerance:this.threshold,seconds:(clock()-this.started)/1000};}
   // Each root action is valued with your best continuation against the solved
   // opponents, so a line your range never takes is not valued with untrained play.
