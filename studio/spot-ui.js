@@ -78,8 +78,10 @@ function spotSettings(hand,pending={}){
   samples:Math.max(2000,Number(pending.samples)||2000),tolerance:.001,rootSizes:same?String($('spotRootSizes')?.value||'').split(/[\s,;]+/).filter(Boolean).map(Number):[],abstraction:{...(pending.referenceModel?.abstraction||state.abstraction),...(state.spotSizing||{})}});
 }
 // Which solver answers this spot, where it runs and roughly how long it takes (measured 2026-10-28):
-// - Heads-up NLH and PLO rivers solve exactly in the browser: about 25 s (NLH) and 40 s (PLO) on a laptop for
-//   chart ranges. Turns and flops do not fit a tab (a turn tree takes 10 s an iteration, a flop over 1 GB).
+// - Heads-up NLH rivers always solve exactly on this device (bets of 1/3, 2/3 and 1.5x the pot and all-in, raises of
+//   the same sizes): about 1-2 s on a laptop for chart ranges and up to 7 s for every hand both ways at 200bb
+//   (measured 2026-11-03; on the same ranges it matches TexasSolver's river strategy). PLO rivers take about 40 s,
+//   desktop only. Turns and flops do not fit a tab (a turn tree takes 10 s an iteration, a flop over 1 GB).
 // - Everything else from the flop on goes to the solver on your Mac: straight to its bridge on the Mac itself,
 //   and from any other device through the account's solve queue (the bridge collects queued spots, solves them
 //   and syncs each answer back as a saved spot; see tools/local-solver/server.cjs).
@@ -125,7 +127,8 @@ function planCost(plan,factor=1){return plan.rate>0?(plan.solve*factor+(plan.boo
 function cloudSpendThisMonth(){const d=new Date(),from=new Date(d.getFullYear(),d.getMonth(),1).getTime();let s=0;for(const j of spotUI.jobs?.values()||[])if(j.cost>0&&(j.startedAt||j.createdAt||0)>=from)s+=j.cost;return s;}
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
 // v2: the trees with a small bet, a big bet and an overbet (learned ratios from the one-size trees no longer apply).
-function solveTimeKey(plan){return(plan.target&&plan.target!=='mac'?plan.target:plan.route)+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:'-v2');}
+// v3 for on-device rivers: the faster river engine (the learned ratios from the old one would read 10x too slow).
+function solveTimeKey(plan){return(plan.target&&plan.target!=='mac'?plan.target:plan.route)+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:plan.route==='river'?'-v3':'-v2');}
 function recordSolveTime(plan,seconds){if(!plan||!(seconds>0)||plan.kind==='multiway'||plan.learned)return;const t=solveTimes(),key=solveTimeKey(plan),ratio=seconds/plan.seed,old=t[key];t[key]=old>0?.6*old+.4*ratio:ratio;try{localStorage.setItem('range-lab-solve-times',JSON.stringify(t))}catch{}}
 // How fast this device runs the solvers' kind of work (typed-array arithmetic over scattered indexes), measured in
 // about 0.2 s and kept for a week. The browser river times above were measured where this scores BENCH_REFERENCE
@@ -146,8 +149,10 @@ function spotPlan(hand,where=spotUI.where){
  if(pre&&preflopFlopPlayers(hand)>3)return{route:'none',street:0,reason:'No chart covers this preflop line, and it can reach the flop four or more ways, which can\'t be solved yet.'};
  if(!simple||!['NLH','PLO4'].includes(c.variant))return{route:'none',street:hand.street,reason:'This game type can\'t be solved yet.'};
  const bridge=localBridge.up===true&&!!$('spotLocalSolver')?.value,kind=pre?'preflop':live.length===3&&c.variant==='NLH'?'mw3':live.length>2?'multiway':c.variant==='PLO4'?'plo':'nlh';let plan;
- // A phone solves rivers itself only when neither your Mac nor the cloud can take them.
- if((kind==='nlh'||kind==='plo')&&hand.street===3&&!bridge&&(kind==='nlh'||!small)&&!(small&&(macOnline()||cloudReady())))plan={route:kind==='nlh'?'river':'plo-river',seed:(kind==='nlh'?(small?34:24):40)*deviceSlowdown(),wait:0};
+ // Heads-up hold'em rivers always solve on this device: a second or two, faster than a trip to your Mac or the cloud,
+ // and with more raise sizes than TexasSolver's river tree. PLO rivers solve here only on a computer without the bridge.
+ if(kind==='nlh'&&hand.street===3)plan={route:'river',seed:(small?3:2)*deviceSlowdown(),wait:0};
+ else if(kind==='plo'&&hand.street===3&&!bridge&&!small)plan={route:'plo-river',seed:40*deviceSlowdown(),wait:0};
  else{
   const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0,where),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=spr<7?32:spr<30&&c.seats>2?220:600;
@@ -368,8 +373,8 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
 function endSolveFeedback(task,message,failed){const progress=$('spotInlineProgress'),el=$(task?.kind==='review'?'reviewFeedback':'playFeedback');if(!progress)return;if(['quiz','quizPrepare'].includes(task?.kind)||!el?.contains(progress)){progress.textContent=message;return;}el.innerHTML='<h3>'+(failed?'The solve failed':'The solve was stopped')+'</h3><p role="status"'+(failed?' class="error"':'')+'>'+esc(message)+'</p>';}
 function handleSpotWorkerMessage(message){
  if(message.type==='spotProgress'){
-  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'\u00a0sec'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the exact river tree':'Solving the current continuation',text=phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
-  status(text);if($('spotInlineProgress'))$('spotInlineProgress').textContent=text;$('progress').style.width=p.phase==='preparing'?'2%':p.phase==='local'?Math.min(95,5+p.done/6)+'%':Math.min(99,100*p.done/p.total)+'%';
+  const p=message,phase=p.phase==='local'?'Solving with TexasSolver on this computer · '+fmt(p.done,0)+'\u00a0sec'+(p.iterations?' · iteration '+fmt(p.iterations,0):'')+(Number.isFinite(p.exploitability)?' · exploitability '+fmt(p.exploitability,2)+'% of pot':''):p.phase==='preparing'?'Preparing ranges':p.phase==='evaluating'?'Evaluating the solved continuation':p.method==='exact-multiway'?'Solving the exact '+(p.players>2?'multiplayer':'heads-up')+' tree':p.method==='exact-river'?'Solving the river':'Solving the current continuation',text=p.method==='exact-river'?phase+'…':phase+(p.total>1?' · '+fmt(p.done,0)+' / '+fmt(p.total,0)+(p.method?.startsWith('exact-')?' iterations':p.phase==='evaluating'?' deals':' sampled updates'):'')+(Number.isFinite(p.gap)?' · deviation gap '+fmt(p.gap,5):'');
+  status(text);if($('spotInlineProgress'))$('spotInlineProgress').textContent=text;$('progress').style.width=p.phase==='preparing'?'2%':p.method==='exact-river'?Math.min(99,Number.isFinite(p.gap)&&p.gap>0?100*Math.min(1,p.tolerance/p.gap):5)+'%':p.phase==='local'?Math.min(95,5+p.done/6)+'%':Math.min(99,100*p.done/p.total)+'%';
   if(['quiz','quizPrepare'].includes(state.pending?.kind))$('quizStatus').textContent=(state.pending.kind==='quizPrepare'?'Preparing your next decision · ': 'Reviewing your hand · ')+text;
   return true;
  }
