@@ -183,6 +183,25 @@ function dealBuiltSpot(withLine){
   if(steps.length){saveLiveSession();renderAll();}
  }catch(e){spotBuilder.pending=null;spotError(e.message);if(!d.open)status(e.message,true);}
 }
+// Play › Analysis "Solve": copies the hand being played into Solve's own table, up to the action you are at (same seats,
+// stacks, button, your cards, board and line), so you can keep solving and exploring it there. The Play game is not touched.
+// Opponents' hidden cards are not copied while the hand is live (they'd be dealt at random), and a live decision opened
+// this way counts as a peek, like looking at the analysis. A finished hand opens in Hand replay with every card shown.
+function openPlayInSolve(){
+ const p=state.hand;if(!p||state.busy||tableSlots.owner!=='play')return;
+ const hero=state.hero;
+ if(p.done){try{loadHistory(H.record(p,{hero,revealAll:true}));state.reviewIndex=0;renderReview();studioInterface.navigate?.('review');spotShowReplay();}catch(e){status(e.message,true);}return;}
+ const at=p.actionLog.length;if(p.actor===hero&&!(p.guessed||[]).includes(at)&&!(p.peeks||[]).includes(at)){p.peeks=[...(p.peeks||[]),at];saveLiveSession();}
+ const config=G.normalize(p.config),holes=p.holes.map((c,s)=>s===hero?c.slice():null),runout=p.board.slice(config.boardCards.length),actions=p.actionLog.map(a=>({...a}));
+ studioInterface.navigate?.('solve');
+ try{
+  stopTableMotion();writeForm(config,state.abstraction);$('hero').value=String(hero);$('heroCards').value=holes[hero].map(c=>C.cardName(c)).join(' ');markDirty();
+  spotBuilder.pending={holes,runout};if(!deal(false)){spotBuilder.pending=null;return;}
+  const h=state.hand;h.assisted=true;spotBuilder.live={dealId:h.dealId,out:[]};
+  for(const a of actions)h.act(a);
+  renderAll();
+ }catch(e){spotBuilder.pending=null;status(e.message,true);}
+}
 // History › Every decision (Train › Decision only): each decision of the hand with the seat's cards and the strategy
 // for them where a chart or the flop library answers it. Tap a row to open that step in Hand replay, which can solve it.
 const everyDecision={key:'',html:''};
@@ -210,6 +229,7 @@ function spotShowReplay(){requestAnimationFrame(()=>$('reviewTable')?.scrollInto
 // A row with no chart or library answer starts the replay's analysis straight away.
 function openDecisionStep(k,solve=false){const h=state.hand;if(!h)return;try{loadHistory(H.record(h,{hero:state.hero,revealAll:true}));state.reviewIndex=Math.min(k,state.reviewFrames.length-1);renderReview();studioInterface.navigate?.('review');spotShowReplay();if(solve)setTimeout(()=>{const b=$('reviewAnalyze');if(b&&!b.disabled)b.click();},0);}catch(e){status(e.message,true);}}
 function initSpotBuilder(){
+ $('uiOpenSolve')?.addEventListener('click',openPlayInSolve);
  const d=document.createElement('dialog');d.className='ui-dialog sb-dialog';d.id='uiSpotDialog';d.setAttribute('aria-label','New hand');
  d.innerHTML='<div class="ui-dialog-head"><h2>New hand</h2><div class="sb-head-actions"><button type="button" class="btn secondary" data-sb-reset>Reset</button><button type="button" class="btn secondary" data-close-dialog>Close</button></div></div><div class="ui-dialog-content"></div>';
  (document.querySelector('.shell')||document.body).append(d);spotBuilder.dialog=d;

@@ -300,3 +300,5 @@ html .ui-pane-tabs.glide-dragging .glide-hot{color:var(--ink)!important}
 .sb-seat .sb-pos .sb-seat-stack{width:52px;height:26px;min-height:26px;padding:2px 4px;font-size:12px;text-align:center;border-radius:7px;box-sizing:border-box}
 .sb-prize{flex-wrap:nowrap}.sb-prize label:last-child{flex:1;min-width:0}
 .sb-prize .input{height:34px;min-height:34px;padding:4px 8px;font-size:14px;box-sizing:border-box}#sbPay{flex:1;min-width:0;width:100%}.sb-row>div{min-width:0}
+
+.ui-analysis-acts{display:flex;align-items:baseline;gap:14px}.ui-open-solve{display:inline-flex;align-items:center;gap:4px}.ui-open-solve[hidden]{display:none}.ui-open-solve svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;align-self:center}
