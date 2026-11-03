@@ -58,6 +58,12 @@ function pass(text){console.log('PASS '+text);count++;}
  assert.deepEqual(classesOf(of(0)),PF.classes.filter(pair).sort(),'The opener\'s grid is not their opening range');assert.equal(classesOf(of(1)).length,169,'The big blind\'s grid is not every hand');assert.deepEqual(PF.nearest([chart],new G.Hand(chart.config,{rng:G.rng(6)})).rangeAssumptions.map(x=>x.seat),[0],'An open shows grids for players yet to act');
  assert.deepEqual(r.handMix.seat,1);assert.deepEqual(r.actions.map(a=>a.kind),['fold','call','raise']);assert.deepEqual([r.handMix.classes.AKo,r.handMix.classes['72o']],[[0,.25,.75],[1,0,0]],'The actor\'s grid colours miss the chart strategy');
  pass('A preflop chart answer gives each live player\'s range at the decision and the actor\'s strategy, so the analysis draws their grids');}
+ // An exact-depth chart match (query, not nearest) carries the grids too.
+ {const PF=require('./preflop.js'),src={name:'Exact',url:'https://example.com/exact',solver:'check',settings:'check',createdAt:'2026-01-01'},pair=c=>c.length===2;
+  const chart=PF.validate({format:PF.FORMAT,name:'Exact',source:src,config:{variant:'NLH',seats:2,stacks:[20,20],sb:.5,bb:1,button:0},nodes:[{seat:0,history:[],actions:[{kind:'fold'},{kind:'raise',to:2}],strategy:PF.classes.map(c=>pair(c)?[0,1000]:[1000,0])},{seat:1,history:[{seat:0,kind:'raise',to:2}],actions:[{kind:'fold'},{kind:'call'}],strategy:PF.classes.map(()=>[0,1000])}]});
+  const h=new G.Hand(chart.config,{rng:G.rng(6)}),q0=PF.query(chart,h);assert.ok(q0,'No exact chart match');assert.deepEqual(q0.rangeAssumptions.map(x=>x.seat),[0],'The opener has no grid at an exact match');assert.deepEqual(q0.handMix.classes.AA,[0,1]);assert.deepEqual(q0.handMix.classes['72o'],[1,0]);
+  h.act({kind:'raise',target:200});const q1=PF.query(chart,h);assert.deepEqual(q1.rangeAssumptions.map(x=>x.seat).sort(),[0,1]);assert.deepEqual(q1.handMix.seat,1);
+  pass('An exact-depth preflop chart match gives the range grids as well');}
 // Off-tree preflop sizes: pseudo-harmonic mapping between chart sizes, a jam with no chart jam maps to the largest raise,
 // and a bigger price than the node's tightens the defence in equity order toward MDF, labelled approximate.
 {const PF=require('./preflop.js'),src={name:'Off tree',url:'https://example.com/off',solver:'check',settings:'check',createdAt:'2026-01-01'},R=to=>({kind:'raise',to}),call=PF.classes.map(()=>[0,1000]);
