@@ -7,7 +7,7 @@
  if(!G&&typeof require==='function'){try{G=require('./hand-engine.js');}catch{G=require('./game.js');}}
  const C=G&&G.Core,STREETS=['flop','turn','river'],assert=(v,m)=>{if(!v)throw Error(m)};
  const CARD=/^[2-9TJQKA][cdhs]$/,COMBO=/^([2-9TJQKA][cdhs]){2}$/,CLASS=/^(?:([2-9TJQKA])\1|(?:A[2-9TJQK]|K[2-9TJQ]|Q[2-9TJ]|J[2-9T]|T[2-9]|9[2-8]|8[2-7]|7[2-6]|6[2-5]|5[2-4]|4[23]|32)[so])$/;
- const DEFAULT_URL='http://127.0.0.1:8787',LOCAL_TREE={bet:[[33,66],[33,66,150],[33,66,150]],later:[66,66],raise:66,allinThreshold:.67};
+ const DEFAULT_URL='http://127.0.0.1:8787',LOCAL_TREE={bet:[[33,66,150],[33,66,150],[33,66,150]],later:[66,66],raise:66,allinThreshold:.67};
  // PLO tree: one bet size per street (fraction of pot), a pot raise, at most 2 raises
  // on the flop and 3 later. The solver lowers the caps itself if memory runs short.
  const COMBO4=/^([2-9TJQKA][cdhs]){4}$/,PLO_TREE={bet:[.33,.66,.75],raise:1,cap:[2,3,3],allinThreshold:.67},PLO_MAX_COMBOS=20000,round4=x=>Math.round(x*1e4)/1e4;

@@ -20,7 +20,9 @@ const ActionBar=(()=>{
     const base=r.currentBet<=r.bb?r.bb:r.currentBet,s=solvedList(r);
     // Sizes that share a label (two at or above the effective stack, or two that round to the same share) show once, the smaller kept.
     const sl=s.map(t=>({label:t>=cover(r)-1e-9?'All-in':r.preflop?num(t/base)+'x':share((t-r.currentBet)/(r.pot+r.toCall)),target:t})).filter((p,i,a)=>a.findIndex(q=>q.label===p.label)===i);
-    if(sl.length>1)return sl;
+    // Postflop always offers the tree's 1/3, 2/3 and 1.5x pot: a flop library solved with fewer sizes (v4 bets only 1/3 on the
+    // flop) must not take the others away; the analysis offers a solve with all of them.
+    if(sl.length>1&&r.preflop)return sl;
     // Otherwise standard sizes (preflop multiples, postflop the solver tree's 1/3, 2/3 and 1.5x pot), and All-in. A size below the
     // minimum bet (1/3 of a small limped pot) shows at the minimum rather than dropping out; sizes at or above the all-in fold into it.
     // (Pot when a pot limit caps the bet below the all-in).

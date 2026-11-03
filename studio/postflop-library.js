@@ -72,6 +72,9 @@
  // The app was renamed from Range Lab to Citrus Poker; charts and flop libraries built
  // on either side of the rename still pair up (the range key must match too).
  const sameName=(a,b)=>String(a).replace(/Citrus Poker/g,'Range Lab')===String(b).replace(/Citrus Poker/g,'Range Lab');
+ // True when the spot's flop tree bets 1/3, 2/3 and 1.5x pot, the sizes every street is meant to have. The v4 libraries
+ // bet only 1/3 on the flop.
+ const fullFlopSizes=spot=>{const b=(spot.tree?.flop?.bet||[]).map(Number);return [33,66,150].every(x=>b.some(y=>Math.abs(y-x)<=2));};
  function query(libraries,range,hand){
   if(!range||hand.done||hand.street!==1||range.live.length!==2)return null;
   const live=hand.living(),firstAfterButton=i=>(i-hand.button+hand.n)%hand.n||hand.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
@@ -98,7 +101,7 @@
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[[ip,'ip'],[oop,'oop']].map(([seat,p])=>({seat,range:spot.game==='PLO4'?'Chart range':reachText(reachOf(spot,flop,p,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),C.cards(key)),source})),
-    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,scale,...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
+    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,scale,...spot.game!=='PLO4'&&!fullFlopSizes(spot)?{fewerSizes:true}:{},...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
     warning:(standIn?'Stand-in flop strategy for '+spot.label+': '+board+' is not in the library, so the nearest solved flop of the same texture, '+spaced(key)+', answers, with your cards moved to match. Treat it as a rough guide. It was':'Precomputed flop strategy for '+spot.label+' on '+spaced(key)+' (the same flop up to suits),')+' solved by '+(spot.game==='PLO4'?'the PLO solver':'TexasSolver')+' for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(similar?' Your hand is not among the '+flop.combos[found.node.player].length+' combos solved for this flop, so the most similar one, '+similar+', answers for it (similar made hand and draws).':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+(spot.game==='PLO4'?' Exploitability is measured exactly, in percent of the pot. The library keeps frequencies only, so no decision cost is graded.':' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.')}};
  }
 
