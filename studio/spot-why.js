@@ -63,43 +63,61 @@
   return total>0?freq.map(x=>x/total):null;
  }
 
+ // How often each part of the range (two pair+, top pair, weaker pairs, no pair) bets or raises, with each part's share.
+ function betByCategory(rows,mix,actions,board){
+  const C=root.PokerGame?.Core,out={},deadSet=new Set(board);if(!C)return null;
+  for(const r of rows){if(!(r.weight>0)||r.cards.some(c=>deadSet.has(c)))continue;const m=mix[C.handClass(r.cards)];if(!m)continue;
+   const cat=classify(r.cards,board).cat,o=out[cat]||(out[cat]={w:0,bet:0});o.w+=r.weight;o.bet+=r.weight*actions.reduce((s,a,i)=>s+(aggressive(a)?m[i]||0:0),0);}
+  const total=Object.values(out).reduce((s,o)=>s+o.w,0);if(!total)return null;
+  for(const o of Object.values(out)){o.share=o.w/total;o.rate=o.bet/o.w;}return out;
+ }
+
  const aggressive=a=>a.kind==='bet'||a.kind==='raise';
- // Bet size buckets from the action tones: up to about half pot is small, bigger is big, all-in is jam.
- function sizeKind(a,tone){return tone==='allin'||/all-in/i.test(a.label||'')?'jam':tone==='bet1'?'small':'big';}
 
  // The reasons, as short sentences, most telling first. input: {board, hero, heroIsIp, spr, actions, tones, labels,
  // heroMix, mine, theirs, mix, heroClass, heroWeight}; mine/theirs are range rows, mix maps hand class -> action mix.
  function reasons(x){
-  const out=[],A=x.actions,labels=x.labels,board=x.board,facing=A.some(a=>a.kind==='fold'||a.kind==='call');
+  const out=[],A=x.actions,labels=x.labels,board=x.board,facing=A.some(a=>a.kind==='fold'||a.kind==='call'),river=board.length>=5,turn=board.length===4;
   const freq=x.mine&&x.mix?rangeFrequencies(x.mine,x.mix,A,board):null,bet=freq?A.reduce((s,a,i)=>s+(aggressive(a)?freq[i]:0),0):null;
-  const by={small:0,big:0,jam:0};if(freq)A.forEach((a,i)=>{if(aggressive(a))by[sizeKind(a,x.tones[i])]+=freq[i];});
   // 1. What the whole range does.
   if(freq){
    const top=freq.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).filter(([p])=>p>=.05).slice(0,3).map(([p,i])=>labels[i]+' '+pct(p)).join(', ');
    out.push({k:'range',t:(facing?'Your range here: ':bet<.25?'Your range mostly checks: ':bet>.6?'Your range bets a lot: ':'Your range mixes: ')+top+'.'});
-   if(bet>=.2){const main=Object.entries(by).sort((a,b)=>b[1]-a[1])[0][0];
-    out.push({k:'size',t:main==='small'?'Bets are mostly small: a cheap bet works when the whole range has an edge.':main==='big'?'Bets are mostly big: strong hands and bluffs bet, the middle checks.':'Bets are mostly all-in: stacks are short, so strong hands and draws just get it in.'});}
+   // Which sizes it uses and which hands bet, straight from the numbers so the sentence can't disagree with them.
+   if(bet>=.1){
+    const sizes=A.map((a,i)=>[freq[i],i]).filter(([p,i])=>aggressive(A[i])&&p>=.03).sort((a,b)=>b[0]-a[0]).map(([p,i])=>labels[i]+' '+pct(p));
+    const cats=x.mix?betByCategory(x.mine,x.mix,A,board):null,NAME={strong:'two pair or better',top:'top pair',pair:'weaker pairs',air:'no pair'};
+    let t=(facing?'When you raise: ':'When you bet: ')+sizes.join(', ')+'.';
+    if(cats){const parts=['strong','top','pair','air'].filter(c=>cats[c]?.share>=.03).map(c=>NAME[c]+' '+pct(cats[c].rate));
+     if(parts.length>=2)t+=' How often each part of your range '+(facing?'raises':'bets')+': '+parts.join(', ')+'.';
+     const s=cats.strong?.rate,p=cats.pair?.rate,a=cats.air?.rate;
+     if(s!=null&&p!=null&&a!=null&&cats.pair.share>=.05&&s-p>=.25&&a-p>=.15)t+=' Strong hands and bluffs bet, weaker pairs check.';}
+    out.push({k:'size',t});}
   }
   // 2. Who the board favours, by top pair or better and by two pair or better.
   if(x.mine&&x.theirs){
    const me=profile(x.mine,board,[]),them=profile(x.theirs,board,x.hero||[]);
    if(me.total>0&&them.total>0){
-    const diff=me.topPlus-them.topPlus,nut=me.strong-them.strong,who=Math.abs(diff)<.04?'Board hits both ranges about evenly':diff>0?'Board favours you':'Board favours them';
+    // Only say the board favours someone when top pair+ and two pair+ agree; when they point opposite ways, say so.
+    const diff=me.topPlus-them.topPlus,showNut=Math.max(me.strong,them.strong)>=.03,nut=showNut?me.strong-them.strong:0;
+    const side=v=>Math.abs(v)<.03?0:Math.sign(v),dS=Math.abs(diff)<.04?0:Math.sign(diff),nS=side(nut);
+    const who=dS&&nS&&dS!==nS?(dS>0?'You have more top pairs, they have more strong hands':'They have more top pairs, you have more strong hands'):(dS||nS)===0?'Board hits both ranges about evenly':(dS||nS)>0?'Board favours you':'Board favours them';
     let t=who+': top pair or better is '+pct(me.topPlus)+' of your range, '+pct(them.topPlus)+' of theirs';
-    if(Math.max(me.strong,them.strong)>=.03)t+='; two pair or better '+pct(me.strong)+' vs '+pct(them.strong);
-    if(nut<-.03&&bet!=null&&bet<.35)t+=', so you bet less';else if(nut>.03&&by.big+by.jam>=.1)t+=', so you can bet big';
+    if(showNut)t+='; two pair or better '+pct(me.strong)+' vs '+pct(them.strong);
     out.push({k:'adv',t:t+'.'});x._draws=[me.draw,them.draw];
    }
   }
   // 3. Board texture.
   const tex=textureWords(board),draws=x._draws&&Math.max(...x._draws)>=.08?' Draws are '+pct(x._draws[0])+' of your range, '+pct(x._draws[1])+' of theirs.':'';
-  out.push({k:'board',t:board.map(cardText).join(' ')+': '+(tex.words.length?tex.words.join(', '):tex.highName)+'.'+(tex.dry?' Few draws, so whoever is ahead now tends to stay ahead.':draws||(tex.wet?' Many draws, so the next card can change who is ahead.':''))});
+  const after=river?(tex.wet?' No cards to come, so missed draws can only win by bluffing.':''):tex.dry?' Few draws, so whoever is ahead now tends to stay ahead.':draws||(tex.wet?(turn?' Many draws, so the river can change who is ahead.':' Many draws, so the next cards can change who is ahead.'):'');
+  out.push({k:'board',t:board.map(cardText).join(' ')+': '+(tex.words.length?tex.words.join(', '):tex.highName)+'.'+after});
   // 4. Stack-to-pot ratio.
-  if(x.spr>0){const s=x.spr<10?Math.round(x.spr*10)/10:Math.round(x.spr);
-   out.push({k:'spr',t:'SPR '+s+': '+(x.spr<2.5?'one bet nearly gets it all in, so top pair plays like a very strong hand.':x.spr<6?'about two bets get it all in.':'deep stacks, so one pair wants a small pot and the best hands build a big one.')});}
+  // On the river only the all-in case matters (no later streets to plan for).
+  if(x.spr>0&&(!river||x.spr<1.5)){const s=x.spr<10?Math.round(x.spr*10)/10:Math.round(x.spr);
+   out.push({k:'spr',t:'SPR '+s+': '+(river?'a pot-sized bet or less puts you all in.':x.spr<2.5?'one bet nearly gets it all in, so top pair plays like a very strong hand.':x.spr<6?'about two bets get it all in.':'deep stacks, so the strongest hands start building the pot early.')});}
   // 5. Position, when nothing is bet yet.
   if(x.heroIsIp!=null&&!facing&&bet!=null){
-   if(x.heroIsIp)out.push({k:'pos',t:bet<.4?'You act last: checking back sees the next card for free.':'You act last, so you can bet more hands.'});
+   if(x.heroIsIp)out.push({k:'pos',t:bet<.4?(river?'You act last: checking back goes straight to showdown.':'You act last: checking back sees the next card for free.'):'You act last, so you can bet more hands.'});
    else if(bet<.4)out.push({k:'pos',t:'You act first: checking keeps your weaker hands out of trouble.'});}
   // 6. The hero's own hand: what it has, a blocker, its play next to the range's.
   if(x.hero?.length===2){
