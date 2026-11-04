@@ -24,4 +24,4 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://range-lab-poker-studio.onrender.com
+        value: https://guava.poker,https://www.guava.poker,https://range-lab-poker-studio.onrender.com

@@ -31,7 +31,7 @@ Then open the app on that Mac, sign in, and set **Solver settings → Solver on 
    - It builds TexasSolver and runs a small test solve. If Homebrew is missing or is an Intel copy on Apple silicon, it gets cmake from a private Python venv and libomp from `$LIBOMP_PREFIX` or a conda install (`conda install llvm-openmp`).
 3. Start the bridge: double-click `tools/local-solver/start.command`, or run `node tools/local-solver/server.cjs`. Keep the window open while you study.
 
-The bridge listens on `127.0.0.1:8787` only. It accepts requests from `https://range-lab-poker-studio.onrender.com` and from `localhost` pages. To allow other origins, set `RANGE_LAB_ORIGINS` (comma-separated). A copy of the app opened from a file sends the origin `null`. Sandboxed frames on any website send it too, so it is not allowed unless you list `null` there. It runs one solve at a time, for either game.
+The bridge listens on `127.0.0.1:8787` only. It accepts requests from `https://guava.poker`, `https://www.guava.poker`, `https://range-lab-poker-studio.onrender.com` and from `localhost` pages. To allow other origins, set `RANGE_LAB_ORIGINS` (comma-separated). A copy of the app opened from a file sends the origin `null`. Sandboxed frames on any website send it too, so it is not allowed unless you list `null` there. It runs one solve at a time, for either game.
 
 Options:
 
