@@ -22,7 +22,7 @@ const once=args.once?JSON.parse(fs.readFileSync(args.once,'utf8')):null;
 // Pages allowed to call the bridge: the Render site, and the app served from
 // localhost. A file:// page sends Origin "null", which sandboxed iframes on any
 // site also send, so it is allowed only when RANGE_LAB_ORIGINS lists null.
-const allowed=(process.env.RANGE_LAB_ORIGINS||'https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1').split(',').map(s=>s.trim()).filter(Boolean);
+const allowed=(process.env.RANGE_LAB_ORIGINS||'https://guava.poker,https://www.guava.poker,https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1').split(',').map(s=>s.trim()).filter(Boolean);
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
 let job=null,finished=null;
