@@ -337,11 +337,26 @@ async function deliverSolveJob(force=false){
  if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
 }
-// Decisions waiting on a Mac or cloud solve (see analyzeSpot) are graded once its answer syncs in.
-async function gradeFromJobs(){for(const [key,item] of [...spotUI.gradeWaits]){const j=[...spotUI.jobs.values()].filter(x=>x.baseKey===key).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];if(!j||j.status==='failed'||j.status==='cancelled'){spotUI.gradeWaits.delete(key);continue;}if(j.status!=='done')continue;
+// Decisions waiting on a Mac or cloud solve (see analyzeSpot) are graded once its answer syncs in. Each wait is also kept in
+// localStorage (hand id, action-log step, the action or guess to grade) so closing or reloading the app before the answer
+// lands doesn't lose the grade: after a reload the decision is rebuilt from the saved hand and graded into it.
+const GRADE_WAITS_KEY='guava-grade-waits',GRADE_WAIT_MS=2*864e5;
+function storedGradeWaits(){try{const v=JSON.parse(localStorage.getItem(GRADE_WAITS_KEY)||'[]');return Array.isArray(v)?v.filter(r=>r&&r.baseKey&&r.deal&&r.action&&Date.now()-(r.at||0)<GRADE_WAIT_MS):[];}catch{return[];}}
+function writeGradeWaits(rows){try{rows.length?localStorage.setItem(GRADE_WAITS_KEY,JSON.stringify(rows.slice(-30))):localStorage.removeItem(GRADE_WAITS_KEY);}catch{}}
+function keepGradeWait(key,item){const deal=item.live?.dealId||item.deal,step=item.step??item.hand?.actionLog?.length;if(!deal||!Number.isInteger(step)||!item.action)return;
+ writeGradeWaits([...storedGradeWaits().filter(r=>r.baseKey!==key),{baseKey:key,deal,step,action:item.action,peeked:!!item.peeked,at:item.at||Date.now()}]);}
+function dropGradeWait(key){spotUI.gradeWaits.delete(key);const rows=storedGradeWaits();if(rows.some(r=>r.baseKey===key))writeGradeWaits(rows.filter(r=>r.baseKey!==key));}
+// A stored wait back as a grade item: the decision's position replayed from the saved hand. Not while that hand is still
+// being played (it is graded once it is saved), and not when the decision already has its grade.
+function gradeWaitItem(r){if(state.hand?.dealId===r.deal&&!state.hand.done)return undefined;const saved=state.histories.find(x=>x.id===r.deal),rec=saved?.record;if(!rec)return null;
+ const hero=rec.hero??0;if((rec.grading||[]).some(g=>(g.hero===undefined||g.hero===hero)&&(g.step??g.actions?.length)===r.step))return null;
+ let hand=null;try{hand=H.frames(rec,state.abstraction).find(f=>f.actionLog.length===r.step)||null;}catch{}if(!hand||hand.actor!==hero)return null;
+ return{kind:'play',action:r.action,background:true,hand,live:hand,savedRow:saved,baseKey:r.baseKey,peeked:r.peeked,deal:r.deal,step:r.step,at:r.at};}
+function restoreGradeWaits(){const rows=storedGradeWaits();for(const r of rows){if(spotUI.gradeWaits.has(r.baseKey))continue;const item=gradeWaitItem(r);if(item===null)dropGradeWait(r.baseKey);else if(item)spotUI.gradeWaits.set(r.baseKey,item);}if(!rows.length)writeGradeWaits([]);}
+async function gradeFromJobs(){for(const [key,item] of [...spotUI.gradeWaits]){const j=[...spotUI.jobs.values()].filter(x=>x.baseKey===key).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];if(!j||j.status==='failed'||j.status==='cancelled'){dropGradeWait(key);continue;}if(j.status!=='done')continue;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
- if(!row||!validSpotResult(row.result))continue;spotUI.gradeWaits.delete(key);spotUI.cache.set(j.key,row.result);try{finishAnalysis(row.result,{...item,cacheKey:j.key,solveOptions:j.options});}catch{}}}
-addEventListener('citrus-synced',()=>loadSolveJobs().then(async()=>{gradeFromJobs();deliverSolveJob();await loadHandTrees(state.hand).catch(()=>false);if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
+ if(!row||!validSpotResult(row.result))continue;dropGradeWait(key);spotUI.cache.set(j.key,row.result);try{finishAnalysis(row.result,{...item,cacheKey:j.key,solveOptions:j.options});}catch{}}}
+addEventListener('citrus-synced',()=>loadSolveJobs().then(async()=>{restoreGradeWaits();gradeFromJobs();deliverSolveJob();await loadHandTrees(state.hand).catch(()=>false);if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
 function spotSourceStamp(snapshot){return JSON.stringify([snapshot?.format,snapshot?.id,snapshot?.episodes,snapshot?.decisions,snapshot?.createdAt,snapshot?.seedState,snapshot?.config,snapshot?.abstraction]);}
 function spotCacheKey(observed,options,extraAction,snapshot){const parts=['spot-v3',PokerSpot.publicKey(observed),options,extraAction],automatic=options.rangeMode==='auto'&&Array.from({length:observed.config.seats},(_,i)=>String(options.ranges[i]||'').trim()).some(text=>!text||/^auto$/i.test(text));if(automatic&&snapshot?.episodes>0&&observed.actions.length)parts.push(spotSourceStamp(snapshot));return JSON.stringify(parts);}
 function validSpotResult(r){
@@ -387,7 +402,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   // Grading a decision you already made never runs a solve on this device when the spot belongs on your Mac or the
   // cloud: a solve already sent there for this decision grades it when its answer lands (gradeFromJobs), and keeps
   // running after you act; otherwise the decision goes ungraded.
-  if(pending.background&&!onDeviceRoute(spotPlan(hand))){const job=[...spotUI.jobs.values()].find(j=>j.baseKey===baseKey&&(jobPending(j)||j.status==='done'));if(job)spotUI.gradeWaits.set(baseKey,{...task});state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(job)gradeFromJobs();if(typeof pumpGrades==='function')pumpGrades();return;}
+  if(pending.background&&!onDeviceRoute(spotPlan(hand))){const job=[...spotUI.jobs.values()].find(j=>j.baseKey===baseKey&&(jobPending(j)||j.status==='done'));if(job){spotUI.gradeWaits.set(baseKey,{...task});keepGradeWait(baseKey,task);}state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(job)gradeFromJobs();if(typeof pumpGrades==='function')pumpGrades();return;}
   if(task.plan?.route==='mac'){await sendToMac(task,observed,opts,extraAction);if(state.pending!==task)return;state.pending=null;lock();const el=$('playFeedback');if(el)el.innerHTML='';status(task.plan.cloud?'Sent to the cloud.':task.plan.server?'Sent to your server.':'Sent to your Mac.');return;}
   const worker=ensureWorker();if(spotUI.workerStamp!==sourceStamp){worker.postMessage({type:'load',snapshot:reference.snapshot});spotUI.workerStamp=sourceStamp;state.workerVersion=0;}
   task.dispatched=true;task.started=Date.now();worker.postMessage({type:'solve',observed,options:opts,extraAction,tag:pending.kind});
