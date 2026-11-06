@@ -13,6 +13,10 @@ const ActionBar=(()=>{
   const solvedList=r=>[...new Set((Array.isArray(r.solved)?r.solved:[]).map(t=>clamp(t,r)))].sort((a,b)=>a-b);
   // Postflop sizes as a share of the pot after calling; the solver tree's sizes (1/3, 2/3, 1.5x) read as the tree names them.
   const share=f=>{const pc=Math.round(f*100);return pc===33?'1/3':pc===66||pc===67?'2/3':pc===150?'1.5x':pc+'%';};
+  // The solvers (phone river, sampled tree, Mac TexasSolver) all treat a postflop bet or raise that puts in 67% or more of
+  // what is left behind (effective stack) as an all-in, so such a preset folds into All-in here too and the bar never
+  // offers a size the solver has no answer for.
+  const ALLIN=.67,jamLike=(t,r)=>{const paid=r.currentBet-r.toCall;return t-paid>=ALLIN*(cover(r)-paid)-1e-9;};
   function presets(r){
     // The sizes the solver has an answer for at this decision, when it has two or more; the slider covers the rest.
     // Labels name the size, not the amount (shown already in the box and the raise button): preflop a multiple of the
@@ -26,7 +30,7 @@ const ActionBar=(()=>{
     // Otherwise standard sizes (preflop multiples, postflop the solver tree's 1/3, 2/3 and 1.5x pot), and All-in. A size below the
     // minimum bet (1/3 of a small limped pot) shows at the minimum rather than dropping out; sizes at or above the all-in fold into it.
     // (Pot when a pot limit caps the bet below the all-in).
-    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).map(([t,label])=>[Math.max(t,r.min),label]).filter(([t])=>snap(t,r)<Math.min(r.max,cover(r)-1e-9)).map(([t,label])=>({label,target:snap(t,r)}));
+    const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).map(([t,label])=>[Math.max(t,r.min),label]).filter(([t])=>snap(t,r)<Math.min(r.max,cover(r)-1e-9)&&(r.preflop||!jamLike(snap(t,r),r))).map(([t,label])=>({label,target:snap(t,r)}));
     // Facing a bet, a size that lands on the minimum raise reads "Min" (with a short stack 1/3 pot is often exactly the min raise).
     return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i).map(p=>r.kind==='raise'&&!r.preflop&&Math.abs(p.target-r.min)<.005?{...p,label:'Min'}:p),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }

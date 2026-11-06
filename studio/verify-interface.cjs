@@ -84,7 +84,9 @@ function pass(text){console.log('PASS '+text);count++;}
  assert.equal(labels({...r,pot:20}),'1/3@6.6 2/3@13.2 1.5x@30 All-in@145.2');
  assert.equal(labels({...r,pot:20,solved:[6.6,145.2]}),'1/3@6.6 2/3@13.2 1.5x@30 All-in@145.2','A flop library solved with only 1/3 and all-in still offers 2/3 and 1.5x pot');
  assert.equal(labels({...r,preflop:true,pot:1.5,min:2,solved:[2.5,7]}),'2.5x@2.5 7x@7','Preflop, the chart\'s solved sizes still lead when it has two or more');
- assert.equal(labels({kind:'raise',min:33,max:36.5,allIn:36.5,effective:36.5,pot:33,currentBet:16.5,toCall:16.5,preflop:false,bb:1,solved:[]}),'Min@33 All-in@36.5','Facing a bet, a size that lands on the min raise reads Min');
+ assert.equal(labels({kind:'raise',min:33,max:60,allIn:60,effective:60,pot:33,currentBet:16.5,toCall:16.5,preflop:false,bb:1,solved:[]}),'Min@33 All-in@60','Facing a bet, a size that lands on the min raise reads Min');
+assert.equal(labels({kind:'raise',min:33,max:36.5,allIn:36.5,effective:36.5,pot:33,currentBet:16.5,toCall:16.5,preflop:false,bb:1,solved:[]}),'All-in@36.5','A raise putting in 67%+ of the stack folds into All-in, as the solver tree does');
+assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,currentBet:0,toCall:0,preflop:false,bb:1,solved:[]}),'1/3@21.8 All-in@61','River at low SPR: 2/3 pot (44 of 61 behind) is an all-in in the solver tree, so the bar offers only 1/3 and All-in');
  pass('Unsolved spots show every default bet size (1/3, 2/3, 1.5x pot, All-in), with sizes under the minimum bet shown at the minimum');}
 {const PL=require('./postflop-library.js'),PF=require('./preflop.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
  const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),share=i=>(i*7%5)/4,bets=['BET 33','BET 66','BET 150','BET 1000'],facing=b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(i=>[1-share(i),share(i)],2)});
