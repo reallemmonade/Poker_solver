@@ -17,8 +17,8 @@ function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,han
 // answers grade the exact action, correct when the solver plays it at least 5% of the time. A size the chart doesn't have
 // (an approximate grade) and chip-EV charts don't count, so they show no rating change.
 function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
- const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=!!row.rated&&Number.isFinite(row.loss),offSize=!!row.referenceSource&&freq!==null&&!!row.approximate,
-  chart=!!row.referenceSource&&freq!==null&&!row.approximate&&!/chip-EV chart/.test(row.referenceSource.name||''),mistake=gradeMistake(row),cost=gradeCost(row);
+ const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=!!row.rated&&Number.isFinite(row.loss),offSize=!!row.referenceSource&&freq!==null&&gradeApprox(row),
+  chart=!!row.referenceSource&&freq!==null&&!gradeApprox(row)&&!/chip-EV chart/.test(row.referenceSource.name||''),mistake=gradeMistake(row),cost=gradeCost(row);
  const opts=(row.options||[]).filter(o=>Number.isFinite(o.f)),top=Math.max(0,...opts.map(o=>o.f)),pc=x=>fmt(x*100,x<.1?1:0)+'%',word=l=>String(l||'').split(' ')[0].toLowerCase();
  let text='Not graded';
  if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
