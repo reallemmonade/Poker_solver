@@ -195,7 +195,7 @@ function planPlace(plan){return onDeviceRoute(plan)?'on this device':plan.cloud?
 function jobPlace(j){return j.target==='modal'?'The cloud':j.target&&j.target!=='mac'?'Your server':'Your Mac';}
 // A spot whose answer is already stored (preflop chart or flop library) needs no solve.
 // A stand-in flop does not count once your Mac has learned the real one.
-function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand)||hand.street===0&&learnedPreflop(hand))return true;if(hand.street===0){noteMissingPreflop(hand);return false;}const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
+function spotReferenceReady(hand){if(!hand||hand.done)return false;try{if(preflopReference(hand)||hand.street===0&&learnedPreflop(hand))return true;if(hand.street===0){noteMissingPreflop(hand);return false;}if(treeReference(hand))return true;const r=postflopLibraryReference(hand);return !!r&&!(r.solve?.library?.standIn&&learnedFlopReady(hand));}catch{return false;}}
 // The solve button, offered on every live spot: references show at once and a short solve starts; otherwise it
 // says where the solve runs and how long it takes (with an effort choice on heads-up NLH flops, where the extra
 // time buys a measurably closer solution), or in one line why this spot can't be solved.
@@ -241,6 +241,26 @@ async function loadSolveJobs(){try{const rows=await dbAll('meta');spotUI.jobs=ne
 // The latest solve sent for this spot. A cancelled one counts as none: you already know, and Solve this spot is offered again.
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found?.status==='cancelled'?null:found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
+// A heads-up flop or turn solve keeps its street's whole tree (PokerLocalSolver.streetTree): a later decision on
+// that street reads it instead of solving again, and the next street's solve starts from the ranges the played line
+// leaves. Trees are kept in memory by hand line (the earlier streets, the board, whose decision and their cards); a
+// Mac or cloud answer is read back from this device's saved answers once its job is done.
+spotUI.trees=new Map();spotUI.treeRows=new Set();spotUI.treeMemo=new WeakMap();
+function treeKey(o,street){return JSON.stringify([o.config,o.board.slice(0,street+2),o.actions.filter(a=>a.street<street).map(a=>[a.seat,a.street,a.kind,a.target||0]),o.actor,(o.heroCards||[]).slice().sort((a,b)=>a-b)]);}
+function rememberTree(result,observed){if(!result?.solve?.tree||!(observed?.board?.length>=3))return;spotUI.trees.set(treeKey(observed,observed.board.length-2),result);while(spotUI.trees.size>12)spotUI.trees.delete(spotUI.trees.keys().next().value);}
+function treeReference(hand){
+ if(!hand||hand.done||hand.street<1||!spotUI.trees.size||typeof PokerLocalSolver==='undefined')return null;const memo=spotUI.treeMemo.get(hand),at=hand.actionLog.length+'|'+hand.actor+'|'+spotUI.trees.size;if(memo?.at===at)return memo.r;
+ let r=null;const o=observedData(hand),saved=spotUI.trees.get(treeKey(o,hand.street));if(saved)try{r=PokerLocalSolver.treeAnswer(saved,o,hand);}catch{r=null;}spotUI.treeMemo.set(hand,{at,r});return r;}
+function treeRanges(hand){if(!hand||hand.street<2||typeof PokerLocalSolver==='undefined')return null;const o=observedData(hand),saved=spotUI.trees.get(treeKey(o,hand.street-1));if(!saved)return null;try{const ranges=PokerLocalSolver.treeCarry(saved,o,{seat:hand.actor,cards:hand.holes[hand.actor]});return ranges?{ranges,origin:'The '+['flop','turn'][hand.street-2]+' solve\'s ranges, narrowed by each player\'s '+['flop','turn'][hand.street-2]+' actions with the solved frequencies'}:null;}catch{return null;}}
+const sameAction=(a,b)=>a&&b&&a.seat===b.seat&&a.street===b.street&&a.kind===b.kind&&(a.target||0)===(b.target||0);
+// Reads the saved answers of done Mac and cloud solves from earlier in this hand (each once), for their trees.
+async function loadHandTrees(hand){
+ if(!hand||hand.done||hand.street<1)return false;let added=false;
+ for(const j of spotUI.jobs.values()){const o=j.observed;if(j.status!=='done'||!o?.board||o.board.length<3||spotUI.treeRows.has(j.rowId)||o.board.length>hand.board.length||o.actions.length>hand.actionLog.length||!o.board.every((c,i)=>c===hand.board[i])||!o.actions.every((a,i)=>sameAction(a,hand.actionLog[i])))continue;
+  spotUI.treeRows.add(j.rowId);let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
+  if(row?.key===j.key&&row.result?.solve?.tree){rememberTree(row.result,o);added=true;}}
+ return added;
+}
 // This device's id, so it cancels only the solves it sent.
 function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){id=Math.random().toString(36).slice(2,12);localStorage.setItem('citrus-device-id',id);}return id;}catch{return'';}}
 // Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
@@ -321,7 +341,7 @@ async function deliverSolveJob(force=false){
 async function gradeFromJobs(){for(const [key,item] of [...spotUI.gradeWaits]){const j=[...spotUI.jobs.values()].filter(x=>x.baseKey===key).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];if(!j||j.status==='failed'||j.status==='cancelled'){spotUI.gradeWaits.delete(key);continue;}if(j.status!=='done')continue;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
  if(!row||!validSpotResult(row.result))continue;spotUI.gradeWaits.delete(key);spotUI.cache.set(j.key,row.result);try{finishAnalysis(row.result,{...item,cacheKey:j.key,solveOptions:j.options});}catch{}}}
-addEventListener('citrus-synced',()=>loadSolveJobs().then(()=>{gradeFromJobs();deliverSolveJob();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
+addEventListener('citrus-synced',()=>loadSolveJobs().then(async()=>{gradeFromJobs();deliverSolveJob();await loadHandTrees(state.hand).catch(()=>false);if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
 function spotSourceStamp(snapshot){return JSON.stringify([snapshot?.format,snapshot?.id,snapshot?.episodes,snapshot?.decisions,snapshot?.createdAt,snapshot?.seedState,snapshot?.config,snapshot?.abstraction]);}
 function spotCacheKey(observed,options,extraAction,snapshot){const parts=['spot-v3',PokerSpot.publicKey(observed),options,extraAction],automatic=options.rangeMode==='auto'&&Array.from({length:observed.config.seats},(_,i)=>String(options.ranges[i]||'').trim()).some(text=>!text||/^auto$/i.test(text));if(automatic&&snapshot?.episodes>0&&observed.actions.length)parts.push(spotSourceStamp(snapshot));return JSON.stringify(parts);}
 function validSpotResult(r){
@@ -350,9 +370,12 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   const sourceReference=preflopReference(hand,regular,pending.quizQuestion?.referencePack)||(hand.street===0&&!pending.quizQuestion?learnedPreflop(hand):null);if(sourceReference&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length){if(extraAction&&T.matchAction(sourceReference.actions,extraAction)<0){sourceReference.actions.push(extraAction);sourceReference.reference.push(null);sourceReference.probs=sourceReference.reference;}if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:sourceReference};state.pending=null;lock();finishAnalysis(sourceReference,task);return;}
   // A flop solved on your Mac or in the cloud with every size answers instead of a library that has fewer sizes.
   if(pending.kind==='inspect'&&!pending.fullTree&&hand.street===1&&spotJob(hand)?.status==='done'){state.pending=null;lock();$('playFeedback').innerHTML='';deliverSolveJob(true);return;}
+  // A later decision on a street your Mac, the cloud or this computer's bridge already solved reads that solve's tree.
+  if(!pending.fullTree&&!pending.force&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length&&hand.street>=1){await loadHandTrees(hand);if(state.pending!==task)return;const fromTree=treeReference(hand);if(fromTree&&!(extraAction&&T.matchAction(fromTree.actions,extraAction)<0)){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:fromTree};state.pending=null;lock();finishAnalysis(fromTree,task);return;}}
   const libraryReference=!pending.fullTree&&!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?postflopLibraryReference(hand):null;if(libraryReference&&!(extraAction&&T.matchAction(libraryReference.actions,extraAction)<0&&!libraryReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:libraryReference};state.pending=null;lock();finishAnalysis(libraryReference,task);return;}
   const turnReference=!opts.ranges.some(x=>x.trim())&&!opts.rootSizes.length?await turnLibraryReference(hand):null;if(state.pending!==task)return;if(turnReference&&!(extraAction&&T.matchAction(turnReference.actions,extraAction)<0&&!turnReference.actions.some(a=>a.kind===extraAction.kind))){if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey,options:opts,result:turnReference};state.pending=null;lock();finishAnalysis(turnReference,task);return;}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const context=await requestSolvedPolicy(hand);if(state.pending!==task)return;if(context?.conditionedRanges?.every(Boolean)){opts.ranges=context.conditionedRanges;opts.rangeOrigin='Conditioned on the preceding exact strategy and public actions';cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
+  if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){await loadHandTrees(hand);if(state.pending!==task)return;const carried=treeRanges(hand);if(carried){opts.ranges=carried.ranges;opts.rangeOrigin=carried.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const carried=await carriedPostflopRanges(hand);if(state.pending!==task)return;if(carried){opts.ranges=carried.ranges;opts.rangeOrigin=carried.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const chart=chartPostflopRanges(hand,observed,opts);if(chart){opts.ranges=chart.ranges;opts.rangeOrigin=chart.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   let cached=spotUI.cache.get(cacheKey);if(!pending.force&&!cached)cached=await getSavedSpot(cacheKey);

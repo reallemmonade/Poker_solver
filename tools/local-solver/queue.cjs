@@ -77,6 +77,9 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'},at())]});return;}
   const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost:costOf(started.startedAt)}:{},message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
+  // The street's kept tree (studio/local-solver.js streetTree) is left off an answer that would pass the account's
+  // 256 KB a record, which would refuse the whole push: later decisions then solve again.
+  if(ok&&result.solve?.tree&&Buffer.byteLength(JSON.stringify({result,observed:job.observed,options:job.options}))>240000)delete result.solve.tree;
   if(ok)rows.push({store:'solves',id:job.rowId,t:Date.now(),data:{id:job.rowId,key:job.key,result,observed:job.observed,options:job.options,extraAction:job.extraAction||null,updatedAt:new Date().toISOString()}});
   rows.push(meta(id,done,at()));jobs.set(id,done);await api('POST','/api/sync',{rows});log((ok?'Solved ':'Could not solve ')+id+' in '+Math.round((done.finishedAt-done.startedAt)/1000)+' s'+(ok?'.':': '+done.message));
  }

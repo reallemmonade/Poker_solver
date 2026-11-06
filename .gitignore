@@ -22,6 +22,7 @@
 !/tools/local-solver/install-linux.sh
 !/tools/local-solver/start.command
 !/tools/local-solver/check-bridge.cjs
+!/tools/local-solver/check-tree.cjs
 !/tools/local-solver/spot-worker.cjs
 !/tools/local-solver/queue.cjs
 !/tools/local-solver/queue-worker.cjs

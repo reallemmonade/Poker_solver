@@ -265,6 +265,97 @@
   return out;
  }
 
+ // A heads-up flop or turn solve already holds every later decision on its street: TexasSolver dumps that street's
+ // whole tree. It is kept with the answer (streetTree), so a later decision on the street reads it (treeAnswer)
+ // instead of solving again, and the next street's solve starts from the ranges the played line leaves (treeCarry).
+ // It holds each player's combos once, then the action nodes breadth first: the line from the street's start in
+ // TexasSolver's labels, whose turn, the actions, and every combo's mix as 0-255 per action in base64. It stops at
+ // about TREE_BYTES, so the answer stays under the account's 256 KB a record; a line past that solves again.
+ // The next street is not in it: the dump stops at the street's end, and a flop solve plays later streets with
+ // one bet size, so the turn gets its own solve with every size.
+ const TREE_BYTES=100000,B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+ function b64(bytes){let out='';for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2],n=a<<16|(b||0)<<8|(c||0);out+=B64[n>>18&63]+B64[n>>12&63]+(i+1<bytes.length?B64[n>>6&63]:'=')+(i+2<bytes.length?B64[n&63]:'=');}return out;}
+ function unb64(text){const clean=text.replace(/=+$/,''),out=new Uint8Array(Math.floor(clean.length*3/4));let bits=0,value=0,k=0;for(const ch of clean){value=value<<6|B64.indexOf(ch);bits+=6;if(bits>=8){bits-=8;out[k++]=value>>bits&255;}}return out;}
+ function streetTree(tree,s,budget=TREE_BYTES){
+  const oop=tree.player,combos={},nodes=[],queue=[[tree,'']];let size=0;
+  for(let q=0;q<queue.length;q++){
+   const [node,line]=queue[q];if(!node||node.node_type!=='action_node'||!node.strategy?.strategy||!Array.isArray(node.actions))continue;
+   const who=node.player===oop?'oop':'ip',table=node.strategy.strategy,list=combos[who]||(combos[who]=Object.keys(table).filter(c=>COMBO.test(c))),A=node.actions.length,out=new Uint8Array(list.length*A);
+   list.forEach((c,i)=>{const row=table[c];if(!Array.isArray(row)||row.length!==A)return;const t=row.reduce((x,y)=>x+(y>0?y:0),0);if(!(t>0))return;let left=255,best=0;row.forEach((p,a)=>{if(p>row[best])best=a;});row.forEach((p,a)=>{if(a===best)return;const v=Math.min(left,Math.max(0,Math.round(p/t*255)));out[i*A+a]=v;left-=v;});out[i*A+best]=left;});
+   const table64=b64(out);size+=table64.length+line.length+40;if(size>budget)break;
+   nodes.push({line,player:who,actions:node.actions.slice(),table:table64});
+   for(const a of node.actions){const child=node.childrens&&node.childrens[a];if(child)queue.push([child,line?line+'/'+a:a]);}
+  }
+  if(!nodes.length||!combos.ip&&!combos.oop)return null;
+  return{v:1,board:s.board.slice(),pot:s.pot,stack:s.stack,ranges:{ip:s.rangeIp,oop:s.rangeOop},combos:{ip:(combos.ip||[]).join(','),oop:(combos.oop||[]).join(',')},nodes};
+ }
+ // One street's line as tree steps, the way spec builds the solved line: each action's kind and the chips it
+ // adds, with who is in and out of position and the effective stack at the street's start. null unless heads-up.
+ function streetLine(data,street){
+  const config=G.normalize(data.config),h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[],paid={};let start=null,facing=0;
+  const open=()=>{if(start)return;const live=h.living();if(live.length!==2)return start=false;const after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));start={ip,oop,stack:Math.min(h.stacks[ip],h.stacks[oop])};};
+  for(const a of data.actions){
+   if(h.street===street)open();
+   if(a.street===street){if(!start)return null;
+    if(a.kind==='check')path.push({kind:'check'});
+    else if(a.kind==='call'){path.push({kind:'call'});paid[a.seat]=facing;}
+    else if(a.kind==='fold')return null;
+    else{const target=a.target;path.push({kind:facing?'raise':'bet',amount:target-(paid[a.seat]||0),allIn:target>=start.stack});paid[a.seat]=target;facing=target;}}
+   h.act(a);
+  }
+  if(h.street===street)open();
+  return start?{...start,path,hand:h}:null;
+ }
+ const treeMaps=new WeakMap();
+ function treeNodes(saved){let m=treeMaps.get(saved);if(!m){m=new Map(saved.nodes.map(n=>[n.line,n]));treeMaps.set(saved,m);}return m;}
+ // Follows a line through a kept tree with follow's size tolerance: every step's node, and the node it ends on
+ // (null at the street's end or past what was kept). null when the line leaves the tree.
+ function walkTree(saved,path){
+  const map=treeNodes(saved),steps=[];let at='';
+  for(const step of path){
+   const node=map.get(at);if(!node)return null;const labels=node.actions;let key;
+   if(step.kind==='check'||step.kind==='call')key=labels.find(l=>l===step.kind.toUpperCase());
+   else{const options=labels.filter(l=>l.startsWith(step.kind.toUpperCase()+' ')).map(l=>({l,amount:parseFloat(l.split(' ')[1])})),best=options.sort((a,b)=>Math.abs(a.amount-step.amount)-Math.abs(b.amount-step.amount))[0];if(best&&(Math.abs(best.amount-step.amount)<=Math.max(2,.01*step.amount)||step.allIn&&best.amount===Math.max(...options.map(o=>o.amount))))key=best.l;}
+   if(!key)return null;steps.push({node,i:labels.indexOf(key)});at=at?at+'/'+key:key;
+  }
+  return{line:at,node:map.get(at)||null,steps};
+ }
+ const treeLists=new WeakMap();
+ function treeCombos(saved,who){let m=treeLists.get(saved);if(!m){m={};treeLists.set(saved,m);}return m[who]||(m[who]=saved.combos[who]?saved.combos[who].split(','):[]);}
+ function treeTable(saved,node){const list=treeCombos(saved,node.player),A=node.actions.length,t=node.bytes||(node.bytes=unb64(node.table)),out={};list.forEach((c,i)=>{let s=0;const r=[];for(let a=0;a<A;a++){r.push(t[i*A+a]);s+=t[i*A+a];}if(s>0)out[c]=r.map(x=>x/s);});return out;}
+ // Each combo's weight for one player after the line's steps: its starting class weight times how often it took
+ // each of that player's actions along the line.
+ function treeReach(saved,who,steps){
+  const start=saved.ranges[who]||{},w=new Map();for(const c of treeCombos(saved,who)){const x=start[C.handClass(C.cards(c))];if(x>0)w.set(c,x);}
+  for(const {node,i}of steps){if(node.player!==who)continue;const table=treeTable(saved,node);for(const [c,x]of w)w.set(c,x*(table[c]?table[c][i]:0));}
+  return w;
+ }
+ function reachText(w,keep=null){const top=Math.max(0,...w.values());if(!(top>0))return null;if(keep&&w.has(keep))w.set(keep,Math.max(w.get(keep),.01*top));let n=0;const parts=[];for(const [c,x]of w){const v=x/top;if(v<.001)continue;n+=v;parts.push(c+(v>=.9995?'':':'+(Math.round(v*1000)/1000)));}return parts.length?{text:parts.join(','),combinations:Math.round(n*10)/10}:null;}
+ const comboKey=cards=>cards.slice().sort((a,b)=>a-b).map(C.cardName).join('');
+ const findCombo=(table,key)=>table[key]?key:table[key.slice(2)+key.slice(0,2)]?key.slice(2)+key.slice(0,2):null;
+ // A later decision on a kept street, answered from the tree as the first solve's own answer would be; null when
+ // the line left the tree, or it is the other player's turn in it, or the hand is not in the solved range.
+ function treeAnswer(result,data,hand){
+  const saved=result?.solve?.tree,street=data.board.length-2;if(!saved||saved.v!==1||saved.board.length!==data.board.length||saved.board.join()!==data.board.map(C.cardName).join())return null;
+  const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w?.node||w.node.player!==(data.actor===line.ip?'ip':'oop'))return null;
+  const table=treeTable(saved,w.node),key=findCombo(table,comboKey(data.heroCards));if(!key)return null;
+  const {actions,probs,index}=mapActions(hand,w.node,table[key],saved),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
+  const q=result.solve,sources=new Map((q.rangeAssumptions||[]).map(r=>[r.seat,r.source])),rangeAssumptions=[];
+  for(const [seat,who]of [[line.ip,'ip'],[line.oop,'oop']]){const r=reachText(treeReach(saved,who,w.steps),who===w.node.player?key:null);if(!r)return null;rangeAssumptions.push({seat,range:r.text,combinations:r.combinations,source:(sources.get(seat)||'Solved range')+', narrowed by this street\'s actions with the solved frequencies'});}
+  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:result.units||(hand.config.mode==='cash'?'bb':'prize units'),ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
+   solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
+    warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+String(q.warning||'')}};
+ }
+ // Both players' ranges for the next street's solve, narrowed by the kept street's whole line with the solved
+ // frequencies, as combo ranges by seat ('' for everyone else); null when the line left the tree.
+ function treeCarry(result,data,hero=null){
+  const saved=result?.solve?.tree;if(!saved||saved.v!==1)return null;const street=saved.board.length-2;if(data.board.length-2!==street+1||saved.board.join()!==data.board.slice(0,saved.board.length).map(C.cardName).join())return null;
+  const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w||w.node||!line.path.length)return null;
+  const ranges=Array(G.normalize(data.config).seats).fill(''),own=hero?comboKey(hero.cards):null;
+  for(const [seat,who]of [[line.ip,'ip'],[line.oop,'oop']]){const list=treeCombos(saved,who),mine=own&&seat===hero.seat?list.find(c=>c===own||c===own.slice(2)+own.slice(0,2))||null:null,r=reachText(treeReach(saved,who,w.steps),mine);if(!r)return null;ranges[seat]=r.text;}
+  return ranges;
+ }
+
  // The PLO solver's tree: actions carry the street total ("to") they bet or raise to.
  function followPLO(tree,path){
   let node=tree;
@@ -356,8 +447,9 @@
    if(this.spec.game==='PLO4')return resultPLO(this);
    if(this.spec.game==='NLH3')return resultMW(this);
    const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length),combos:comboMix(node.strategy.strategy,index,actions.length)};}catch{}
+   let tree=null;try{tree=streetTree(this.body.tree,this.spec);}catch{}
    return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
-    solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
+    solve:{version:1,method:'local-texassolver',...tree?{tree}:{},exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
      warning:'Solved by TexasSolver on this computer for the ranges shown, with the listed bet sizes on every later street. Exploitability is the solver\'s own estimate, in percent of the pot. It does not report action EVs, so no decision cost is graded.'+chipCaveat(this.hand.config)}};
   }
  }
@@ -417,6 +509,6 @@
    solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,streetTree,streetLine,walkTree,treeAnswer,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
