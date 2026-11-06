@@ -79,20 +79,17 @@
  function reasons(x){
   const out=[],A=x.actions,labels=x.labels,board=x.board,facing=A.some(a=>a.kind==='fold'||a.kind==='call'),river=board.length>=5,turn=board.length===4;
   const freq=x.mine&&x.mix?rangeFrequencies(x.mine,x.mix,A,board):null,bet=freq?A.reduce((s,a,i)=>s+(aggressive(a)?freq[i]:0),0):null;
-  // 1. What the whole range does.
-  if(freq){
-   const top=freq.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).filter(([p])=>p>=.05).slice(0,3).map(([p,i])=>labels[i]+' '+pct(p)).join(', ');
-   out.push({k:'range',t:(facing?'Your range here: ':bet<.25?'Your range mostly checks: ':bet>.6?'Your range bets a lot: ':'Your range mixes: ')+top+'.'});
-   // Which sizes it uses and which hands bet, straight from the numbers so the sentence can't disagree with them.
-   if(bet>=.1){
-    const sizes=A.map((a,i)=>[freq[i],i]).filter(([p,i])=>aggressive(A[i])&&p>=.03).sort((a,b)=>b[0]-a[0]).map(([p,i])=>labels[i]+' '+pct(p));
-    const cats=x.mix?betByCategory(x.mine,x.mix,A,board):null,NAME={strong:'two pair or better',top:'top pair',pair:'weaker pairs',air:'no pair'};
-    let t=(facing?'When you raise: ':'When you bet: ')+sizes.join(', ')+'.';
-    if(cats){const parts=['strong','top','pair','air'].filter(c=>cats[c]?.share>=.03).map(c=>NAME[c]+' '+pct(cats[c].rate));
-     if(parts.length>=2)t+=' How often each part of your range '+(facing?'raises':'bets')+': '+parts.join(', ')+'.';
-     const s=cats.strong?.rate,p=cats.pair?.rate,a=cats.air?.rate;
-     if(s!=null&&p!=null&&a!=null&&cats.pair.share>=.05&&s-p>=.25&&a-p>=.15)t+=' Strong hands and bluffs bet, weaker pairs check.';}
-    out.push({k:'size',t});}
+  // 1. How the range bets, as a reason (the frequencies are already on screen, so no numbers here).
+  if(freq&&bet>=.1){
+   const smallShare=A.reduce((t,a,i)=>t+(aggressive(a)&&(x.tones?.[i]==='bet1'||/1\/[34]|1\/2/.test(labels[i]||''))?freq[i]:0),0)/bet;
+   const cats=x.mix?betByCategory(x.mine,x.mix,A,board):null,r=c=>cats?.[c]&&cats[c].share>=.03?cats[c].rate:null;
+   const s=r('strong'),tp=r('top'),p=r('pair'),a=r('air'),polar=s!=null&&p!=null&&a!=null&&s-p>=.25&&a-p>=.15;
+   let t='';
+   if(facing)t=polar?'You raise your strongest hands and some bluffs, and just call with the middle: a raise only gets called by better.':'';
+   else if(polar)t=river?'You bet your strongest hands for value and missed hands as bluffs, and check middling pairs: they win some showdowns but worse hands won’t call a bet.':'You bet your strongest hands and your bluffs, and check middling pairs to keep the pot small.';
+   else if(smallShare>=.6&&bet>.5)t='You bet small and often: your whole range is ahead enough that a cheap bet makes their weak hands fold or pay.';
+   else if(smallShare<.4&&tp!=null&&tp>=.5)t='Bets are big because your value hands are strong enough to want a big pot, and big bets give your bluffs more fold equity.';
+   if(t)out.push({k:'size',t});
   }
   // 2. Who the board favours, by top pair or better and by two pair or better.
   if(x.mine&&x.theirs){
@@ -102,13 +99,13 @@
     const diff=me.topPlus-them.topPlus,showNut=Math.max(me.strong,them.strong)>=.03,nut=showNut?me.strong-them.strong:0;
     const side=v=>Math.abs(v)<.03?0:Math.sign(v),dS=Math.abs(diff)<.04?0:Math.sign(diff),nS=side(nut);
     const who=dS&&nS&&dS!==nS?(dS>0?'You have more top pairs, they have more strong hands':'They have more top pairs, you have more strong hands'):(dS||nS)===0?'Board hits both ranges about evenly':(dS||nS)>0?'Board favours you':'Board favours them';
-    let t=who+': top pair or better is '+pct(me.topPlus)+' of your range, '+pct(them.topPlus)+' of theirs';
-    if(showNut)t+='; two pair or better '+pct(me.strong)+' vs '+pct(them.strong);
+    const so=bet==null?'':who==='Board favours you'&&bet>=.5?', so you can bet a lot':who==='Board favours them'&&bet<.5?', so you check more':'';
+    let t=who+' (top pair or better '+pct(me.topPlus)+' vs '+pct(them.topPlus)+(showNut?', two pair or better '+pct(me.strong)+' vs '+pct(them.strong):'')+')'+(facing?'':so);
     out.push({k:'adv',t:t+'.'});x._draws=[me.draw,them.draw];
    }
   }
   // 3. Board texture.
-  const tex=textureWords(board),draws=x._draws&&Math.max(...x._draws)>=.08?' Draws are '+pct(x._draws[0])+' of your range, '+pct(x._draws[1])+' of theirs.':'';
+  const tex=textureWords(board),draws=x._draws&&Math.max(...x._draws)>=.08?(x._draws[0]>x._draws[1]*1.3?' You have more of the draws, so you can bet them as semi-bluffs.':x._draws[1]>x._draws[0]*1.3?' They have more of the draws, so charge them to see the next card.':' Both ranges have draws, so the next card can change who is ahead.'):'';
   const after=river?(tex.wet?' No cards to come, so missed draws can only win by bluffing.':''):tex.dry?' Few draws, so whoever is ahead now tends to stay ahead.':draws||(tex.wet?(turn?' Many draws, so the river can change who is ahead.':' Many draws, so the next cards can change who is ahead.'):'');
   out.push({k:'board',t:board.map(cardText).join(' ')+': '+(tex.words.length?tex.words.join(', '):tex.highName)+'.'+after});
   // 4. Stack-to-pot ratio.
@@ -126,9 +123,17 @@
    const flushSuits=[0,1,2,3].filter(s=>board.filter(c=>suit(c)===s).length>=2),topRank=Math.max(...board.map(rank));let block='';
    for(const c of x.hero){if(!block&&!k.flushDraw&&k.cat!=='strong'&&rank(c)===12&&flushSuits.includes(suit(c)))block='blocks their nut flush draws';if(!block&&k.cat==='air'&&rank(c)===topRank)block='blocks some of their top pairs';}
    let t='Your '+x.hero.map(cardText).join('')+': '+bits.join(' with ')+(block?', '+block:'');
-   if(x.heroMix){const best=x.heroMix.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0])[0];t+='. '+labels[best[1]]+' '+pct(best[0])+(freq?' (range '+pct(freq[best[1]])+')':'');}
-   if(x.heroMix&&freq){const pass=A.reduce((s,a,i)=>s+(aggressive(a)?0:x.heroMix[i]),0);if(k.cat==='air'&&!draw&&pass>.7&&bet>=.3)t+='. Worse hands fold and better ones call, so it checks';}
-   out.push({k:'hand',t:t+'.'});
+   if(x.heroMix){
+    const order=x.heroMix.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]),main=A[order[0][1]],kind=aggressive(main)?(facing?'raise':'bet'):main.kind,c=k.cat,made=c!=='air';
+    let why='';
+    if(kind==='bet'||kind==='raise')why=c==='strong'||c==='top'?'strong enough to '+kind+' for value: worse hands still call':c==='pair'?kind+'s thin for value: worse pairs'+(river?'':' and draws')+' still call':draw&&!river?kind+'s as a semi-bluff: it can improve if called':kind+'s as a bluff: it rarely wins at showdown'+(block?' and its blocker makes their strong hands less likely':'');
+    else if(kind==='check')why=c==='strong'?'checks to trap: it keeps their bluffs and weaker hands in':c==='top'||c==='pair'?'checks: it often wins at showdown, but worse hands won’t call a bet':river?'gives up: worse hands fold to a bet and better ones call':'checks: worse hands fold and better ones call, so a bet does little';
+    else if(kind==='call')why=made?'calls: it beats enough of their bluffs to pay off':draw&&!river?'calls: the price is right to draw':'calls as a bluff-catcher: it beats their missed draws';
+    else if(kind==='fold')why='folds: it loses to most of their betting range';
+    if(why)t+='. '+why[0].toUpperCase()+why.slice(1);
+    if(order[1]&&order[1][0]>=.25)t+='. It mixes in '+labels[order[1][1]]+' because the two plays are close';
+   }
+   out.unshift({k:'hand',t:t+'.'});
    if(x.heroWeight!=null&&x.heroWeight<.02)out.push({k:'rare',t:'Your preflop chart almost never gets '+x.heroClass+' here, so this hand’s advice is less settled.'});
   }
   return out;
