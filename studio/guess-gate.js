@@ -23,9 +23,10 @@ function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
  let text='Not graded';
  if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
  else if(offSize){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text=same&&same.f>=chartMistakeFrequency?'Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')':'Size not in the chart · not graded';}
+ else if(chart&&gradeSizeOnly(row)){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text='Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')';}
  else if(chart)text=mistake?'Rare · solver plays it '+pc(freq):freq>=top-1e-9?'Best play · '+pc(freq):'Mixed · solver plays it '+pc(freq);
- let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,s=PokerRating.score({mistake,cost:solved?cost:null});elo=Math.round((r.n<PokerRating.PROVISIONAL?40:16)*(s-PokerRating.expected(now,PokerRating.SPOT[row.street]??1500)));}catch{}}
- return{text,elo,cls:!(chart||solved)?(offSize?'ok':'none'):!mistake?'good':solved&&cost<1?'ok':'bad'};}
+ let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,s=PokerRating.score({mistake,cost:solved?cost:null,sizeOnly:!solved&&gradeSizeOnly(row)});elo=Math.round((r.n<PokerRating.PROVISIONAL?40:16)*(s-PokerRating.expected(now,PokerRating.SPOT[row.street]??1500)));}catch{}}
+ return{text,elo,cls:!(chart||solved)?(offSize?'ok':'none'):!mistake?'good':gradeSizeOnly(row)?'ok':solved&&cost<1?'ok':'bad'};}
 function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
 // renderPlay asks for the analysis pane's content through this. body() builds the normal content.
 function guessGateHTML(h,solved,q,body){

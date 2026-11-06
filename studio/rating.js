@@ -4,7 +4,8 @@
   // solver or chart rather than from chips won, so card luck doesn't move it. Each graded decision is one game
   // against the spot: preflop chart spots are rated 1200, postflop solved spots 1500. The score is 1 for a
   // decision that isn't a mistake, e^(-bb lost) for a solver-measured mistake, and 0 for a chart mistake or a
-  // mistake without a bb cost (ICM). Rating settles where the expected score matches your average score.
+  // mistake without a bb cost (ICM), except
+  // half (0.5) for the right action at a size the chart or library rarely uses (sizeOnly). Rating settles where the expected score matches your average score.
   // A decision: {at (ms), mode ('cash'|'icm'), seats, street, mistake, cost (bb or null)} (leakDecisions in leak-drills.js).
   const START=1200,SPOT=[1200,1500,1500,1500],PROVISIONAL=30,K_NEW=40,K=16;
   const CATEGORIES=[
@@ -12,7 +13,7 @@
     {id:'mtt',label:'MTT',test:d=>d.mode==='icm'},
     {id:'cash',label:'Cash',test:d=>d.mode!=='icm'},
     {id:'hu',label:'Heads-up',test:d=>d.seats===2}];
-  const score=d=>!d.mistake?1:d.cost>0?Math.exp(-d.cost):0;
+  const score=d=>!d.mistake?1:d.cost>0?Math.exp(-d.cost):d.sizeOnly?.5:0;
   const expected=(r,spot)=>1/(1+Math.pow(10,(spot-r)/400));
   function rate(decisions){
     const rows=decisions.filter(d=>Number.isFinite(d.at)).sort((a,b)=>a.at-b.at);let r=START,peak=START,total=0;const history=[];
