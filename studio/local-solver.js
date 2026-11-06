@@ -40,8 +40,10 @@
   // 7.5 GB and 3x the time on a 100bb flop.
   const sizes={};for(const who of ['ip','oop']){sizes[who]={};for(let s=street;s<3;s++){const bet=street===0&&s>0?[LOCAL_TREE.later[s-1]]:LOCAL_TREE.bet[s];sizes[who][STREETS[s]]={bet:bet.slice(),raise:s===0?[LOCAL_TREE.raise]:[],donk:[]};}}
   // The 1bb minimum bet: TexasSolver's console has no minimum of its own, so a
-  // default size below it in a small pot becomes exactly 1bb.
-  const minBet=G.units(config.bb);for(const who of ['ip','oop']){const b=sizes[who][STREETS[street]];b.bet=b.bet.map(p=>p*pot/100<minBet?round(100*minBet/pot):p);}
+  // default size below it in a small pot (1/3 of a limped 2bb pot) becomes exactly
+  // 1bb, on every street of the solve (a checked-through street keeps the pot this
+  // small). Sizes that land on the same percentage after this are kept once.
+  const minBet=G.units(config.bb);for(const who of ['ip','oop'])for(let s=street;s<3;s++){const b=sizes[who][STREETS[s]];for(const k of ['bet','donk'])b[k]=[...new Set(b[k].map(p=>p*pot/100<minBet?round(100*minBet/pot):p))];}
   let allinThreshold=LOCAL_TREE.allinThreshold;
   // Add the sizes actually used on this street so the real line exists in the tree.
   const path=[],paid={[ip]:0,[oop]:0};let facing=0;

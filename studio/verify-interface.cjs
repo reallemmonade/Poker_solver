@@ -80,7 +80,7 @@ function pass(text){console.log('PASS '+text);count++;}
 // clamps beyond its sizes, sends a jam to the all-in, a bigger price than the node's tightens the defence toward MDF, and a
 // smaller one widens it (fold share x alpha(real)/alpha(node)).
 {const AB=require('./action-bar.js'),r={min:1,max:145.2,allIn:145.2,effective:180,pot:2.5,currentBet:0,toCall:0,preflop:false,bb:1,solved:[]},labels=x=>AB.presets(x).map(p=>p.label+'@'+p.target).join(' ');
- assert.equal(labels(r),'1/3@1 2/3@1.65 1.5x@3.75 All-in@145.2','An unsolved limped pot keeps every default size, 1/3 at the minimum bet');
+ assert.equal(labels(r),'Min@1 2/3@1.65 1.5x@3.75 All-in@145.2','An unsolved limped pot keeps every default size; 1/3 pot is under the 1bb minimum, so it bets 1bb and reads Min');
  assert.equal(labels({...r,pot:20}),'1/3@6.6 2/3@13.2 1.5x@30 All-in@145.2');
  assert.equal(labels({...r,pot:20,solved:[6.6,145.2]}),'1/3@6.6 2/3@13.2 1.5x@30 All-in@145.2','A flop library solved with only 1/3 and all-in still offers 2/3 and 1.5x pot');
  assert.equal(labels({...r,preflop:true,pot:1.5,min:2,solved:[2.5,7]}),'2.5x@2.5 7x@7','Preflop, the chart\'s solved sizes still lead when it has two or more');
@@ -88,6 +88,12 @@ function pass(text){console.log('PASS '+text);count++;}
 assert.equal(labels({kind:'raise',min:33,max:36.5,allIn:36.5,effective:36.5,pot:33,currentBet:16.5,toCall:16.5,preflop:false,bb:1,solved:[]}),'All-in@36.5','A raise putting in 67%+ of the stack folds into All-in, as the solver tree does');
 assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,currentBet:0,toCall:0,preflop:false,bb:1,solved:[]}),'1/3@21.8 All-in@61','River at low SPR: 2/3 pot (44 of 61 behind) is an all-in in the solver tree, so the bar offers only 1/3 and All-in');
  pass('Unsolved spots show every default bet size (1/3, 2/3, 1.5x pot, All-in), with sizes under the minimum bet shown at the minimum');}
+// A flop library's all-in is this hand's all-in even when the library was solved shallower than the hand (a 99bb library shove
+// in a 167bb-vs-102bb limped pot read "Bet 4950%"), and its bets under the 1bb minimum bet the minimum.
+{const PL=require('./postflop-library.js'),h=new G.Hand({seats:2,sb:.5,bb:1,mode:'cash',stacks:[168,103]},{rng:G.rng(5)});h.act({kind:'call'});h.act({kind:'check'});h.act({kind:'check'});
+ const scale=h.pot/100,node={actions:['CHECK','BET 33','BET 66','BET 4950']},targets=f=>PL.libraryActions(h,node,[.25,.25,.25,.25],scale,f).actions.map(a=>a.target||0);
+ assert.deepEqual(targets({jamAt:4950*scale}),[0,G.units(1),132,h.legal().allInTo],'Library all-in maps to the hand\'s all-in; 1/3 of 2bb bets the 1bb minimum');
+ pass('Flop library bets respect the 1bb minimum and its all-in stays all-in at any stack depth');}
 {const PL=require('./postflop-library.js'),PF=require('./preflop.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
  const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),share=i=>(i*7%5)/4,bets=['BET 33','BET 66','BET 150','BET 1000'],facing=b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(i=>[1-share(i),share(i)],2)});
  const flop={nodes:[{path:'',player:'oop',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},{path:'CHECK',player:'ip',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},...bets.map(facing)]};

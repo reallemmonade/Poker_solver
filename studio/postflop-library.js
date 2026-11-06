@@ -64,7 +64,7 @@
     label=best.a;add(real,p,s.amount);add(lib,p,best.amount);}
    if(!label)return null;path+=(path?'/':'')+label;node=nodes.get(path);
   }
-  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9||wide<1-1e-9,k:k<1-1e-9?k:1,wide:wide<1-1e-9?wide:1,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid)}:null;
+  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9||wide<1-1e-9,k:k<1-1e-9?k:1,wide:wide<1-1e-9?wide:1,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid),jamAt:lib.stack-lib.paid[steps.length%2]}:null;
  }
 
  // Answers the current flop decision from the library, or returns null. range is
@@ -97,7 +97,7 @@
   if(!r)return null;const standIn=key!==c.key;
   // A bigger price than the node's tightens this combo's defence (and the range grid's) toward MDF, a smaller one widens it.
   let cut=null;if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),spot.game==='PLO4'?null:C.cards(key));r=cut(at,r);}
-  const {actions,probs,index}=libraryActions(hand,found.node,r,scale),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,mv,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),hand.board)};
+  const {actions,probs,index}=libraryActions(hand,found.node,r,scale,found),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,mv,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),hand.board)};
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[[ip,'ip'],[oop,'oop']].map(([seat,p])=>({seat,range:spot.game==='PLO4'?'Chart range':reachText(reachOf(spot,flop,p,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),C.cards(key)),source})),
@@ -223,12 +223,15 @@
   for(const a of hand.actionLog.filter(a=>a.street===street)){if(['bet','raise'].includes(a.kind)){steps.push({kind:a.kind,amount:a.target-paid[a.seat],allIn:!!a.allIn});paid[a.seat]=a.target;facing=a.target;}else{steps.push({kind:a.kind});if(a.kind==='call')paid[a.seat]=facing;}}
   return steps;
  }
- // A solved node's actions as this hand's legal actions, with the hero's frequencies r.
- function libraryActions(hand,node,r,scale){
-  const legal=hand.legal(),actions=[],probs=[],index=[];
+ // A solved node's actions as this hand's legal actions, with the hero's frequencies r. Bets below the
+ // 1bb minimum become the minimum bet. The library's all-in (chips that put in its whole stack, found.jamAt
+ // from walk) is this hand's all-in, whatever the stacks: a library solved at 100bb answering a deeper
+ // hand would otherwise offer a 99bb "bet" that is really the shove (and read as a 4950% pot bet).
+ function libraryActions(hand,node,r,scale,found=null){
+  const legal=hand.legal(),actions=[],probs=[],index=[],jamAt=found&&Number.isFinite(found.jamAt)?found.jamAt:Infinity;
   node.actions.forEach((label,i)=>{const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};else if(kind==='CHECK')action={kind:'check',label:'Check'};else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
-   else{const k=hand.currentBet?'raise':'bet',target=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(parseFloat(amount)*scale)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   else{const k=hand.currentBet?'raise':'bet',chips=parseFloat(amount)*scale,top=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo),target=chips>=jamAt*.999?top:Math.min(top,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(chips)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
    action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
   return{actions,probs,index};
  }
@@ -295,7 +298,7 @@
   const found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb),false,line.at);if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
   const cards=hand.holes[hand.actor].map(line.move);let r=row(found.node,comboIndex(cards)),cut=null;if(!r)return null;
   if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]);r=cut(comboIndex(cards),r);}
-  const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,line.move,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),hand.board)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
+  const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale,found),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,line.move,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),hand.board)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix,...line.offTree||found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:t.flop.iterations||0,exploitability:t.flop.exploitability,seconds:0,rangeAssumptions:[[t.ip,'ip'],[t.oop,'oop']].map(([seat,p])=>({seat,range:reachText(reachOf(t.spot,null,p,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]),source})),
     library:{spot:t.spot.label,flop:t.key,turn:line.prefix.split('|')[1],standIn:false,line:line.prefix+(found.path?'/'+found.path:''),sizesMatched:!substituted,scale:t.scale},
@@ -315,6 +318,6 @@
   if(!apply(chunk.nodes,line.flop.path)||!apply(line.turn.nodes,turn.path))return null;
   return weights;
  }
- const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry};
+ const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry,libraryActions};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerPostflopLibrary=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
