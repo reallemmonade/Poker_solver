@@ -9,7 +9,11 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // A chip-EV chart standing in for an ICM table does not model the payouts, and an approximate (off-tree size) answer is not
 // the chart's own, so their choices are shown but never counted as mistakes. A decision made after looking at the analysis
 // (peeked) always counts, at no measured cost: needing to look means the spot isn't known yet.
-function gradeMistake(g){return g.peeked?true:g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+// A flop-library answer from a stand-in flop (the nearest solved flop of the same texture, your cards moved to match) grades
+// like the library itself; only a size the library lacks (sizesMatched false) or an off-tree size is approximate.
+// Older grades marked stand-ins approximate, so this reads the stored solve instead of trusting the flag.
+function gradeApprox(g){return!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
 function gradeSizeOnly(g){if(!g||g.peeked||!g.referenceSource||!gradeMistake(g)||!Array.isArray(g.options))return false;const word=l=>String(l||'').split(' ')[0].toLowerCase(),mine=word(g.label||g.options[g.choice]?.label);
