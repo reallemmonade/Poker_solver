@@ -10,6 +10,10 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // the chart's own, so their choices are shown but never counted as mistakes. A decision made after looking at the analysis
 // (peeked) always counts, at no measured cost: needing to look means the spot isn't known yet.
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+// A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
+// the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
+function gradeSizeOnly(g){if(!g||g.peeked||!g.referenceSource||!gradeMistake(g)||!Array.isArray(g.options))return false;const word=l=>String(l||'').split(' ')[0].toLowerCase(),mine=word(g.label||g.options[g.choice]?.label);
+ return!!mine&&['bet','raise'].includes(mine)&&g.options.some((o,i)=>i!==g.choice&&o.label!==g.label&&word(o.label)===mine&&Number.isFinite(o.f)&&o.f>=(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05));}
 function gradeCost(g){return!g.peeked&&g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,

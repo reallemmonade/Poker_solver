@@ -18,7 +18,7 @@ function leakDecisions(facts=factsOf(state.histories),guesses=true){const out=[]
  for(const f of facts){if(f.assisted)continue;for(const g of f.grades.slice().reverse()){
   const chart=!!g.referenceSource&&!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency),solved=!!g.rated&&Number.isFinite(g.loss);if(!chart&&!solved||!g.config||!Array.isArray(g.actions)||!g.hand)continue;
   const c=leakClass(g);if(!c)continue;const mistake=gradeMistake(g);
-  out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved&&!g.peeked?gradeCost(g):null,at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
+  out.push({id:g.id,variant:g.config.variant,mode:g.config.mode,seats:c.seats,pos:g.position||c.pos,street:g.street,topic:c.topic,depth:c.depth,mistake,cost:solved&&!g.peeked?gradeCost(g):null,sizeOnly:!solved&&gradeSizeOnly(g),at:Date.parse(g.createdAt)||Date.parse(f.at)||0,cls:g.hand.length===4?comboOf(g.hand):'',publicKey:c.publicKey,grade:g});}}
  return out;}
 async function leakSolves(){if(leakDrill.solves)return leakDrill.solves;const index=new Map();
  try{for(const row of await dbAll('solves')){try{const k=JSON.parse(row.key)[1];if(typeof k!=='string'||!row.result?.supported||!row.result.actions?.length)continue;if(!PokerPreflop.isResult(row.result)&&!T.assessmentEvidence(row.result).usable)continue;if(!index.has(k))index.set(k,row);}catch{}}}catch{}
