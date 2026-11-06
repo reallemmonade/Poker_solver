@@ -45,7 +45,9 @@ function quizChartIndex(pack){
   try{const ph=step?hands.get(parentKey):base;if(ph){h=ph.clone();if(step)h.act({kind:step.kind,target:['raise','bet'].includes(step.kind)?step.target:undefined});}else{h=base.clone();for(const e of node.history)h.act({kind:e.kind,target:e.to===undefined?undefined:G.units(e.to)});}}catch{continue}
   if(h.done||h.street!==0||h.actor!==node.seat)continue;hands.set(node.key,h);
   const vecs=vecsOf(node.key),reach=vecs?vecs.reduce((p,v)=>{if(!v)return p;let m=0;for(let i=0;i<L;i++)m+=prior[i]*v[i];return p*m;},1):0,topics=quizChartTopics.filter(t=>quizTopicMatches(h,t));
-  index.push({pack,node,hero:node.seat,topics,topic:topics[0]||'other',heroActed:node.history.some(e=>e.seat===node.seat),reach});
+  // A hero whose own range came through the chart's flat-or-3-bet split (gradeSplit in hand-db.js) is not drilled.
+  let raises=0,afterSplit=false;for(const e of node.history){if(e.seat===node.seat&&raises===1&&(e.kind==='call'||e.kind==='raise'))afterSplit=true;if(e.kind==='raise'||e.kind==='bet')raises++;}
+  index.push({pack,node,hero:node.seat,topics:afterSplit?[]:topics,topic:afterSplit?'other':topics[0]||'other',heroActed:node.history.some(e=>e.seat===node.seat),afterSplit,reach});
  }
  quizCharts.index.set(pack,index);return index;
 }
@@ -61,7 +63,7 @@ function quizChartHole(entry){
 }
 function quizChartHand(entry){const hole=quizChartHole(entry);if(hole===null)return null;const holes=Array(entry.pack.config.seats).fill(null);if(hole)holes[entry.hero]=hole;try{const h=new G.Hand(entry.pack.config,{holes});for(const e of entry.node.history)h.act({kind:e.kind,target:e.to===undefined?undefined:G.units(e.to)});return !h.done&&h.actor===entry.hero&&PokerPreflop.historyKey(h)===entry.node.key?h:null;}catch{return null}}
 function quizChartPacks(filters){return preflopLibrary.packs.filter(p=>{const c=p.config;return(filters.quizVariant==='any'||filters.quizVariant===c.variant)&&['any',c.mode].includes(filters.quizFormat)&&(filters.quizSeats==='any'||+filters.quizSeats===c.seats)&&(filters.quizStart==='full'||['any','0'].includes(filters.quizStreet)&&!['betcheck','vsbet','vsraise'].includes(filters.quizTopic));});}
-function quizChartEntries(packs,filters){const full=filters.quizStart==='full',out=[];for(const pack of packs){const c=pack.config,labels=G.positions(c.seats);for(const e of quizChartIndex(pack))if(e.reach>=quizChartReach&&(full?!e.heroActed:filters.quizTopic==='any'||e.topics.includes(filters.quizTopic))&&quizPositionMatches(labels[e.hero],filters.quizPosition)&&quizStackMatches(quizEffective(c,e.hero),filters.quizStack))out.push(e);}return out;}
+function quizChartEntries(packs,filters){const full=filters.quizStart==='full',out=[];for(const pack of packs){const c=pack.config,labels=G.positions(c.seats);for(const e of quizChartIndex(pack))if(e.reach>=quizChartReach&&(full?!e.heroActed:!e.afterSplit&&(filters.quizTopic==='any'||e.topics.includes(filters.quizTopic)))&&quizPositionMatches(labels[e.hero],filters.quizPosition)&&quizStackMatches(quizEffective(c,e.hero),filters.quizStack))out.push(e);}return out;}
 // Mixed decisions pick a decision type first, then a chart, then a line by how often the chart reaches it,
 // so deep multiway trees full of 3-bet and all-in nodes do not crowd out first-in and heads-up spots.
 function quizChartQuestion(entries,filters){

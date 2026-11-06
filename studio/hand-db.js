@@ -12,8 +12,19 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // A flop-library answer from a stand-in flop (the nearest solved flop of the same texture, your cards moved to match) grades
 // like the library itself; only a size the library lacks (sizesMatched false) or an off-tree size is approximate.
 // Older grades marked stand-ins approximate, so this reads the stored solve instead of trusting the flag.
-function gradeApprox(g){return!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
-function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+// The preflop charts' split between flatting and 3-betting an open is not trustworthy yet: 3-bets come out linear and the
+// flat ranges full of holes (tools/preflop/balance-check.cjs still fails), while how often a hand continues is sound. So facing
+// an open ('vsopen') a chart grades fold against continue only, and a chart spot whose actor's own range came through that
+// split ('after': a flatter facing a squeeze, a 3-bettor facing a 4-bet) is not graded at all. Read from the saved line, so
+// older grades follow the same rule.
+function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;let raises=0,after=false;
+ for(const a of g.actions){if(a.seat===g.hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after?'after':raises===1?'vsopen':null;}
+const gradeFolds=o=>/^fold\b/i.test(o?.label||'');
+// The frequency a chart grade is judged by: the chosen action's, or facing an open, how often the chart continues at all.
+function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsopen'||!Array.isArray(g.options)||!g.options[g.choice]||gradeFolds(g.options[g.choice])||!Number.isFinite(f))return f;
+ return Math.max(f,g.options.reduce((s,o)=>s+(!gradeFolds(o)&&Number.isFinite(o.f)?o.f:0),0));}
+function gradeApprox(g){return gradeSplit(g)==='after'||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
 function gradeSizeOnly(g){if(!g||g.peeked||!g.referenceSource||!gradeMistake(g)||!Array.isArray(g.options))return false;const word=l=>String(l||'').split(' ')[0].toLowerCase(),mine=word(g.label||g.options[g.choice]?.label);
