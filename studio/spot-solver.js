@@ -243,6 +243,16 @@
    return{supported:true,actions:this.actions,reference,mean,se:mean.map(()=>0),loss:mean.map(v=>Math.max(0,mean[best]-v)),lossSE:mean.map(()=>0),best,samples:0,effectiveSamples:0,units:this.rootHand.config.mode==='cash'?'bb':'prize units',referenceTrained:this.iterations>0,referenceVisits:this.iterations,referenceUpdates:this.iterations,coverage:1,evidenceCoverage:1,beliefCoverage:1,actionCoverage:mean.map(()=>1),ignoredPublicActions:0,reliable:converged,solve:{version:VERSION,method:'exact-river',exact:true,iterations:this.iterations,states:this.nodes.length,gap:d.nashConv,handRegret:d.handRegret,tolerance:this.threshold,handTolerance:this.handThreshold,converged,diagnostics:d,rangeAssumptions:this.ranges.descriptions,actionTree:this.options.abstraction,additionalRootSizes:this.options.rootSizes,historyPreserved:true,privateCardsUsed:'Full player ranges; only the acting player hand selects the displayed row',seconds:(clock()-this.started)/1000,warning:'The measured deviation gap applies to these entered ranges and allowed bet sizes. It does not bound range-assumption error or omitted bet sizes.'}};
   }
  }
+ // The river from its first action with only the two live seats: seat 0 out of position, seat 1 on the button,
+ // everything already in the pot as dead money, and each seat's range read from the full table's ranges.
+ function headsUpRiver(data,hand,ranges){
+  const n=hand.n,after=i=>(i-hand.button+n)%n||n,seats=hand.living().slice().sort((a,b)=>after(a)-after(b)),map=new Map(seats.map((s,i)=>[s,i]));
+  if(seats.length!==2||!data.actions.every(a=>a.street===3?map.has(a.seat):true)||seats.some(s=>!(hand.stacks[s]+hand.streetPaid[s]>0)))return null;
+  const paid=hand.streetPaid.reduce((x,y)=>x+y,0),config=G.normalize({...data.config,seats:2,button:1,stacks:seats.map(s=>G.bb(hand.stacks[s]+hand.streetPaid[s])),startStreet:3,board:data.board.map(C.cardName).join(''),pot:G.bb(hand.pot-paid),ante:0,otherStacks:[],bounties:[]});
+  const reduced={...data,config,actor:map.get(data.actor),actions:data.actions.filter(a=>a.street===3).map(a=>({...a,seat:map.get(a.seat)}))};
+  const view={descriptions:ranges.descriptions,distributions:seats.map(s=>ranges.distributions[s]),rows:seat=>ranges.rows(seats[seat]),draw:(...args)=>{const d=ranges.draw(...args);return{...d,holes:seats.map(s=>d.holes[s])};}};
+  return{data:reduced,ranges:view};
+ }
  class Solver{
   constructor(model,data,rawOptions={},extra=null){
    this.options=options(rawOptions);this.data={...data,config:G.normalize(data.config),heroCards:data.heroCards.slice(),board:data.board.slice(),actions:data.actions.map(a=>({...a}))};assert(data.actor>=0&&data.actor<data.config.seats,'Invalid acting seat.');
@@ -265,7 +275,11 @@
     // Three or more players from the flop on: the browser's engines rarely fit
     // these ranges, so they go to the bridge, which runs the same engines in Node.
     if(!local&&this.options.forceLocal&&this.options.localSolver&&Local?.SpotEngine&&live.length>2&&data.board.length>=3){try{local=new Local.SpotEngine(this.data,this.ranges,this.options,extra);}catch{}}
+    // Two players left on a hold'em river at a bigger table: the folded seats only left chips in the pot, so the
+    // spot is the same heads-up river with that money as dead pot, and the fast river engine solves it.
+    const folded=!exact&&!ploLocal&&live.length===2&&data.board.length===5&&simpleUtility&&this.data.config.mode==='cash'&&this.data.config.rules.hole===2?headsUpRiver(this.data,hand,this.ranges):null;
     if(exact)this.engine=new ExactRiverSolver(this.data,this.ranges,this.options,extra);
+    else if(folded)this.engine=new ExactRiverSolver(folded.data,folded.ranges,this.options,extra);
     else if(local)this.engine=local;
     else if(live.length===2&&uniformFolds&&simpleUtility&&data.config.variant==='NLH'&&data.board.length>=3){const postflop=root.PokerExactPostflop||(typeof require==='function'?require('./postflop-exact.js'):null);assert(postflop,'The exact postflop engine is unavailable.');this.engine=new postflop.Engine(this.data,this.ranges,this.options,extra,{reconstruct,actionsAt,terminalValues:ExactRiverSolver.prototype.terminalValues});}
     else if(rawOptions.experimental)this.engine=new SampledSolver(this.data,this.ranges,this.options,extra);
