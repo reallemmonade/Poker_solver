@@ -16,7 +16,7 @@ async function checkPassword(password,stored){const [kind,salt,hash]=String(stor
 const DUMMY=hashPassword('citrus-dummy-password');
 
 function memoryStore(){
- const users=new Map(),sessions=new Map(),records=new Map(),resets=new Map();let seq=0;
+ const users=new Map(),sessions=new Map(),records=new Map(),resets=new Map(),rooms=new Map();let seq=0;
  const rows=id=>{if(!records.has(id))records.set(id,new Map());return records.get(id);};
  return{kind:'memory',
   async init(){},
@@ -37,7 +37,12 @@ function memoryStore(){
   async push(userId,list){const m=rows(userId);let accepted=0;for(const r of list){const key=r.store+'\u0000'+r.id,old=m.get(key);if(old&&old.t>=r.t)continue;m.set(key,{...r,seq:++seq});accepted++;}return accepted;},
   async head(userId,since){let count=0,max=since;for(const r of rows(userId).values())if(r.seq>since){count++;max=Math.max(max,r.seq);}return{count,max};},
   async pull(userId,since,limit){return[...rows(userId).values()].filter(r=>r.seq>since).sort((a,b)=>a.seq-b.seq).slice(0,limit);},
-  async deleteUser(userId){users.delete(userId);records.delete(userId);resets.delete(userId);for(const [k,s]of sessions)if(s.userId===userId)sessions.delete(k);}
+  async deleteUser(userId){users.delete(userId);records.delete(userId);resets.delete(userId);for(const [k,s]of sessions)if(s.userId===userId)sessions.delete(k);},
+  // Friend tables (server.cjs) are saved here so a restart or deploy keeps them. scope keeps the preview's tables apart from Render's.
+  async getRoom(scope,code){return rooms.get(scope+' '+code)||null;},
+  async saveRoom(scope,code,data,t){rooms.set(scope+' '+code,{scope,code,data,touched_at:t});},
+  async deleteRoom(scope,code){rooms.delete(scope+' '+code);},
+  async pruneRooms(before){for(const [k,r]of rooms)if(r.touched_at<before)rooms.delete(k);}
  };
 }
 
@@ -53,7 +58,8 @@ CREATE TABLE IF NOT EXISTS citrus_records(user_id text NOT NULL REFERENCES citru
 CREATE INDEX IF NOT EXISTS citrus_records_user_seq ON citrus_records(user_id,seq);
 ALTER TABLE citrus_users ADD COLUMN IF NOT EXISTS email text;
 CREATE UNIQUE INDEX IF NOT EXISTS citrus_users_email ON citrus_users(email);
-CREATE TABLE IF NOT EXISTS citrus_resets(user_id text PRIMARY KEY REFERENCES citrus_users(id) ON DELETE CASCADE,code_hash text NOT NULL,expires bigint NOT NULL,tries integer NOT NULL DEFAULT 0);`);},
+CREATE TABLE IF NOT EXISTS citrus_resets(user_id text PRIMARY KEY REFERENCES citrus_users(id) ON DELETE CASCADE,code_hash text NOT NULL,expires bigint NOT NULL,tries integer NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS guava_rooms(scope text NOT NULL,code text NOT NULL,data text NOT NULL,touched_at bigint NOT NULL,PRIMARY KEY(scope,code));`);},
   async createUser(u){const r=await q('INSERT INTO citrus_users(id,username,name,pass,email) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',[u.id,u.username,u.name,u.pass,u.email||null]);return r.rowCount===1;},
   async userByName(username){return(await q('SELECT id,username,name,pass,email FROM citrus_users WHERE username=$1',[username])).rows[0]||null;},
   async userByEmail(email){return(await q('SELECT id,username,name,pass,email FROM citrus_users WHERE email=$1',[email])).rows[0]||null;},
@@ -72,7 +78,11 @@ CREATE TABLE IF NOT EXISTS citrus_resets(user_id text PRIMARY KEY REFERENCES cit
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=nextval('citrus_record_seq') WHERE citrus_records.t<excluded.t`,[userId,list.map(x=>x.store),list.map(x=>x.id),list.map(x=>x.t),list.map(x=>x.size),list.map(x=>x.data)]);return r.rowCount;},
   async head(userId,since){const r=(await q('SELECT count(*)::int AS count,coalesce(max(seq),$2)::bigint AS max FROM citrus_records WHERE user_id=$1 AND seq>$2',[userId,since])).rows[0];return{count:r.count,max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=$1 AND seq>$2 ORDER BY seq LIMIT $3',[userId,since,limit])).rows.map(r=>({...r,t:Number(r.t),seq:Number(r.seq)}));},
-  async deleteUser(userId){await q('DELETE FROM citrus_users WHERE id=$1',[userId]);}
+  async deleteUser(userId){await q('DELETE FROM citrus_users WHERE id=$1',[userId]);},
+  async getRoom(scope,code){return(await q('SELECT code,data,touched_at FROM guava_rooms WHERE scope=$1 AND code=$2',[scope,code])).rows[0]||null;},
+  async saveRoom(scope,code,data,t){await q('INSERT INTO guava_rooms(scope,code,data,touched_at) VALUES($1,$2,$3,$4) ON CONFLICT(scope,code) DO UPDATE SET data=excluded.data,touched_at=excluded.touched_at',[scope,code,data,t]);},
+  async deleteRoom(scope,code){await q('DELETE FROM guava_rooms WHERE scope=$1 AND code=$2',[scope,code]);},
+  async pruneRooms(before){await q('DELETE FROM guava_rooms WHERE touched_at<$1',[before]);}
  };
 }
 
@@ -85,7 +95,7 @@ function libsqlStore(url,authToken){
   async init(){await db.batch([`CREATE TABLE IF NOT EXISTS citrus_users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,pass TEXT NOT NULL,created_at INTEGER NOT NULL)`,
    `CREATE TABLE IF NOT EXISTS citrus_sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES citrus_users(id) ON DELETE CASCADE,created_at INTEGER NOT NULL,seen_at INTEGER NOT NULL)`,
    `CREATE TABLE IF NOT EXISTS citrus_records(user_id TEXT NOT NULL REFERENCES citrus_users(id) ON DELETE CASCADE,store TEXT NOT NULL,id TEXT NOT NULL,t INTEGER NOT NULL,seq INTEGER NOT NULL,size INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(user_id,store,id))`,
-   `CREATE INDEX IF NOT EXISTS citrus_records_user_seq ON citrus_records(user_id,seq)`,`CREATE INDEX IF NOT EXISTS citrus_records_seq ON citrus_records(seq)`,`CREATE INDEX IF NOT EXISTS citrus_sessions_user ON citrus_sessions(user_id)`,`CREATE TABLE IF NOT EXISTS citrus_resets(user_id TEXT PRIMARY KEY,code_hash TEXT NOT NULL,expires INTEGER NOT NULL,tries INTEGER NOT NULL DEFAULT 0)`],'write');
+   `CREATE TABLE IF NOT EXISTS guava_rooms(scope TEXT NOT NULL,code TEXT NOT NULL,data TEXT NOT NULL,touched_at INTEGER NOT NULL,PRIMARY KEY(scope,code))`,`CREATE INDEX IF NOT EXISTS citrus_records_user_seq ON citrus_records(user_id,seq)`,`CREATE INDEX IF NOT EXISTS citrus_records_seq ON citrus_records(seq)`,`CREATE INDEX IF NOT EXISTS citrus_sessions_user ON citrus_sessions(user_id)`,`CREATE TABLE IF NOT EXISTS citrus_resets(user_id TEXT PRIMARY KEY,code_hash TEXT NOT NULL,expires INTEGER NOT NULL,tries INTEGER NOT NULL DEFAULT 0)`],'write');
    // Accounts made before emails existed get the column added once.
    const cols=(await q('PRAGMA table_info(citrus_users)')).rows.map(r=>r.name);if(!cols.includes('email'))await q('ALTER TABLE citrus_users ADD COLUMN email TEXT');await q('CREATE UNIQUE INDEX IF NOT EXISTS citrus_users_email ON citrus_users(email)');},
   async createUser(u){const r=await q('INSERT OR IGNORE INTO citrus_users(id,username,name,pass,email,created_at) VALUES(?,?,?,?,?,?)',[u.id,u.username,u.name,u.pass,u.email||null,Date.now()]);return r.rowsAffected===1;},
@@ -106,7 +116,11 @@ function libsqlStore(url,authToken){
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=excluded.seq WHERE citrus_records.t<excluded.t`,args:[userId,x.store,x.id,x.t,x.size,x.data]})),'write');return results.reduce((n,r)=>n+r.rowsAffected,0);},
   async head(userId,since){const r=row(await q('SELECT count(*) AS count,coalesce(max(seq),?) AS max FROM citrus_records WHERE user_id=? AND seq>?',[since,userId,since]));return{count:Number(r.count),max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=? AND seq>? ORDER BY seq LIMIT ?',[userId,since,limit])).rows.map(r=>({store:r.store,id:r.id,t:Number(r.t),seq:Number(r.seq),size:Number(r.size),data:r.data}));},
-  async deleteUser(userId){await db.batch([{sql:'DELETE FROM citrus_records WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_sessions WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_resets WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_users WHERE id=?',args:[userId]}],'write');}
+  async deleteUser(userId){await db.batch([{sql:'DELETE FROM citrus_records WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_sessions WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_resets WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_users WHERE id=?',args:[userId]}],'write');},
+  async getRoom(scope,code){return row(await q('SELECT code,data,touched_at FROM guava_rooms WHERE scope=? AND code=?',[scope,code]));},
+  async saveRoom(scope,code,data,t){await q('INSERT INTO guava_rooms(scope,code,data,touched_at) VALUES(?,?,?,?) ON CONFLICT(scope,code) DO UPDATE SET data=excluded.data,touched_at=excluded.touched_at',[scope,code,data,t]);},
+  async deleteRoom(scope,code){await q('DELETE FROM guava_rooms WHERE scope=? AND code=?',[scope,code]);},
+  async pruneRooms(before){await q('DELETE FROM guava_rooms WHERE touched_at<?',[before]);}
  };
 }
 
@@ -203,6 +217,8 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   return json(res,404,{error:'Not found.'});
  };
  // Health line: which database, whether it answered, and whether reset email can be sent.
+ // Friend-table storage for server.cjs; null when no database is set up (tables then live in memory only).
+ route.rooms=store&&store.getRoom?{get:async(scope,code)=>(await db()).getRoom(scope,code),save:async(scope,code,data,t)=>(await db()).saveRoom(scope,code,data,t),remove:async(scope,code)=>(await db()).deleteRoom(scope,code),prune:async before=>(await db()).pruneRooms(before)}:null;
  route.status=async()=>{if(!store)return{accounts:'off',reason:offReason};const ok=await(ready||db().then(()=>true,()=>false));return{accounts:store.kind,database:ok?'ok':'unreachable'+(lastError?': '+lastError.replace(/[a-z]+:\/\/\S+/gi,'[url]').slice(0,160):''),resetEmail:!!mail};};
  return route;
 }
