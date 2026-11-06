@@ -301,7 +301,7 @@ html .ui-pane-tabs.glide-dragging .glide-hot{color:var(--ink)!important}
 .sb-prize{flex-wrap:nowrap}.sb-prize label:last-child{flex:1;min-width:0}
 .sb-prize .input{height:34px;min-height:34px;padding:4px 8px;font-size:14px;box-sizing:border-box}#sbPay{flex:1;min-width:0;width:100%}.sb-row>div{min-width:0}
 
-.ui-analysis-acts{display:flex;align-items:baseline;gap:14px}.ui-open-solve{display:inline-flex;align-items:center;gap:4px}.ui-open-solve[hidden]{display:none}.ui-open-solve svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;align-self:center}
+.ui-analysis-acts{display:flex;align-items:center;gap:14px}.ui-open-solve{gap:4px}.ui-open-solve[hidden]{display:none}.ui-open-solve svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 /* Friend games (friend-play.js): the room strip above the table, Invite seats before the first hand, and the bot,
    solver and saved-history controls hidden while you sit at a friend table. */
 .friend-bar{margin:0 0 6px;padding:7px 8px 7px 12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
@@ -322,3 +322,6 @@ html .ui-pane-tabs.glide-dragging .glide-hot{color:var(--ink)!important}
 body.friend-game #deal,body.friend-game #restartSession,body.friend-game #sessionStatus,body.friend-game #sessionElsewhere,body.friend-game [data-pane-edit],body.friend-game #uiEditGame,body.friend-game #uiOpenSolve,body.friend-game #analyze,body.friend-game .ui-pane-hands,body.friend-game .ui-history-pane>h2,body.friend-game #uiTableOptions,body.friend-game .table-legend{display:none!important}
 @media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app.friend-game .ui-live-grid .ui-table-pane .felt{height:max(240px,calc(100% - var(--dock,140px) - 20px - var(--friend-bar,52px)));margin-top:6px}.friend-bar{padding:5px 6px 5px 10px}.friend-bar .fb-code{font-size:16px}}
 body:not(.friend-game) .friend-bar{display:none!important}
+
+/* Analysis card header: title, Solve and Hide share one centre line and one text-button style */
+.ui-analysis-title{align-items:center;margin-bottom:12px}.ui-analysis-title h2{margin:0}.ui-analysis.ui-analysis-hidden .ui-analysis-title{margin-bottom:0}.ui-analysis-toggle{display:inline-flex;align-items:center;height:28px;line-height:1;padding:0 2px}
