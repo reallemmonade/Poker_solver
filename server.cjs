@@ -7,7 +7,8 @@ const TURN_MS=env('TURN_SECONDS',45)*1000,AWAY_MS=env('AWAY_SECONDS',15)*1000,HO
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Vary':'Origin'});res.end(data===null?'':JSON.stringify(data));};
 const err=(status,message)=>Object.assign(Error(message),{status});
 const engine=f=>{try{return f()}catch(e){throw e.status||e.constructor!==Error?e:err(400,e.message)}};
-const code=()=>crypto.randomBytes(6).toString('hex').toUpperCase();
+// Room codes are 6 characters you can read out loud: no 0/O or 1/I. 32^6 ≈ 1 billion codes, and wrong guesses are rate limited.
+const CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',code=()=>Array.from({length:6},()=>CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
 const token=()=>crypto.randomBytes(24).toString('base64url');
 const shuffleRandom=()=>crypto.randomBytes(6).readUIntBE(0,6)/2**48;
 const safeName=value=>String(value||'Player').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,24)||'Player';
