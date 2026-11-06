@@ -13,9 +13,14 @@ function actionTones(actions,hand=null){
 // An action's short label. Postflop bets and raises name their size as a share of the pot after calling, as the solver
 // tree and the bet bar do ("Bet 1/3", "Raise 2/3", "Bet 1.5x"); anything all-in reads All-in. Elsewhere sizes stay in bb, to one decimal.
 function potShareLabel(f){const named=[[1/4,'1/4'],[1/3,'1/3'],[1/2,'1/2'],[2/3,'2/3'],[3/4,'3/4'],[1,'Pot'],[1.5,'1.5x'],[2,'2x']].find(([x])=>Math.abs(f-x)<=Math.max(.02,x*.05));return named?named[1]:Math.round(f*100)+'%';}
-function toneLabel(a,tone,hand=null){let s=String(a.label||'');const jam=tone==='allin'||/·\s*(puts the opponent )?all-in/i.test(s);s=s.replace(/\s*·\s*(puts the opponent )?all-in\b/i,'');
+// Every solver source goes through here, so the rules hold app-wide: a bet or raise that covers every opponent (or is
+// marked all-in, effective all-in or "puts the opponent all-in") reads All-in, and postflop one at the legal minimum
+// whose pot share is bigger than the tree's smallest size (a 1bb bet into a 2bb limped pot, where 1/3 pot would be under
+// the 1bb minimum), or a minimum raise, reads Min, as the bet bar's preset does.
+function toneLabel(a,tone,hand=null){let s=String(a.label||'');const legal=(()=>{try{return hand&&!hand.done&&hand.street>0?hand.legal():null}catch{return null}})(),sized=(a.kind==='bet'||a.kind==='raise')&&Number.isFinite(a.target),cover=legal?Math.min(legal.allInTo,Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i]))||legal.allInTo):Infinity;
+ const jam=tone==='allin'||!!a.allIn||/·[^·]*\ball-in\b/i.test(s)||!!(legal&&sized&&a.target>=cover);s=s.replace(/\s*·[^·]*\ball-in\b.*$/i,'');
  if(jam)return hand&&hand.street>0?'All-in':s.replace(/^(Bet|Raise to|Raise)\b/i,'All-in').replace(/(\d+\.\d+)(?= bb)/g,n=>String(+(+n).toFixed(1)));
- if(hand&&hand.street>0&&!hand.done&&(a.kind==='bet'||a.kind==='raise')&&Number.isFinite(a.target)){const paid=hand.streetPaid[hand.actor],owe=Math.max(0,(hand.currentBet||0)-paid),pot=Math.max(1,hand.pot+owe);return(a.kind==='raise'?'Raise ':'Bet ')+potShareLabel((a.target-paid-owe)/pot);}
+ if(legal&&sized){const paid=hand.streetPaid[hand.actor],owe=Math.max(0,(hand.currentBet||0)-paid),pot=Math.max(1,hand.pot+owe),f=(a.target-paid-owe)/pot;return(a.kind==='raise'?'Raise ':'Bet ')+(a.target===legal.minRaiseTo&&(a.kind==='raise'||f>1/3+.02)?'Min':potShareLabel(f));}
  return s.replace(/(\d+\.\d+)(?= bb)/g,n=>String(+(+n).toFixed(1)));}
 // A frequency mix as left-to-right color bands, for one range-grid cell.
 function actionMixStyle(mix,tones){let at=0;const stops=[];mix.forEach((p,i)=>{if(!(p>0))return;const end=Math.min(100,at+p*100);stops.push('var(--act-'+tones[i]+') '+at.toFixed(1)+'% '+end.toFixed(1)+'%');at=end;});return stops.length?'background:linear-gradient(to right,'+stops.join(',')+')':'';}
