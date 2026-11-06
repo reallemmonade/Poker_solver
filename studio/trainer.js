@@ -47,7 +47,11 @@
     snapshot(){return{...this.summary(),seedState:this.random.state(),table:this.table.dump()};}
     static load(snapshot){if(!snapshot||![3,VERSION].includes(snapshot.schema)||!Number.isInteger(snapshot.episodes)||snapshot.episodes<0)throw Error('Unsupported full-hand model format.');const model=new Model(snapshot.config,snapshot.abstraction,snapshot.seedState);model.table.load(snapshot.table);model.episodes=snapshot.episodes;model.streetVisits=Array.isArray(snapshot.streetVisits)&&snapshot.streetVisits.length===4?snapshot.streetVisits:[0,0,0,0];model.table.decisions=Number(snapshot.decisions)||0;model.seconds=Number(snapshot.seconds)||0;model.createdAt=snapshot.createdAt||new Date().toISOString();return model;}
   }
-  function matchAction(actions,event){return actions.findIndex(a=>a.kind===event.kind&&(!['raise','bet'].includes(a.kind)||a.target===event.target));}
+  // The action taken, among a solve's actions. A bet or raise matches its exact size, else the nearest size of the same kind
+  // within 0.1bb or 4% (the bet bar rounds its 1/3, 2/3 and 1.5x presets; solvers round chips), so a preset is graded as the
+  // solver's size instead of going ungraded.
+  function matchAction(actions,event){const exact=actions.findIndex(a=>a.kind===event.kind&&(!['raise','bet'].includes(a.kind)||a.target===event.target));if(exact>=0||!['raise','bet'].includes(event?.kind)||!Number.isFinite(event.target))return exact;
+    let best=-1,gap=Infinity;actions.forEach((a,i)=>{if(a.kind!==event.kind||!Number.isFinite(a.target))return;const d=Math.abs(a.target-event.target);if(d<gap){gap=d;best=i;}});return best>=0&&gap<=Math.max(10,.04*event.target)?best:-1;}
   // These are conservative display/assessment gates, not convergence certificates.
   // Counts scale with the number of actions; a state also needs a measured, small policy drift
   // (queries from read-only packs carry no drift and are judged on counts alone).

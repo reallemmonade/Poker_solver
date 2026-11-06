@@ -243,9 +243,10 @@
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};
    else if(kind==='CHECK')action={kind:'check',label:'Check'};
    else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
-   // Amounts below the minimum bet or raise go up to it; the effective all-in
-   // stays all-in for whoever is shorter, or puts the shorter player all-in.
-   else{const k=hand.currentBet?'raise':'bet',want=paid+Math.round(parseFloat(amount)),jam=!!spec&&want>=spec.stack,target=Math.min(legal.allInTo,Math.max(want,k==='raise'?legal.minRaiseTo:Math.max(want,G.units(hand.config.bb))));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':jam?' · puts the opponent all-in':'')};}
+   // Amounts below the minimum bet or raise go up to it. The solver's all-in (its whole stack, give or take the
+   // chip TexasSolver's rounding can leave off) is the effective all-in: exactly what the bet bar's All-in bets,
+   // so the two match when grading, and it reads All-in rather than a pot share like "Bet 994%".
+   else{const k=hand.currentBet?'raise':'bet',want=paid+Math.round(parseFloat(amount)),cover=Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i])),top=Math.min(legal.allInTo,cover>0?Math.max(cover,legal.minRaiseTo):legal.allInTo),jam=!!spec&&want>=spec.stack*.98,target=jam?top:Math.min(legal.allInTo,Math.max(want,k==='raise'?legal.minRaiseTo:Math.max(want,G.units(hand.config.bb))));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':target>=cover?' · puts the opponent all-in':'')};}
    action.id=action.kind+':'+(action.target||0);
    const same=actions.findIndex(a=>a.id===action.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=row[i];else{actions.push(action);probs.push(row[i]);}
   });

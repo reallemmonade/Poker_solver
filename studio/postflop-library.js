@@ -231,7 +231,7 @@
   const legal=hand.legal(),actions=[],probs=[],index=[],jamAt=found&&Number.isFinite(found.jamAt)?found.jamAt:Infinity;
   node.actions.forEach((label,i)=>{const [kind,amount]=label.split(' ');let action;
    if(kind==='FOLD')action={kind:'fold',label:'Fold'};else if(kind==='CHECK')action={kind:'check',label:'Check'};else if(kind==='CALL')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
-   else{const k=hand.currentBet?'raise':'bet',chips=parseFloat(amount)*scale,top=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo),target=chips>=jamAt*.999?top:Math.min(top,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(chips)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   else{const k=hand.currentBet?'raise':'bet',chips=parseFloat(amount)*scale,cover=Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i])),top=Math.min(legal.allInTo,legal.maxRaiseTo??legal.allInTo,cover>0?Math.max(cover,legal.minRaiseTo):legal.allInTo),target=chips>=jamAt*.98?top:Math.min(top,Math.max(legal.minRaiseTo,hand.streetPaid[hand.actor]+Math.round(chips)));action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
    action.id=action.kind+':'+(action.target||0);const same=actions.findIndex(x=>x.id===action.id);index.push(same>=0?same:actions.length);if(same>=0)probs[same]+=r[i];else{actions.push(action);probs.push(r[i]);}});
   return{actions,probs,index};
  }
