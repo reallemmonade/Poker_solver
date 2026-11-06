@@ -74,13 +74,39 @@
 
  const aggressive=a=>a.kind==='bet'||a.kind==='raise';
 
+ // One line per option the solver considers, in the order shown: which part of the range takes it and why that play
+ // earns. x as for reasons (labels are the on-screen names); freq is the range's frequency of each action, or null.
+ const PART={strong:'two pair or better',top:'top pair or overpairs',pair:'weaker pairs',draw:'draws',air:'missed hands'};
+ function options(x,freq){
+  const A=x.actions,board=x.board,river=board.length>=5,facing=A.some(a=>a.kind==='fold'||a.kind==='call'),C=root.PokerGame?.Core,dead=new Set(board);
+  // Who takes each action: the range's weight on it, split into made-hand and draw groups.
+  const parts=A.map(()=>({w:0}));
+  if(x.mine&&x.mix&&C)for(const r of x.mine){if(!(r.weight>0)||r.cards.some(c=>dead.has(c)))continue;const m=x.mix[C.handClass(r.cards)];if(!m)continue;const k=classify(r.cards,board),g=k.cat==='air'&&k.draw&&!river?'draw':k.cat;
+   m.forEach((p,i)=>{if(!(p>0)||!parts[i])return;parts[i][g]=(parts[i][g]||0)+r.weight*p;parts[i].w+=r.weight*p;});}
+  const who=i=>{const o=parts[i];if(!(o.w>0))return'';const top=Object.keys(PART).filter(g=>(o[g]||0)/o.w>=.2).sort((a,b)=>o[b]-o[a]).slice(0,2);return top.length?top.map(g=>PART[g]).join(' and '):'';};
+  const has=(i,g)=>parts[i].w>0&&(parts[i][g]||0)/parts[i].w>=.2,spr=x.spr||0;
+  return A.map((a,i)=>{
+   const f=freq?freq[i]:x.heroMix?.[i],tone=x.tones?.[i],used=f==null||f>=.005,mix=who(i);let t='';
+   if(a.kind==='fold')t=used?'hands that can’t beat enough of their bets to pay this price':'nothing folds: everything has enough equity at this price';
+   else if(a.kind==='call')t=used?'beats their bluffs often enough to pay, and keeps their bluffs in'+(river?'':'; draws call to see the next card'):'nothing just calls: hands either raise or fold';
+   else if(a.kind==='check')t=!used?'never checks: betting wins more with every hand':facing?'':(has(i,'air')&&!has(i,'pair')&&!has(i,'top')&&!has(i,'strong')?'they can’t bet profitably, so they give up':(river?'they win some showdowns but get called only by better, so checking keeps the pot small':'they win some showdowns but get called only by better, so checking keeps the pot small and sees the next card free')+(has(i,'strong')?'; the strong hands in here stop a check from looking weak':''));
+   else if(tone==='allin'||/^All-in/.test(x.labels[i]||''))t=used?(spr<3?'stacks are short, so the strongest hands and best draws just get it in':'polar: only the nuts and a few bluffs, and their range can rarely call'):(spr>=3?'too big at SPR '+(Math.round(spr*10)/10)+': it risks the whole stack where a smaller bet does the same job':'a smaller size does the same job without risking the stack');
+   else if(tone==='bet1')t=used?(facing?'a small raise that charges their draws and gets value from weaker pairs':'a cheap bet: thin value and protection, and their weakest hands fold for little risk'):'the bigger sizes do more with the same hands';
+   else if(tone==='bet2')t=used?(facing?'raises for value and with strong draws':'charges their draws: value from good made hands, with draws as semi-bluffs'):'the other sizes split the hands better';
+   else if(tone==='bet3')t=used?(has(i,'air')||has(i,'draw')?'a polar overbet: only very strong hands and bluffs, because they have few strong hands':'an overbet with only very strong hands: they want the biggest pot, and their range is capped'):'their range has enough strong hands that an overbet gets called too often';
+   if(!t)return null;
+   return{label:x.labels[i],f,t:(used&&mix?mix[0].toUpperCase()+mix.slice(1)+'. ':'')+t[0].toUpperCase()+t.slice(1)+'.'};
+  }).filter(Boolean);
+ }
+
  // The reasons, as short sentences, most telling first. input: {board, hero, heroIsIp, spr, actions, tones, labels,
  // heroMix, mine, theirs, mix, heroClass, heroWeight}; mine/theirs are range rows, mix maps hand class -> action mix.
  function reasons(x){
   const out=[],A=x.actions,labels=x.labels,board=x.board,facing=A.some(a=>a.kind==='fold'||a.kind==='call'),river=board.length>=5,turn=board.length===4;
   const freq=x.mine&&x.mix?rangeFrequencies(x.mine,x.mix,A,board):null,bet=freq?A.reduce((s,a,i)=>s+(aggressive(a)?freq[i]:0),0):null;
-  // 1. How the range bets, as a reason (the frequencies are already on screen, so no numbers here).
-  if(freq&&bet>=.1){
+  // 1. How the range bets, as a reason (the frequencies are already on screen, so no numbers here). Skipped when the
+  // per-option lines (options) show, since they say which hands take each size.
+  if(freq&&bet>=.1&&!x.perOption){
    const smallShare=A.reduce((t,a,i)=>t+(aggressive(a)&&(x.tones?.[i]==='bet1'||/1\/[34]|1\/2/.test(labels[i]||''))?freq[i]:0),0)/bet;
    const cats=x.mix?betByCategory(x.mine,x.mix,A,board):null,r=c=>cats?.[c]&&cats[c].share>=.03?cats[c].rate:null;
    const s=r('strong'),tp=r('top'),p=r('pair'),a=r('air'),polar=s!=null&&p!=null&&a!=null&&s-p>=.25&&a-p>=.15;
@@ -139,12 +165,12 @@
   return out;
  }
 
- const api={classify,profile,textureWords,rangeFrequencies,reasons};
+ const api={classify,profile,textureWords,rangeFrequencies,reasons,options};
  root.SpotWhy=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
 if(typeof document!=='undefined'){
- const WHY_KEY='guava-why-open';
+ const WHY_KEY='guava-why-open',pct=x=>{const v=x*100;return v>0&&v<1?'<1%':Math.round(v)+'%';};
  // Remember the last open/closed state on this device.
  document.addEventListener('toggle',e=>{const d=e.target;if(d?.classList?.contains('spot-why'))try{localStorage.setItem(WHY_KEY,d.open?'1':'0');}catch{}},true);
  globalThis.spotWhyHTML=function(result){
@@ -158,9 +184,12 @@ if(typeof document!=='undefined'){
    const after=i=>(i-h.button+h.n)%h.n||h.n,ip=liveSeats.slice().sort((a,b)=>after(a)-after(b)).pop();
    const hero=seat===state.hero&&h.holes[seat]?.length===2?h.holes[seat]:null,heroClass=hero?G.Core.handClass(hero):null;
    let heroWeight=null;if(hero&&mine){const key=hero.slice().sort((a,b)=>a-b).join(),peak=Math.max(...mine.map(r=>r.weight)),row=mine.find(r=>r.cards.join()===key);heroWeight=peak>0?(row?row.weight:0)/peak:null;}
-   const list=SpotWhy.reasons({board:h.board,hero,heroIsIp:seat===ip,spr:potStart>0?stack/potStart:0,actions:result.actions,tones,labels,heroMix:hero?result.reference:null,mine,theirs,mix:result.handMix?.classes||null,heroClass,heroWeight});
-   if(!list.length)return'';let open=false;try{open=localStorage.getItem(WHY_KEY)==='1';}catch{}
-   return'<details class="spot-why"'+(open?' open':'')+'><summary>Why?</summary><ul>'+list.map(r=>'<li>'+esc(r.t)+'</li>').join('')+'</ul></details>';
+   const input={board:h.board,hero,heroIsIp:seat===ip,spr:potStart>0?stack/potStart:0,actions:result.actions,tones,labels,heroMix:hero?result.reference:null,mine,theirs,mix:result.handMix?.classes||null,heroClass,heroWeight};
+   const mix=input.mix&&mine?SpotWhy.rangeFrequencies(mine,input.mix,result.actions,h.board):null,opts=SpotWhy.options(input,mix),list=SpotWhy.reasons({...input,perOption:opts.length>0});
+   if(!list.length&&!opts.length)return'';let open=false;try{open=localStorage.getItem(WHY_KEY)==='1';}catch{}
+   // Each option the solver considers, with how often the whole range takes it, then the reasons for the spot itself.
+   const rows=opts.length?'<div class="why-options">'+opts.map((o,i)=>'<div class="why-option"><b><i style="background:var(--act-'+tones[result.actions.findIndex((a,k)=>labels[k]===o.label)]+')"></i>'+esc(o.label)+(Number.isFinite(o.f)?'<span>'+(mix?'range ':'')+pct(o.f)+'</span>':'')+'</b><p>'+esc(o.t)+'</p></div>').join('')+'</div>':'';
+   return'<details class="spot-why"'+(open?' open':'')+'><summary>Why?</summary>'+rows+(list.length?'<ul>'+list.map(r=>'<li>'+esc(r.t)+'</li>').join('')+'</ul>':'')+'</details>';
   }catch(error){return'';}
  };
 }

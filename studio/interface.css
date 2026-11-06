@@ -267,6 +267,12 @@ body:not([data-ui-route=solve]) #replaySame{display:none!important}.ui-session-l
 .spot-why[open]>summary::after{transform:rotate(-135deg) translateY(-1px)}
 .spot-why ul{margin:8px 0 0;padding:0 0 0 18px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:var(--ink)}
 .spot-why li::marker{color:var(--gold)}
+.why-options{display:grid;gap:8px;margin:10px 0 0}
+.why-option{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.why-option b{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink)}
+.why-option b i{width:9px;height:9px;border-radius:3px;flex:none}
+.why-option b span{margin-left:auto;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.why-option p{margin:3px 0 0;font-size:13px;line-height:1.4;color:var(--muted)}
 @media(pointer:coarse){.spot-why>summary{min-height:40px}}
 /* Tab glide (tab-glide.js): one pill slides under the active tab; drag along a scrub bar and it follows your finger. */
 .ui-pane-tabs.has-glide,.ui-subnav.has-glide{position:relative}.has-glide{isolation:isolate}

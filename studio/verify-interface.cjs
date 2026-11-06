@@ -92,8 +92,14 @@ assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,cu
 // in a 167bb-vs-102bb limped pot read "Bet 4950%"), and its bets under the 1bb minimum bet the minimum.
 {const PL=require('./postflop-library.js'),h=new G.Hand({seats:2,sb:.5,bb:1,mode:'cash',stacks:[168,103]},{rng:G.rng(5)});h.act({kind:'call'});h.act({kind:'check'});h.act({kind:'check'});
  const scale=h.pot/100,node={actions:['CHECK','BET 33','BET 66','BET 4950']},targets=f=>PL.libraryActions(h,node,[.25,.25,.25,.25],scale,f).actions.map(a=>a.target||0);
- assert.deepEqual(targets({jamAt:4950*scale}),[0,G.units(1),132,h.legal().allInTo],'Library all-in maps to the hand\'s all-in; 1/3 of 2bb bets the 1bb minimum');
- pass('Flop library bets respect the 1bb minimum and its all-in stays all-in at any stack depth');}
+ assert.deepEqual(targets({jamAt:4950*scale}),[0,G.units(1),132,h.stacks[1]],'Library all-in maps to the hand\'s effective all-in (what the bet bar\'s All-in bets); 1/3 of 2bb bets the 1bb minimum');
+ assert.equal(T.matchAction(PL.libraryActions(h,node,[.25,.25,.25,.25],scale,{jamAt:4950*scale}).actions,{kind:'bet',target:135}),2,'A preset a few chips off the solved size grades as that size');assert.equal(T.matchAction([{kind:'bet',target:132}],{kind:'bet',target:300}),-1);
+ {const L=require('./local-solver.js'),hh=new G.Hand({seats:2,sb:.5,bb:1,mode:'cash',stacks:[300,100]},{rng:G.rng(5)});hh.act({kind:'call'});hh.act({kind:'check'});hh.act({kind:'check'});
+  assert.deepEqual(L.mapActions(hh,{actions:['CHECK','BET 66','BET 9799']},[.5,.3,.2],{stack:9800}).actions.map(a=>a.target||0),[0,100,hh.stacks[1]],'A Mac/cloud all-in a chip short of the stack is the effective all-in');}
+ {const W=require('./spot-why.js'),board=G.Core.cards('Kc9c6hJh'),rows=[];for(let a=0;a<52;a++)for(let b=a+1;b<52;b++)if(!board.includes(a)&&!board.includes(b))rows.push({cards:[a,b],weight:1});const mix={};for(const r of rows)mix[G.Core.handClass(r.cards)]=[.6,.2,.2,0];
+  const o=W.options({board,actions:[{kind:'check'},{kind:'bet',target:1},{kind:'bet',target:2},{kind:'bet',target:9}],tones:['passive','bet1','bet2','allin'],labels:['Check','Bet 1/3','Bet 2/3','All-in'],mine:rows,mix,spr:9.9},W.rangeFrequencies(rows,mix,[1,2,3,4],board));
+  assert.deepEqual(o.map(x=>x.label),['Check','Bet 1/3','Bet 2/3','All-in'],'Why? gives a reason for every option the solver considers');assert.ok(/Too big at SPR 9\.9/.test(o[3].t),o[3].t);}
+ pass('Flop library bets respect the 1bb minimum and its all-in stays all-in at any stack depth; a Mac all-in a chip short stays all-in; presets a hair off a solved size grade as it; Why? explains each option');}
 {const PL=require('./postflop-library.js'),PF=require('./preflop.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));
  const table=(f,A)=>PL.encode(live.map(([i])=>[i,f(i)]),A),share=i=>(i*7%5)/4,bets=['BET 33','BET 66','BET 150','BET 1000'],facing=b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(i=>[1-share(i),share(i)],2)});
  const flop={nodes:[{path:'',player:'oop',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},{path:'CHECK',player:'ip',actions:['CHECK',...bets],table:table(()=>[1,0,0,0,0],5)},...bets.map(facing)]};
