@@ -6,6 +6,8 @@
   // decision that isn't a mistake, e^(-bb lost) for a solver-measured mistake, and 0 for a chart mistake or a
   // mistake without a bb cost (ICM), except
   // half (0.5) for the right action at a size the chart or library rarely uses (sizeOnly). Rating settles where the expected score matches your average score.
+  // A mistake never gains rating: against the spot it scores that fraction of what you were expected to score
+  // (outcome), so a small miss costs a little and a large or chart miss costs the most, whatever your rating.
   // A decision: {at (ms), mode ('cash'|'icm'), seats, street, mistake, cost (bb or null)} (leakDecisions in leak-drills.js).
   const START=1200,SPOT=[1200,1500,1500,1500],PROVISIONAL=30,K_NEW=40,K=16;
   const CATEGORIES=[
@@ -15,15 +17,18 @@
     {id:'hu',label:'Heads-up',test:d=>d.seats===2}];
   const score=d=>!d.mistake?1:d.cost>0?Math.exp(-d.cost):d.sizeOnly?.5:0;
   const expected=(r,spot)=>1/(1+Math.pow(10,(spot-r)/400));
+  const outcome=(d,r)=>{const e=expected(r,SPOT[d.street]??1500);return d.mistake?score(d)*e:1;};
+  // The rating change one decision makes at rating r after n earlier decisions.
+  const delta=(d,r,n)=>(n<PROVISIONAL?K_NEW:K)*(outcome(d,r)-expected(r,SPOT[d.street]??1500));
   function rate(decisions){
     const rows=decisions.filter(d=>Number.isFinite(d.at)).sort((a,b)=>a.at-b.at);let r=START,peak=START,total=0;const history=[];
-    rows.forEach((d,i)=>{const s=score(d);total+=s;r+=(i<PROVISIONAL?K_NEW:K)*(s-expected(r,SPOT[d.street]??1500));if(i>=PROVISIONAL)peak=Math.max(peak,r);history.push([d.at,r]);});
+    rows.forEach((d,i)=>{total+=score(d);r+=delta(d,r,i);if(i>=PROVISIONAL)peak=Math.max(peak,r);history.push([d.at,r]);});
     return{rating:rows.length?Math.round(r):null,n:rows.length,provisional:rows.length<PROVISIONAL,accuracy:rows.length?total/rows.length:null,peak:rows.length>PROVISIONAL?Math.round(peak):null,history};}
   // Rating change since a time: the latest rating less the last one before it (or the start).
   function change(history,since){if(!history.length)return null;let before=START;for(const [at,r] of history){if(at>=since)break;before=r;}return Math.round(history[history.length-1][1]-before);}
   // At most n evenly spaced points, always keeping the last one, for drawing.
   function thin(history,n=120){if(history.length<=n)return history;const out=[];for(let i=0;i<n;i++)out.push(history[Math.round(i*(history.length-1)/(n-1))]);return out;}
   const compute=decisions=>CATEGORIES.map(c=>({id:c.id,label:c.label,...rate(decisions.filter(c.test))}));
-  root.PokerRating={START,SPOT,PROVISIONAL,CATEGORIES,score,expected,rate,change,thin,compute};
+  root.PokerRating={START,SPOT,PROVISIONAL,CATEGORIES,score,expected,outcome,delta,rate,change,thin,compute};
   if(typeof module==='object')module.exports=root.PokerRating;
 })(typeof window!=='undefined'?window:globalThis);
