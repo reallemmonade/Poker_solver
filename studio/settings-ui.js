@@ -19,6 +19,7 @@ function initSettingsLayout(){
   recording.append(grading);}
  const table=section('Table');
  if($('uiSounds'))table.append(valueRow('Sounds',$('uiSounds')));
+ if(typeof skipAfterFold==='function'){const row=make('label','set-row','<span>Fast forward after I fold</span><input type="checkbox" id="skipAfterFold">'),box=row.querySelector('input');box.checked=skipAfterFold();box.onchange=()=>{try{localStorage.setItem('guava-skip-after-fold',box.checked?'1':'0')}catch{}};table.append(row);}
  for(const [id,label] of [['uiLook','Look'],['uiFelt','Table color'],['uiTheme','Light or dark']])if($(id))table.append(valueRow(label,$(id)));
  content.querySelector('.ui-sounds')?.remove();const display=byTitle('Card display & theme');if(display&&!display.querySelector('select,input,button'))display.remove();
  const disc=(sec,titles)=>{for(const t of titles){const d=byTitle(t);if(d){d.classList.add('set-disc');sec.append(d);}}return sec;};

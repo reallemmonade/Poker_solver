@@ -58,7 +58,12 @@ function tableSounds(root,h,hero){if(!h||root.id!=='table')return;hero=(hero+h.n
  if(!same){if(old)tableSound('deal',{cards:Math.min(18,h.holes.reduce((n,x)=>n+x.length,0)),gap:Math.max(.025,motionMs(22)/1000)});return}
  let at=0;for(const e of h.log.slice(old.count)){if(heardSounds.has(e))continue;if(e.type==='action')tableSound(e.kind!=='fold'&&e.allIn?'allin':e.kind,{at});else if(e.type==='street')tableSound('board',{at,cards:e.street===1?3:1,gap:.085});else if(e.type==='result')tableSound('win',{at});else continue;at+=.28}
  if(turn>=0&&old.turn!==turn)tableSound('turn',{at});}
-function motionMs(ms){return tableView.mode==='off'||window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:Math.round(ms*(tableView.mode==='fast'?.4:1));}
+// Fast forward after I fold (Settings > Table, on by default): once your hand is folded the rest of it still plays out
+// with every bet, card and pot animation, about three times faster. Every action goes through the
+// engine as normal, so history and bot stats stay complete.
+function skipAfterFold(){try{return localStorage.getItem('guava-skip-after-fold')!=='0'}catch{return true}}
+function fastForwarding(h=state.hand){if(!h?.folded||typeof friendGame==='function'&&friendGame()||$('controlAll')?.checked||!$('play')?.classList.contains('active')||!skipAfterFold())return false;return h.folded[(state.hero%h.n+h.n)%h.n]===true;}
+function motionMs(ms){return tableView.mode==='off'||window.matchMedia('(prefers-reduced-motion: reduce)').matches||!ms?0:Math.max(1,Math.round(ms*(tableView.mode==='fast'?.4:1)*(fastForwarding()?.3:1)));}
 function stopTableMotion(){cancelSessionNext();tableView.generation++;clearTimeout(tableView.botTimer);tableView.botTimer=null;tableView.presented=null;tableView.playing=false;tableView.message='';$('table')?.getAnimations({subtree:true}).forEach(a=>a.cancel());$('table')?.querySelectorAll('.table-flight').forEach(x=>x.remove());$('table')?.querySelectorAll('[data-bet]').forEach(x=>x.style.visibility='');if(state.hand?.done)onHandEnd();}
 function motionPause(ms){return new Promise(resolve=>setTimeout(resolve,motionMs(ms)));}
 async function animateElement(el,frames,ms,delay=0){if(!el||!motionMs(ms)||typeof el.animate!=='function')return;const a=el.animate(frames,{duration:motionMs(ms),delay:motionMs(delay),easing:'cubic-bezier(.2,.7,.2,1)',fill:'both'});try{await a.finished}catch{}finally{a.cancel()}}
