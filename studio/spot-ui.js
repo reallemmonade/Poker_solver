@@ -309,7 +309,9 @@ function jobBarHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=la
  return'<div class="notice'+(jobPending(j)?' solve-job-wait':'')+'" id="solveJobNotice">'+(jobPending(j)?cancel('Cancel'):'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
 setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
 async function sendToMac(task,observed,opts,extraAction){
- if(!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
+ // A flop, turn or river solve needs everyone's range; a preflop line solves the whole preflop game on the Mac
+ // (tools/preflop/spot.cjs) and needs none, which is exactly the line no chart covers.
+ if(observed.board.length&&!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
  const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
