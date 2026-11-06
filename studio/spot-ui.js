@@ -167,7 +167,7 @@ function spotPlan(hand,where=spotUI.where){
    if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
    else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
    else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
-  else if(!bridge&&dest.target==='mac'){const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!hb?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-hb.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
+  else if(!bridge&&dest.target==='mac'){if(!pre&&hb?.seen&&(hb.features||[]).includes('update')&&!(hb.features||[]).includes('trees'))plan.updateHint=true;const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!hb?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-hb.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
  }
  // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
  // can't be sent, so it isn't offered (the solve would only stop with that error).
@@ -218,9 +218,11 @@ function solveSpotClick(skipReference=false){
 function solveChoices(hand,plan){const other=spotPlan(hand,plan.cloud?'mac':'cloud'),cloud=plan.cloud?plan:other,mac=plan.cloud?other:plan;return[['mac',mac],['cloud',cloud]];}
 // The Mac/Cloud switch above effort buttons: the one picked is pressed, and the efforts below are for it.
 function solveWhereHTML(hand,plan){return'<div class="solve-where" role="group" aria-label="Where to solve">'+solveChoices(hand,plan).map(([w,p])=>'<button type="button" class="solve-where-pick'+((w==='cloud')===!!plan.cloud?' on':'')+'" aria-pressed="'+((w==='cloud')===!!plan.cloud)+'" data-solve-where="'+w+'"><span>'+(w==='cloud'?'Cloud':'Mac')+'</span><span>'+planTimeText(p).replace(/^about /,'')+'</span></button>').join('')+'</div>';}
+// A Mac bridge from before PR #246 answers only the decision it was sent, so it is offered an update.
+function updateHintHTML(plan){return plan?.updateHint&&!plan.cloud?'<p class="small muted"><button type="button" class="ui-jump" data-jump="mac-update">Update your Mac</button> so the rest of the hand reuses its solve.</p>':'';}
 function solvePromptHTML(plan,full=false){const off=(state.busy?' disabled':'')+(full?' data-full-tree':''),time=f=>planTimeText(plan,f).replace(/^about /,''),h=plan.hand||state.hand;
- if(plan.choices&&!plan.efforts)return'<div class="solve-inline">'+solveChoices(h,plan).map(([w,p])=>'<button type="button" class="btn solve-cta'+(w==='mac'?' secondary':'')+'" data-inline-solve="standard" data-where="'+w+'"'+off+'><span>Solve '+planPlace(p)+'</span><span>'+planTimeText(p).replace(/^about /,'')+'</span></button>').join('')+'</div>';
- return'<div class="solve-inline">'+(plan.choices?solveWhereHTML(h,plan):'')+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+'</div>';}
+ if(plan.choices&&!plan.efforts)return'<div class="solve-inline">'+solveChoices(h,plan).map(([w,p])=>'<button type="button" class="btn solve-cta'+(w==='mac'?' secondary':'')+'" data-inline-solve="standard" data-where="'+w+'"'+off+'><span>Solve '+planPlace(p)+'</span><span>'+planTimeText(p).replace(/^about /,'')+'</span></button>').join('')+updateHintHTML(solveChoices(h,plan)[0][1])+'</div>';
+ return'<div class="solve-inline">'+(plan.choices?solveWhereHTML(h,plan):'')+(plan.efforts?'<div class="solve-efforts">'+Object.entries(SOLVE_EFFORTS).map(([id,e])=>'<button type="button" class="btn solve-cta'+(id==='standard'?'':' secondary')+'" data-inline-solve="'+id+'"'+off+'><span>'+e.label+'</span><span>'+time(e.factor)+'</span></button>').join('')+'</div>':'<button type="button" class="btn solve-cta" data-inline-solve="standard"'+off+'><span>Solve '+planPlace(plan)+'</span><span>'+time(1)+'</span></button>')+(plan.note?'<p class="small muted">'+esc(plan.note)+'</p>':'')+updateHintHTML(plan)+'</div>';}
 document.addEventListener('click',event=>{const b=event.target.closest('[data-inline-solve]');if(!b)return;const h=state.hand;if(!h||h.done||state.busy)return;const plan=spotPlan(h,b.dataset.where||spotUI.where);if(plan&&!plan.blocked&&plan.route!=='none')analyzeSpot(h,{kind:'inspect',plan,effort:b.dataset.inlineSolve,fullTree:b.hasAttribute('data-full-tree')});});
 document.addEventListener('click',event=>{const b=event.target.closest('.solve-inline [data-solve-where]');if(!b)return;spotUI.where=b.dataset.solveWhere;spotUI.last=null;if(state.hand)renderPlay();});
 function hideSolveConfirm(){const box=$('spotConfirm');if(box){box.classList.add('hide');box.innerHTML='';}}
@@ -253,10 +255,20 @@ function treeReference(hand){
  let r=null;const o=observedData(hand),saved=spotUI.trees.get(treeKey(o,hand.street));if(saved)try{r=PokerLocalSolver.treeAnswer(saved,o,hand);}catch{r=null;}spotUI.treeMemo.set(hand,{at,r});return r;}
 function treeRanges(hand){if(!hand||hand.street<2||typeof PokerLocalSolver==='undefined')return null;const o=observedData(hand),saved=spotUI.trees.get(treeKey(o,hand.street-1));if(!saved)return null;try{const ranges=PokerLocalSolver.treeCarry(saved,o,{seat:hand.actor,cards:hand.holes[hand.actor]});return ranges?{ranges,origin:'The '+['flop','turn'][hand.street-2]+' solve\'s ranges, narrowed by each player\'s '+['flop','turn'][hand.street-2]+' actions with the solved frequencies'}:null;}catch{return null;}}
 const sameAction=(a,b)=>a&&b&&a.seat===b.seat&&a.street===b.street&&a.kind===b.kind&&(a.target||0)===(b.target||0);
+// A solve job sent earlier on this hand's line (its board and actions start this hand's).
+function jobOnLine(j,hand){const o=j?.observed;return !!(o?.board&&hand&&!hand.done&&Array.isArray(o.actions)&&o.board.length<=hand.board.length&&o.actions.length<=hand.actionLog.length&&o.board.every((c,i)=>c===hand.board[i])&&o.actions.every((a,i)=>sameAction(a,hand.actionLog[i])));}
+// Once you've sent one decision of a hand to your Mac or the cloud, the rest of that hand solves there without
+// asking: a later decision the kept tree can't answer (the next street, or a size off the tree) goes to the same
+// place by itself. The plan for that, or null.
+function followUpPlan(hand){
+ if(!hand||hand.done||hand.street<1||spotJob(hand))return null;const me=deviceId();let last=null;
+ for(const j of spotUI.jobs.values())if(j.device===me&&j.status!=='cancelled'&&j.status!=='failed'&&jobOnLine(j,hand)&&(!last||(j.createdAt||0)>(last.createdAt||0)))last=j;
+ if(!last)return null;const plan=spotPlan(hand,last.target==='modal'?'cloud':'mac');return plan&&!plan.blocked&&plan.route==='mac'?plan:null;
+}
 // Reads the saved answers of done Mac and cloud solves from earlier in this hand (each once), for their trees.
 async function loadHandTrees(hand){
  if(!hand||hand.done||hand.street<1)return false;let added=false;
- for(const j of spotUI.jobs.values()){const o=j.observed;if(j.status!=='done'||!o?.board||o.board.length<3||spotUI.treeRows.has(j.rowId)||o.board.length>hand.board.length||o.actions.length>hand.actionLog.length||!o.board.every((c,i)=>c===hand.board[i])||!o.actions.every((a,i)=>sameAction(a,hand.actionLog[i])))continue;
+ for(const j of spotUI.jobs.values()){const o=j.observed;if(j.status!=='done'||!o?.board||o.board.length<3||spotUI.treeRows.has(j.rowId)||!jobOnLine(j,hand))continue;
   spotUI.treeRows.add(j.rowId);let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
   if(row?.key===j.key&&row.result?.solve?.tree){rememberTree(row.result,o);added=true;}}
  return added;
@@ -268,7 +280,7 @@ async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending
 // A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made. With
 // Record an assessment on, it keeps going instead: its answer grades the decision you made (gradeFromJobs).
 // Not before the saved hand is back after a reload: until then the table holds a placeholder deal.
-function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||spotUI.gradeWaits.has(j.baseKey)||$('gradeEvery')?.checked)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key)cancelSolveJob(id);}}
+function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||spotUI.gradeWaits.has(j.baseKey)||$('gradeEvery')?.checked)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key&&!jobOnLine(j,state.hand))cancelSolveJob(id);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from

@@ -272,10 +272,11 @@
  // instead of solving again, and the next street's solve starts from the ranges the played line leaves (treeCarry).
  // It holds each player's combos once, then the action nodes breadth first: the line from the street's start in
  // TexasSolver's labels, whose turn, the actions, and every combo's mix as 0-255 per action in base64. It stops at
- // about TREE_BYTES, so the answer stays under the account's 256 KB a record; a line past that solves again.
+ // about TREE_BYTES (the bridge drops the deepest nodes when the whole answer would pass the account's 256 KB a
+ // record); a line past that solves again.
  // The next street is not in it: the dump stops at the street's end, and a flop solve plays later streets with
  // one bet size, so the turn gets its own solve with every size.
- const TREE_BYTES=100000,B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+ const TREE_BYTES=160000,B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
  function b64(bytes){let out='';for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2],n=a<<16|(b||0)<<8|(c||0);out+=B64[n>>18&63]+B64[n>>12&63]+(i+1<bytes.length?B64[n>>6&63]:'=')+(i+2<bytes.length?B64[n&63]:'=');}return out;}
  function unb64(text){const clean=text.replace(/=+$/,''),out=new Uint8Array(Math.floor(clean.length*3/4));let bits=0,value=0,k=0;for(const ch of clean){value=value<<6|B64.indexOf(ch);bits+=6;if(bits>=8){bits-=8;out[k++]=value>>bits&255;}}return out;}
  function streetTree(tree,s,budget=TREE_BYTES){
