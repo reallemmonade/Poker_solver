@@ -54,7 +54,8 @@ function captureSessionTransition(){return{config:state.config,hero:state.hero,h
 // Solve has its own table: entering the Solve tab parks the Play game (hand, setup, session, bots, model, fixed hole cards)
 // and leaving puts it back, so a hand built or solved there never becomes the game being played. Only the Play table is
 // saved as the live session; a newer session synced from elsewhere while Solve is open is adopted when Play returns.
-const tableSlots={owner:'play',parked:null,remote:null};
+// Play, Solve and a friend game each keep their own table; the ones not on screen wait here by owner.
+const tableSlots={owner:'play',parked:{},remote:null};
 function captureTable(){return{...captureSessionTransition(),level:liveSession.level,abstraction:state.abstraction,snapshot:state.snapshot,heroCards:$('heroCards').value,feedback:$('playFeedback').innerHTML};}
 function restoreTable(saved){
  state.config=saved.config;state.hero=saved.hero;state.hand=saved.hand;state.handSaved=saved.handSaved;state.currentGrades=saved.currentGrades;state.sessionHands=saved.completedHands;Object.assign(liveSession,saved.session);liveSession.level=saved.level;botSettings.seats=saved.bots;botSettings.renderKey='';saveBotSettings();
@@ -63,7 +64,7 @@ function restoreTable(saved){
 }
 function swapTable(to){
  if(to===tableSlots.owner)return;cancelSessionNext();stopTableMotion();if(typeof handReportClose==='function')handReportClose();if(typeof handGradeHide==='function')handGradeHide();
- const back=tableSlots.parked;tableSlots.parked=captureTable();tableSlots.owner=to;
+ const back=tableSlots.parked[to];tableSlots.parked[tableSlots.owner]=captureTable();delete tableSlots.parked[to];tableSlots.owner=to;
  if(back)restoreTable(back);else{state.hand=null;state.handSaved=false;state.currentGrades=[];state.dirty=false;}
  if(to!=='play'){renderAll();return;}
  const remote=tableSlots.remote;tableSlots.remote=null;if(remote){restoreLiveSession(remote,true);return;}
@@ -80,7 +81,7 @@ function renderSessionStatus(){
 }
 function scheduleSessionNext(){
  cancelSessionNext();const hand=state.hand;
- if(!hand?.done||typeof handReport!=='undefined'&&handReport.open||!$('autoNextHand').checked||!$('play').classList.contains('active')||playBusy()||tableView.playing||state.dirty||$('controlAll').checked)return;
+ if(friendGame()||!hand?.done||typeof handReport!=='undefined'&&handReport.open||!$('autoNextHand').checked||!$('play').classList.contains('active')||playBusy()||tableView.playing||state.dirty||$('controlAll').checked)return;
  liveSession.timer=setTimeout(()=>{liveSession.timer=null;if(state.hand!==hand||!$('play').classList.contains('active')||!$('autoNextHand').checked||playBusy()||state.dirty)return;deal(true);},4500);
 }
 function sessionHandEnded(){

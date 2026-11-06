@@ -302,3 +302,23 @@ html .ui-pane-tabs.glide-dragging .glide-hot{color:var(--ink)!important}
 .sb-prize .input{height:34px;min-height:34px;padding:4px 8px;font-size:14px;box-sizing:border-box}#sbPay{flex:1;min-width:0;width:100%}.sb-row>div{min-width:0}
 
 .ui-analysis-acts{display:flex;align-items:baseline;gap:14px}.ui-open-solve{display:inline-flex;align-items:center;gap:4px}.ui-open-solve[hidden]{display:none}.ui-open-solve svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;align-self:center}
+/* Friend games (friend-play.js): the room strip above the table, Invite seats before the first hand, and the bot,
+   solver and saved-history controls hidden while you sit at a friend table. */
+.friend-bar{margin:0 0 6px;padding:7px 8px 7px 12px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.friend-bar .fb-row{display:flex;align-items:center;gap:8px;min-width:0}
+.friend-bar .fb-notes{flex-wrap:wrap;margin-top:6px;font-size:13px}
+.friend-bar .fb-code{font-weight:900;letter-spacing:.14em;color:var(--gold);font-size:18px}
+.friend-bar .fb-link,.friend-bar .fb-clock{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);font-size:12px}
+.friend-bar .fb-clock{font-size:13px;color:var(--ink)}
+.friend-bar .btn.sm{min-height:34px;height:34px;padding:0 11px;font-size:13px;border-radius:10px}
+.friend-bar .fb-claim{display:inline-flex;align-items:center;gap:6px}
+.friend-bar .fb-notice{color:var(--muted)}
+.friend-invite.seat-node{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:7px 4px;border:1.5px dashed color-mix(in srgb,var(--gold) 55%,transparent);border-radius:12px;background:var(--panel);color:var(--gold);font:700 12px/1.2 inherit;cursor:pointer}
+.friend-invite.seat-node span{font-size:20px;line-height:1}
+.friend-lobby-center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.friend-lobby-center b{display:block;margin-top:4px;font-size:26px;letter-spacing:0;color:var(--ink)}
+#playActions .friend-deal{width:100%}
+#playActions .friend-wait{text-align:center;padding:10px}
+body.friend-game #deal,body.friend-game #restartSession,body.friend-game #sessionStatus,body.friend-game #sessionElsewhere,body.friend-game [data-pane-edit],body.friend-game #uiEditGame,body.friend-game #uiOpenSolve,body.friend-game #analyze,body.friend-game .ui-pane-hands,body.friend-game .ui-history-pane>h2,body.friend-game #uiTableOptions,body.friend-game .table-legend{display:none!important}
+@media(max-width:800px),(max-width:1000px) and (pointer:coarse){.ui-app.friend-game .ui-live-grid .ui-table-pane .felt{height:max(240px,calc(100% - var(--dock,140px) - 20px - var(--friend-bar,52px)));margin-top:6px}.friend-bar{padding:5px 6px 5px 10px}.friend-bar .fb-code{font-size:16px}}
+body:not(.friend-game) .friend-bar{display:none!important}
