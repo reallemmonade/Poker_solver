@@ -12,6 +12,9 @@ assert.ok(R.rate(run(3000,i=>({street:2,mistake:i%10===0,cost:i%10===0?40:null})
 // Small solver mistakes cost less than punts.
 assert.ok(R.score({mistake:true,cost:.1})>.9&&R.score({mistake:true,cost:5})<.01&&R.score({mistake:true,cost:null})===0&&R.score({mistake:false})===1);
 assert.equal(R.score({mistake:true,cost:null,sizeOnly:true}),.5);
+// A mistake never gains rating, even a small one well below the spot's rating; a correct play always gains.
+for(const r of [800,1200,1500,1900])for(const n of [0,40]){for(const d of [{street:3,mistake:true,cost:.45},{street:0,mistake:true,cost:null,sizeOnly:true},{street:1,mistake:true,cost:.06},{street:0,mistake:true,cost:null}])assert.ok(R.delta(d,r,n)<0,JSON.stringify([d,r,n]));assert.ok(R.delta({street:2,mistake:false},r,n)>0);}
+assert.ok(R.delta({street:3,mistake:true,cost:.45},1300,40)>R.delta({street:3,mistake:true,cost:3},1300,40));
 // Order is by time, not input order, and the first 30 decisions are provisional.
 const some=run(40,i=>({mistake:i<5}));assert.equal(R.rate(some.slice().reverse()).rating,R.rate(some).rating);assert.equal(R.rate(some.slice(0,20)).provisional,true);assert.equal(R.rate(some).provisional,false);
 // Categories: MTT is tournament play, Cash is cash games, Heads-up is two-handed tables of either kind.
