@@ -4,7 +4,7 @@
 // up to 90% medium, larger large); preflop, and wherever no hand is given, raises shade by their order. A bet that
 // covers every opponent is all-in, as the bet bar labels it.
 function actionTones(actions,hand=null){
- const legal=(()=>{try{return hand&&!hand.done?hand.legal():null}catch{return null}})(),cover=legal?Math.min(legal.allInTo,Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i]))||legal.allInTo):0,jam=a=>/all-in/i.test(a.label||'')||!!a.allIn||!!(legal&&a.target>=cover*.99);
+ const legal=(()=>{try{return hand&&!hand.done?hand.legal():null}catch{return null}})(),cover=legal?Math.min(legal.allInTo,Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i]))||legal.allInTo):0,jam=a=>/all-in/i.test(a.label||'')||!!a.allIn||!!(legal&&a.target>=cover*.97);
  const sized=actions.map((a,i)=>({a,i})).filter(({a})=>(a.kind==='bet'||a.kind==='raise')&&!jam(a)).sort((x,y)=>(x.a.target||0)-(y.a.target||0)),tones=actions.map(a=>a.kind==='fold'?'fold':a.kind==='check'||a.kind==='call'?'passive':'allin');
  if(hand&&hand.street>0&&!hand.done){const paid=hand.streetPaid[hand.actor],owe=Math.max(0,(hand.currentBet||0)-paid),pot=Math.max(1,hand.pot+owe);for(const {a,i}of sized){const f=((a.target||0)-paid-owe)/pot;tones[i]=f<=.45?'bet1':f<=.9?'bet2':'bet3';}}
  else{const by={1:['bet2'],2:['bet1','bet3'],3:['bet1','bet2','bet3']}[sized.length];sized.forEach(({i},k)=>{tones[i]=by?by[k]:['bet1','bet2','bet3'][Math.min(2,Math.floor(3*k/sized.length))];});}
@@ -14,11 +14,11 @@ function actionTones(actions,hand=null){
 // tree and the bet bar do ("Bet 1/3", "Raise 2/3", "Bet 1.5x"); anything all-in reads All-in. Elsewhere sizes stay in bb, to one decimal.
 function potShareLabel(f){const named=[[1/4,'1/4'],[1/3,'1/3'],[1/2,'1/2'],[2/3,'2/3'],[3/4,'3/4'],[1,'Pot'],[1.5,'1.5x'],[2,'2x']].find(([x])=>Math.abs(f-x)<=Math.max(.02,x*.05));return named?named[1]:Math.round(f*100)+'%';}
 // Every solver source goes through here, so the rules hold app-wide: a bet or raise that covers every opponent (or is
-// marked all-in, effective all-in or "puts the opponent all-in") reads All-in, and postflop one at the legal minimum
+// marked all-in, effective all-in, within 3% of all-in or "puts the opponent all-in") reads All-in, and postflop one at the legal minimum
 // whose pot share is bigger than the tree's smallest size (a 1bb bet into a 2bb limped pot, where 1/3 pot would be under
 // the 1bb minimum), or a minimum raise, reads Min, as the bet bar's preset does.
 function toneLabel(a,tone,hand=null){let s=String(a.label||'');const legal=(()=>{try{return hand&&!hand.done&&hand.street>0?hand.legal():null}catch{return null}})(),sized=(a.kind==='bet'||a.kind==='raise')&&Number.isFinite(a.target),cover=legal?Math.min(legal.allInTo,Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i]))||legal.allInTo):Infinity;
- const jam=tone==='allin'||!!a.allIn||/·[^·]*\ball-in\b/i.test(s)||!!(legal&&sized&&a.target>=cover*.99);s=s.replace(/\s*·[^·]*\ball-in\b.*$/i,'');
+ const jam=tone==='allin'||!!a.allIn||/·[^·]*\ball-in\b/i.test(s)||!!(legal&&sized&&a.target>=cover*.97);s=s.replace(/\s*·[^·]*\ball-in\b.*$/i,'');
  if(jam)return hand&&hand.street>0?'All-in':s.replace(/^(Bet|Raise to|Raise)\b/i,'All-in').replace(/(\d+\.\d+)(?= bb)/g,n=>String(+(+n).toFixed(1)));
  if(legal&&sized){const paid=hand.streetPaid[hand.actor],owe=Math.max(0,(hand.currentBet||0)-paid),pot=Math.max(1,hand.pot+owe),f=(a.target-paid-owe)/pot;return(a.kind==='raise'?'Raise ':'Bet ')+(a.target===legal.minRaiseTo&&(a.kind==='raise'||f>1/3+.02)?'Min':potShareLabel(f));}
  return s.replace(/(\d+\.\d+)(?= bb)/g,n=>String(+(+n).toFixed(1)));}
