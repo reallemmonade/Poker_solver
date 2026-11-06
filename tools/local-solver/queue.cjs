@@ -46,7 +46,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),name,rate,features:update?['preflop','update','targets']:['preflop','targets'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),name,rate,features:update?['preflop','update','targets','trees']:['preflop','targets','trees'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
    for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id)&&(!once||r.id===once.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
@@ -77,9 +77,10 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'},at())]});return;}
   const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost:costOf(started.startedAt)}:{},message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
-  // The street's kept tree (studio/local-solver.js streetTree) is left off an answer that would pass the account's
-  // 256 KB a record, which would refuse the whole push: later decisions then solve again.
-  if(ok&&result.solve?.tree&&Buffer.byteLength(JSON.stringify({result,observed:job.observed,options:job.options}))>240000)delete result.solve.tree;
+  // The street's kept tree (studio/local-solver.js streetTree) loses its deepest nodes until the answer fits the
+  // account's 256 KB a record, which would otherwise refuse the whole push.
+  const rowBytes=()=>Buffer.byteLength(JSON.stringify({result,observed:job.observed,options:job.options}));
+  while(ok&&result.solve?.tree&&rowBytes()>240000){const n=result.solve.tree.nodes;n.splice(Math.max(1,Math.floor(n.length*.85)));if(n.length<=1&&rowBytes()>240000)delete result.solve.tree;}
   if(ok)rows.push({store:'solves',id:job.rowId,t:Date.now(),data:{id:job.rowId,key:job.key,result,observed:job.observed,options:job.options,extraAction:job.extraAction||null,updatedAt:new Date().toISOString()}});
   rows.push(meta(id,done,at()));jobs.set(id,done);await api('POST','/api/sync',{rows});log((ok?'Solved ':'Could not solve ')+id+' in '+Math.round((done.finishedAt-done.startedAt)/1000)+' s'+(ok?'.':': '+done.message));
  }
