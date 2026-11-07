@@ -23,7 +23,13 @@ const gradeFolds=o=>/^fold\b/i.test(o?.label||'');
 // The frequency a chart grade is judged by: the chosen action's, or facing an open, how often the chart continues at all.
 function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsopen'||!Array.isArray(g.options)||!g.options[g.choice]||gradeFolds(g.options[g.choice])||!Number.isFinite(f))return f;
  return Math.max(f,g.options.reduce((s,o)=>s+(!gradeFolds(o)&&Number.isFinite(o.f)?o.f:0),0));}
-function gradeApprox(g){return gradeSplit(g)==='after'||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+// The charts' 3-bets are linear, so facing an open they fold every hand a solver uses as a 3-bet bluff or a speculative
+// flat (suited connectors, suited broadways, small suited aces). Continuing with one of those where the chart folds is
+// not graded: pairs, suited aces, suited K9+, suited broadways, and suited connectors and one-gappers from 54s and 64s up.
+function gradeBluffHand(cls){if(!/^[2-9TJQKA]{2}[so]?$/.test(cls||''))return false;const R='23456789TJQKA',hi=R.indexOf(cls[0]),lo=R.indexOf(cls[1]);if(hi===lo)return true;if(cls[2]!=='s')return false;
+ return cls[0]==='A'||cls[0]==='K'&&lo>=7||lo>=8||hi-lo<=2&&lo>=2;}
+function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choice]&&!gradeFolds(g.options[g.choice])&&Number.isFinite(g.referenceFrequency)&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05)&&gradeBluffHand(comboOf(g.hand||''));}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
