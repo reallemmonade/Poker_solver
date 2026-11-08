@@ -247,7 +247,7 @@ function jobPending(j){return j.status==='queued'||j.status==='running';}
 // that street reads it instead of solving again, and the next street's solve starts from the ranges the played line
 // leaves. Trees are kept in memory by hand line (the earlier streets, the board, whose decision and their cards); a
 // Mac or cloud answer is read back from this device's saved answers once its job is done.
-spotUI.trees=new Map();spotUI.treeRows=new Set();spotUI.treeMemo=new WeakMap();
+spotUI.trees=new Map();spotUI.treeWaits=[];spotUI.treeRows=new Set();spotUI.treeMemo=new WeakMap();
 function treeKey(o,street){return JSON.stringify([o.config,o.board.slice(0,street+2),o.actions.filter(a=>a.street<street).map(a=>[a.seat,a.street,a.kind,a.target||0]),o.actor,(o.heroCards||[]).slice().sort((a,b)=>a-b)]);}
 function rememberTree(result,observed){if(!result?.solve?.tree||!(observed?.board?.length>=3))return;spotUI.trees.set(treeKey(observed,observed.board.length-2),result);while(spotUI.trees.size>12)spotUI.trees.delete(spotUI.trees.keys().next().value);}
 function treeReference(hand){
@@ -263,16 +263,26 @@ function jobOnLine(j,hand){const o=j?.observed;return !!(o?.board&&hand&&!hand.d
 function followUpPlan(hand){
  if(!hand||hand.done||hand.street<1||spotJob(hand))return null;const me=deviceId();let last=null;
  for(const j of spotUI.jobs.values())if(j.device===me&&j.status!=='cancelled'&&j.status!=='failed'&&jobOnLine(j,hand)&&(!last||(j.createdAt||0)>(last.createdAt||0)))last=j;
- if(!last)return null;const plan=spotPlan(hand,last.target==='modal'?'cloud':'mac');return plan&&!plan.blocked&&plan.route==='mac'?plan:null;
+ if(!last||lineJob(hand))return null;const plan=spotPlan(hand,last.target==='modal'?'cloud':'mac');if(!plan||plan.blocked||plan.route!=='mac')return null;
+ const was=(last.observed?.board?.length||3)-3,now=hand.board.length-3;return{...plan,why:was<now?'street':'line'};
 }
+// A solve still running for an earlier decision of this street on this hand's line: its tree answers this decision
+// when it lands, so nothing is sent again in the meantime.
+function lineJob(hand){if(!hand||hand.done||hand.street<1)return null;let found=null;for(const j of spotUI.jobs.values())if(jobPending(j)&&j.observed?.board?.length===hand.board.length&&jobOnLine(j,hand)&&(!found||(j.createdAt||0)>(found.createdAt||0)))found=j;return found;}
+const STREET_WORDS=['preflop','flop','turn','river'];
+// Why a decision later in a hand went off to be solved on its own, shown over its progress.
+function jobWhyHTML(j){const s=STREET_WORDS[(j.observed?.board?.length||3)-2]||'',prev=STREET_WORDS[(j.observed?.board?.length||3)-3]||'';return j.why==='street'?'<p class="small muted">The '+prev+' solve stops at the end of the '+prev+', so the '+s+' is solved now.</p>':j.why==='line'?'<p class="small muted">The earlier '+s+' solve doesn\'t cover this line (a bet size it didn\'t use), so this decision is solved on its own.</p>':'';}
 // Reads the saved answers of done Mac and cloud solves from earlier in this hand (each once), for their trees.
 async function loadHandTrees(hand){
  if(!hand||hand.done||hand.street<1)return false;let added=false;
  for(const j of spotUI.jobs.values()){const o=j.observed;if(j.status!=='done'||!o?.board||o.board.length<3||spotUI.treeRows.has(j.rowId)||!jobOnLine(j,hand))continue;
-  spotUI.treeRows.add(j.rowId);let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
-  if(row?.key===j.key&&row.result?.solve?.tree){rememberTree(row.result,o);added=true;}}
+  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
+  if(row?.key!==j.key)continue;spotUI.treeRows.add(j.rowId);if(row.result?.solve?.tree){rememberTree(row.result,o);added=true;}}
  return added;
 }
+// Decisions you acted on while their street's solve was still running (analyzeSpot): graded from its tree once it lands
+// (or not at all if it was cancelled or failed).
+function releaseTreeWaits(){const ready=spotUI.treeWaits.filter(t=>!lineJob(t.hand));if(!ready.length)return;spotUI.treeWaits=spotUI.treeWaits.filter(t=>!ready.includes(t));for(const t of ready)state.gradeQueue.push(t);if(typeof pumpGrades==='function')pumpGrades();}
 // This device's id, so it cancels only the solves it sent.
 function deviceId(){try{let id=localStorage.getItem('citrus-device-id');if(!id){id=Math.random().toString(36).slice(2,12);localStorage.setItem('citrus-device-id',id);}return id;}catch{return'';}}
 // Cancelling marks the job; the Mac stops it at its next progress check (within about 10 seconds) or skips it.
@@ -280,7 +290,12 @@ async function cancelSolveJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending
 // A solve this device sent stops once you act or the hand ends: its answer would be for a decision already made. With
 // Record an assessment on, it keeps going instead: its answer grades the decision you made (gradeFromJobs).
 // Not before the saved hand is back after a reload: until then the table holds a placeholder deal.
-function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||spotUI.gradeWaits.has(j.baseKey)||$('gradeEvery')?.checked)continue;if(key===null)key=state.hand&&!state.hand.done?PokerSpot.publicKey(observedData(state.hand)):'';if(j.baseKey!==key&&!jobOnLine(j,state.hand))cancelSolveJob(id);}}
+// A solve you acted before keeps running only while it can still answer a decision of yours: you're in the hand and
+// it is still that solve's street. Folding, the next street or the end of the hand cancels it (Maxam, 2026-11-08).
+// Each table cancels only its own solves (Play, or Solve's own table); Hand replay solves are never cancelled here.
+function solveTable(){return typeof studioInterface!=='undefined'&&studioInterface.tab==='solve'?'solve':'play';}
+function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId(),h=state.hand,table=solveTable();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||(j.table||'play')!==table)continue;if(key===null)key=h&&!h.done?PokerSpot.publicKey(observedData(h)):'';if(j.baseKey===key)continue;
+ const live=!!h&&!h.done&&!(state.hero>=0&&h.folded[state.hero])&&j.observed?.board?.length===h.board.length&&jobOnLine(j,h);if(!live)cancelSolveJob(id);}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
 // Where a Mac solve stands, in one line, with a progress bar while it runs. A running solve's progress comes from
@@ -319,13 +334,13 @@ function jobNoticeHTML(j){const bar=jobBarHTML(j),st=jobState(j);if(st.retry){co
 function jobBarHTML(j){const st=jobState(j),id='solvejob-'+hash(j.key),cancel=label=>'<button type="button" class="'+(label?'ui-text-button solve-cancel':'solve-job-x')+'" data-cancel-job="'+esc(id)+'" aria-label="Cancel solve">'+(label||'✕')+'</button>';
  if(jobPending(j)&&st.label)return'<div class="solve-job'+(st.queued?' queued':'')+'" id="solveJobNotice" role="progressbar" aria-label="'+esc(st.text)+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div class="solve-job-fill" style="width:'+(st.queued?100:Math.max(2,Math.min(100,st.p*100))).toFixed(1)+'%"></div><span>'+esc(st.label)+'</span><span>'+esc(st.time)+'</span>'+cancel()+'</div>';
  return'<div class="notice'+(jobPending(j)?' solve-job-wait':'')+'" id="solveJobNotice">'+(jobPending(j)?cancel('Cancel'):'')+esc(st.text)+(st.p!==undefined?'<div class="solve-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(st.p*100)+'"><div style="width:'+Math.max(2,Math.min(100,st.p*100)).toFixed(1)+'%"></div></div>':'')+'</div>';}
-setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
+setInterval(()=>{const el=$('solveJobNotice');if(!el||document.visibilityState==='hidden')return;const j=spotJob(state.hand)||lineJob(state.hand);if(j&&jobPending(j))el.outerHTML=jobNoticeHTML(j);},1000);
 async function sendToMac(task,observed,opts,extraAction){
  // A flop, turn or river solve needs everyone's range; a preflop line solves the whole preflop game on the Mac
  // (tools/preflop/spot.cjs) and needs none, which is exactly the line no chart covers.
  if(observed.board.length&&!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),table:task.kind==='review'?'review':solveTable(),...plan.why?{why:plan.why}:{},street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
 }
@@ -376,7 +391,7 @@ function restoreGradeWaits(){const rows=storedGradeWaits();for(const r of rows){
 async function gradeFromJobs(){for(const [key,item] of [...spotUI.gradeWaits]){const j=[...spotUI.jobs.values()].filter(x=>x.baseKey===key).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];if(!j||j.status==='failed'||j.status==='cancelled'){dropGradeWait(key);continue;}if(j.status!=='done')continue;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
  if(!row||!validSpotResult(row.result))continue;dropGradeWait(key);spotUI.cache.set(j.key,row.result);try{finishAnalysis(row.result,{...item,cacheKey:j.key,solveOptions:j.options});}catch{}}}
-addEventListener('citrus-synced',()=>loadSolveJobs().then(async()=>{restoreGradeWaits();gradeFromJobs();deliverSolveJob();await loadHandTrees(state.hand).catch(()=>false);if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
+addEventListener('citrus-synced',()=>loadSolveJobs().then(async()=>{restoreGradeWaits();gradeFromJobs();deliverSolveJob();await loadHandTrees(state.hand).catch(()=>false);releaseTreeWaits();if(typeof renderPlay==='function'&&state.hand)renderPlay();}));
 function spotSourceStamp(snapshot){return JSON.stringify([snapshot?.format,snapshot?.id,snapshot?.episodes,snapshot?.decisions,snapshot?.createdAt,snapshot?.seedState,snapshot?.config,snapshot?.abstraction]);}
 function spotCacheKey(observed,options,extraAction,snapshot){const parts=['spot-v3',PokerSpot.publicKey(observed),options,extraAction],automatic=options.rangeMode==='auto'&&Array.from({length:observed.config.seats},(_,i)=>String(options.ranges[i]||'').trim()).some(text=>!text||/^auto$/i.test(text));if(automatic&&snapshot?.episodes>0&&observed.actions.length)parts.push(spotSourceStamp(snapshot));return JSON.stringify(parts);}
 function validSpotResult(r){
@@ -422,7 +437,7 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   // Grading a decision you already made never runs a solve on this device when the spot belongs on your Mac or the
   // cloud: a solve already sent there for this decision grades it when its answer lands (gradeFromJobs), and keeps
   // running after you act; otherwise the decision goes ungraded.
-  if(pending.background&&!onDeviceRoute(spotPlan(hand))){const job=[...spotUI.jobs.values()].find(j=>j.baseKey===baseKey&&(jobPending(j)||j.status==='done'));if(job){spotUI.gradeWaits.set(baseKey,{...task});keepGradeWait(baseKey,task);}state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(job)gradeFromJobs();if(typeof pumpGrades==='function')pumpGrades();return;}
+  if(pending.background&&!onDeviceRoute(spotPlan(hand))){const job=[...spotUI.jobs.values()].find(j=>j.baseKey===baseKey&&(jobPending(j)||j.status==='done'));if(!job&&!pending.treeWaited&&lineJob(hand)){spotUI.treeWaits.push({...task,treeWaited:true});state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(typeof pumpGrades==='function')pumpGrades();return;}if(job){spotUI.gradeWaits.set(baseKey,{...task});keepGradeWait(baseKey,task);}state.pending=null;lock();endSolveFeedback(task,'',false);$('playFeedback').innerHTML='';if(job)gradeFromJobs();if(typeof pumpGrades==='function')pumpGrades();return;}
   if(task.plan?.route==='mac'){await sendToMac(task,observed,opts,extraAction);if(state.pending!==task)return;state.pending=null;lock();const el=$('playFeedback');if(el)el.innerHTML='';status(task.plan.cloud?'Sent to the cloud.':task.plan.server?'Sent to your server.':'Sent to your Mac.');return;}
   const worker=ensureWorker();if(spotUI.workerStamp!==sourceStamp){worker.postMessage({type:'load',snapshot:reference.snapshot});spotUI.workerStamp=sourceStamp;state.workerVersion=0;}
   task.dispatched=true;task.started=Date.now();worker.postMessage({type:'solve',observed,options:opts,extraAction,tag:pending.kind});
