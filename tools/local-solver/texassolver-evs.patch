@@ -12,6 +12,33 @@ index 9e36411..89f632a 100644
  
  private:
      vector<float> bestResponse(shared_ptr<GameTreeNode> node, int player, const vector<vector<float>>& reach_probs, uint64_t board,int deal);
+diff --git a/include/solver/PCfrSolver.h b/include/solver/PCfrSolver.h
+index 3bcfcf2..5417e89 100644
+--- a/include/solver/PCfrSolver.h
++++ b/include/solver/PCfrSolver.h
+@@ -92,6 +92,8 @@ public:
+     );
+     void train() override;
+     json dumps(bool with_status,int depth);
++    // Per-hand EVs at the root for both players, keyed by combo.
++    json dumpEvs();
+ private:
+     vector<vector<PrivateCards>> ranges;
+     vector<PrivateCards> range1;
+diff --git a/src/runtime/PokerSolver.cpp b/src/runtime/PokerSolver.cpp
+index 0cf7fc4..c48a1a7 100644
+--- a/src/runtime/PokerSolver.cpp
++++ b/src/runtime/PokerSolver.cpp
+@@ -96,6 +96,9 @@ void PokerSolver::train(string p1_range, string p2_range, string boards, string
+ 
+ void PokerSolver::dump_strategy(string dump_file,int dump_rounds) {
+     json dump_json = this->solver->dumps(false,dump_rounds);
++    // Per-hand root EVs, for calibrating preflop realization from flop solves.
++    shared_ptr<PCfrSolver> pcfr = std::dynamic_pointer_cast<PCfrSolver>(this->solver);
++    if(pcfr) dump_json["evs"] = pcfr->dumpEvs();
+     ofstream fileWriter;
+     fileWriter.open(dump_file);
+     fileWriter << dump_json;
 diff --git a/src/solver/BestResponse.cpp b/src/solver/BestResponse.cpp
 index 49e2560..a9046bb 100644
 --- a/src/solver/BestResponse.cpp
@@ -40,24 +67,36 @@ index 49e2560..a9046bb 100644
 +    }
 +    return out;
 +}
-diff --git a/include/solver/PCfrSolver.h b/include/solver/PCfrSolver.h
-index 3bcfcf2..5417e89 100644
---- a/include/solver/PCfrSolver.h
-+++ b/include/solver/PCfrSolver.h
-@@ -92,6 +92,8 @@ public:
-     );
-     void train() override;
-     json dumps(bool with_status,int depth);
-+    // Per-hand EVs at the root for both players, keyed by combo.
-+    json dumpEvs();
- private:
-     vector<vector<PrivateCards>> ranges;
-     vector<PrivateCards> range1;
 diff --git a/src/solver/PCfrSolver.cpp b/src/solver/PCfrSolver.cpp
-index f0e022b..5f289b9 100644
+index f0e022b..9ba3ba3 100644
 --- a/src/solver/PCfrSolver.cpp
 +++ b/src/solver/PCfrSolver.cpp
-@@ -966,3 +966,23 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+@@ -4,6 +4,8 @@
+ 
+ #include <solver/BestResponse.h>
+ #include "solver/PCfrSolver.h"
++#include <cstdlib>
++#include <fstream>
+ 
+ //#define DEBUG;
+ 
+@@ -732,8 +734,15 @@ void PCfrSolver::train() {
+ 
+     uint64_t begintime = timeSinceEpochMillisec();
+     uint64_t endtime = timeSinceEpochMillisec();
++    // A caller that has to stop (a cloud solve at its price cap) creates this file: the solve ends after the
++    // current iteration and its strategy so far is dumped as usual.
++    const char* stop_file = getenv("TEXASSOLVER_STOP_FILE");
+ 
+     for(int i = 0;i < this->iteration_number;i++){
++        if(stop_file != nullptr && i > 0 && ifstream(stop_file).good()){
++            cout << "Stopped early at iteration " << i << " (stop file)." << endl;
++            break;
++        }
+         for(int player_id = 0;player_id < this->player_number;player_id ++) {
+             this->round_deal = vector<int>{-1,-1,-1,-1};
+             //#pragma omp parallel
+@@ -966,3 +975,23 @@ json PCfrSolver::dumps(bool with_status,int depth) {
      return std::move(retjson);
  }
  
@@ -81,17 +120,3 @@ index f0e022b..5f289b9 100644
 +    }
 +    return out;
 +}
-diff --git a/src/runtime/PokerSolver.cpp b/src/runtime/PokerSolver.cpp
-index 0cf7fc4..c48a1a7 100644
---- a/src/runtime/PokerSolver.cpp
-+++ b/src/runtime/PokerSolver.cpp
-@@ -96,6 +96,9 @@ void PokerSolver::train(string p1_range, string p2_range, string boards, string
- 
- void PokerSolver::dump_strategy(string dump_file,int dump_rounds) {
-     json dump_json = this->solver->dumps(false,dump_rounds);
-+    // Per-hand root EVs, for calibrating preflop realization from flop solves.
-+    shared_ptr<PCfrSolver> pcfr = std::dynamic_pointer_cast<PCfrSolver>(this->solver);
-+    if(pcfr) dump_json["evs"] = pcfr->dumpEvs();
-     ofstream fileWriter;
-     fileWriter.open(dump_file);
-     fileWriter << dump_json;

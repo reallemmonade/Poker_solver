@@ -18,11 +18,19 @@ Big jobs (job.size == "big": preflop lines that can reach a three-way flop, hour
 (BIG_RATE, about $1.64 an hour) that solves 8 of their 3-way flops at once, so they finish in tens of minutes. Their
 price per solve is about the same as on 8 cores; only the wait shrinks. studio/spot-ui.js CLOUD_SOLVER.big must match.
 The preflop three-way equity table (about 2 minutes to build) is kept on a Modal Volume, so it's built once.
+
+Price cap: the phone shows each solve's quote as an estimate ("~39¢", job.estimate) and sends a cap with it (job.cap,
+1.5x the quote). The worker is billed from this function's start (--started) and stops at the cap (--cap seconds,
+at least CAP_FLOOR so a cold start can't sink a sub-cent solve): a little before it, the solve is told to stop and
+still answers with what it has (marked capped); at the cap the job ends whatever it has. A last guard here kills the
+worker shortly after. Each finished job keeps its quote (estimate) and what it cost (cost), so tools/cloud/costs.cjs
+can check quotes against real bills.
 """
 import json
 import os
 import subprocess
 import tempfile
+import time
 import urllib.request
 
 import modal
@@ -34,6 +42,8 @@ BIG_CORES = 32
 BIG_MEMORY_MB = 16384
 BIG_RATE = round(BIG_CORES * 0.0000131 * 3600 + BIG_MEMORY_MB / 1024 * 0.00000222 * 3600, 3)
 BIG_HOURS = 6
+CAP_RATIO = 1.5
+CAP_FLOOR = 120
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 IGNORE = ["render-site", "**/*.png", "**/node_modules", "**/TexasSolver", "**/.cmake-venv", "**/plo_solver", "**/mw_solver", "**/equity3"]
 
@@ -68,20 +78,39 @@ def solve_big(job: dict):
     run_job(job, BIG_CORES, BIG_MEMORY_MB, BIG_RATE, BIG_HOURS * 3600 - 300)
 
 
+def cap_seconds(job: dict, rate: float, timeout: int) -> int:
+    """The job's price cap in seconds of this machine: its cap (or 1.5x its quote) at this rate, CAP_FLOOR at least."""
+    spec = job.get("job") or {}
+    try:
+        dollars = float(spec.get("cap") or 0) or float(spec.get("estimate") or 0) * CAP_RATIO
+    except (TypeError, ValueError):
+        dollars = 0
+    seconds = dollars / rate * 3600 if dollars > 0 and rate > 0 else timeout
+    return int(min(timeout, max(CAP_FLOOR, seconds)))
+
+
 def run_job(job: dict, cores: int, memory_mb: int, rate: float, timeout: int):
+    started = int(time.time() * 1000)
+    cap = cap_seconds(job, rate, timeout)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "job.json")
         with open(path, "w") as f:
             json.dump(job, f)
-        print("Cloud solve", job["id"], "for", job["link"]["user"], "on", cores, "cores")
+        print("Cloud solve", job["id"], "for", job["link"]["user"], "on", cores, "cores, capped at", cap, "s")
         table = os.path.join(CACHE, "equity3.bin")
         had_table = os.path.exists(table)
-        run = subprocess.run(
-            ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(rate), "--once", path,
-             "--threads", str(cores * 2), "--parallel", str(max(1, cores // 4)), "--memory", str(int(memory_mb * 0.8)),
-             "--timeout", str(timeout)],
-            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json"), "CITRUS_EQUITY3": table},
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        try:
+            run = subprocess.run(
+                ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(rate), "--once", path,
+                 "--threads", str(cores * 2), "--parallel", str(max(1, cores // 4)), "--memory", str(int(memory_mb * 0.8)),
+                 "--timeout", str(timeout), "--started", str(started), "--cap", str(cap)],
+                cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json"), "CITRUS_EQUITY3": table},
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=cap + 30)
+        except subprocess.TimeoutExpired as e:
+            out = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            print(out[-4000:])
+            fail(job, "It reached its price cap before it had an answer.", cost=round(rate * (time.time() * 1000 - started) / 3.6e6, 5))
+            return
         print(run.stdout[-4000:])
         if not had_table and os.path.exists(table):
             cache.commit()
@@ -92,8 +121,8 @@ def run_job(job: dict, cores: int, memory_mb: int, rate: float, timeout: int):
             fail(job, "The cloud worker stopped" + (": " + lines[-1][:200] if lines else "."))
 
 
-def fail(job: dict, message: str):
-    link, value = job["link"], {**job["job"], "status": "failed", "message": message, "worker": "modal"}
+def fail(job: dict, message: str, cost: float = 0):
+    link, value = job["link"], {**job["job"], "status": "failed", "message": message, "worker": "modal", **({"cost": cost, "capped": True} if cost else {})}
     row = {"store": "meta", "id": job["id"], "t": int(job.get("t") or 0) + 5000, "data": {"id": job["id"], "value": value}}
     req = urllib.request.Request(link["api"] + "/api/sync", data=json.dumps({"rows": [row]}).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer " + link["token"]})
