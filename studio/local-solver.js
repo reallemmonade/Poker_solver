@@ -406,7 +406,8 @@
    if(x.kind==='fold')action={kind:'fold',label:'Fold'};
    else if(x.kind==='check')action={kind:'check',label:'Check'};
    else if(x.kind==='call')action={kind:'call',label:'Call '+G.bb(legal.callCost)+' bb'};
-   else{const top=Math.min(legal.maxRaiseTo,legal.allInTo),target=Math.min(top,Math.max(legal.minRaiseTo,Math.round(x.to))),k=hand.currentBet?'raise':'bet';action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo?' · all-in':'')};}
+   // The solver's all-in (x.allin, at the shortest stack) is this hand's all-in: what the bet bar's All-in bets, so it reads All-in.
+   else{const top=Math.min(legal.maxRaiseTo,legal.allInTo),cover=Math.max(0,...hand.living().filter(i=>i!==hand.actor).map(i=>hand.streetPaid[i]+hand.stacks[i])),jamTo=Math.min(top,cover>0?Math.max(cover,legal.minRaiseTo):top),target=x.allin?jamTo:Math.min(top,Math.max(legal.minRaiseTo,Math.round(x.to))),k=hand.currentBet?'raise':'bet';action={kind:k,target,label:(k==='bet'?'Bet ':'Raise to ')+G.bb(target)+' bb'+(target===legal.allInTo||x.allin?' · all-in':'')};if(x.allin)action.allIn=true;}
    action.id=action.kind+':'+(action.target||0);const ev=evs?G.bb(evs[i]+paid):null;
    const same=actions.findIndex(a=>a.id===action.id);index.push(same>=0?same:actions.length);if(same>=0){probs[same]+=row[i];if(ev!==null&&ev>mean[same])mean[same]=ev;}else{actions.push(action);probs.push(row[i]);mean.push(ev);}
   });
