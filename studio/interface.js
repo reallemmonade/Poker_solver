@@ -228,7 +228,7 @@ function initInterface(){
   start(h.config?.startStreet||0,[]);
   for(const e of h.log||[]){if(e.type==='street'){const prev=e.street===1?0:e.street===2?3:4;start(e.street,e.board.slice(prev));continue;}if(e.type!=='action')continue;
    const me=e.seat===you;if(e.kind==='fold'&&!me&&!inHand.has(e.seat)){folds++;continue;}flush();if(e.kind!=='check'&&e.kind!=='fold')inHand.add(e.seat);
-   const big=e.kind==='bet'||e.kind==='raise';if(big)raises++;const cls=e.allIn&&e.kind!=='fold'?'ai':e.kind==='fold'?'f':big?'b'+Math.min(raises,3):'p',what=big?fmt(G.bb(e.target)):e.kind;
+   const big=e.kind==='bet'||e.kind==='raise';if(big)raises++;const cls=e.allIn&&e.kind!=='fold'?'ai':e.kind==='fold'?'f':big?'b'+Math.min(raises,3):'p',what=big?(e.allIn?'All-in':fmt(G.bb(e.target))):e.kind;
    row.acts.push('<span class="hs-act hs-'+cls+(me?' hs-you':'')+'">'+esc(pos[e.seat]+' '+what)+'</span>');}
   flush();const cards=cs=>cs.map(c=>cardHTML(c)).join('');let html=rows.map(r=>'<div class="hs-row"><span class="hs-st">'+G.STREET[r.street]+'</span><div>'+(r.cards.length?'<span class="hs-cards">'+cards(r.cards)+'</span>':'')+'<div class="hs-acts">'+r.acts.join('')+'</div></div></div>').join('');
   if(h.done){const shown=h.foldWinner===null?h.living().filter(i=>i!==you):[],net=h.returns?.[you];html+='<div class="hs-row hs-end"><span class="hs-st">'+(shown.length?'Show':'Result')+'</span><div class="hs-acts">'+shown.map(i=>'<span class="hs-show">'+esc(pos[i])+' <span class="hs-cards">'+cards(h.holes[i])+'</span></span>').join('')+(net!=null?'<b class="'+(net>0?'hdb-up':net<0?'hdb-down':'')+'">'+signed(net,1)+'</b>':'')+'</div></div>';}
