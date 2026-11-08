@@ -355,12 +355,15 @@ async function startCloudSolve(id,job,t){
 }
 // While a solve is out on the Mac, sync every 20 seconds, and every 10 while it runs, so its progress stays
 // current and its answer shows soon after it lands.
-function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()],u=spotUI.macUpdate;if(!jobs.some(jobPending)&&!(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
+function watchSolveJobs(){clearTimeout(spotUI.jobTimer);spotUI.jobTimer=0;const jobs=[...spotUI.jobs.values()],u=spotUI.macUpdate;if(!jobs.some(jobPending)&&!spotUI.awaitRow&&!(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS))return;spotUI.jobTimer=setTimeout(()=>{spotUI.jobTimer=0;if(document.visibilityState!=='hidden')citrusAccount.run();watchSolveJobs();},jobs.some(j=>j.status==='running')?10000:20000);}
 // A finished Mac solve for the live spot shows as soon as it syncs in.
 async function deliverSolveJob(force=false){
- const h=state.hand,j=spotJob(h),shown=activeSpotResult(h);if(!j||j.status!=='done'||state.busy||shown&&shown.solve?.method!=='postflop-library')return;if(!force&&spotUI.delivered===j.rowId)return;spotUI.delivered=j.rowId;
+ const h=state.hand,j=spotJob(h),shown=activeSpotResult(h);if(!j||j.status!=='done'||state.busy||shown&&shown.solve?.method!=='postflop-library')return;if(!force&&spotUI.delivered===j.rowId)return;
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
- if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
+ // The job can sync in before its answer does: keep syncing until the answer is here, then show it.
+ if(!row||row.key!==j.key){if(spotUI.awaitRow!==j.rowId){spotUI.awaitRow=j.rowId;watchSolveJobs();}return;}
+ if(spotUI.awaitRow===j.rowId)spotUI.awaitRow=null;spotUI.delivered=j.rowId;
+ if(state.hand!==h||h.done||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
  if(typeof guessRegrade==='function')guessRegrade(h,row.result);
 }
