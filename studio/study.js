@@ -53,4 +53,4 @@ initQuizFlow();
 initOpponents();
 initPreflopReferences();
 renderTrainingCollection();
-boot();
+boot().finally(()=>window.studioBootStep&&studioBootStep());
