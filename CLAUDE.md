@@ -22,7 +22,7 @@ node tools/hand-trace.cjs --user <username> --last 5     # newest hands first; m
 node tools/hand-trace.cjs --user <username> --hand h…    # one hand
 ```
 
-It only reads (SELECT) and needs `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Cloud sessions don't have them; run it on Maxam's Mac through the linked device (`cd ~/Desktop/Poker_Solver && git pull && node tools/hand-trace.cjs …`), where `.env.telescope.local` holds them. The output flags a spot solved more than once and a finished solve that was never shown or used to grade. In a browser console, `HandTrace.recent()` returns that tab's latest traces, and `--file <json>` formats one.
+It only reads (SELECT) and needs `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Cloud sessions don't have them, and the linked-device shell is a sandbox with no network, so start a Remote Control session on Maxam's Mac and run it in `~/Desktop/Poker_Solver/poker_solver` (`git pull && node tools/hand-trace.cjs …`), where `.env.telescope.local` holds them. It needs no npm install. The output flags a spot solved more than once and a finished solve that was never shown or used to grade. In a browser console, `HandTrace.recent()` returns that tab's latest traces, and `--file <json>` formats one.
 
 When you add a new solve route, answer source or grading path, log it with `HandTrace.log(hand, type, {...})` so the trace stays complete.
 
