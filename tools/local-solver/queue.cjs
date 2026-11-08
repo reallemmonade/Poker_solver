@@ -13,7 +13,7 @@
 // what each solve cost on the job. A cloud worker (--once <job>, tools/cloud) is started for one job: it gets the job
 // and the account's sync cursor with it, solves, pushes the answer and exits.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
-const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=20000,BEAT_MS=180000,PROGRESS_MS=10000,IDLE_LOAD=.5,WANT_DAYS=30;
+const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=Number(process.env.CITRUS_QUEUE_POLL_MS)||20000,BEAT_MS=Number(process.env.CITRUS_QUEUE_BEAT_MS)||180000,PROGRESS_MS=Number(process.env.CITRUS_QUEUE_PROGRESS_MS)||10000,IDLE_LOAD=.5,WANT_DAYS=30;
 
 // How far a running solve has got, pushed with the job every 10 seconds. TexasSolver and the PLO solver report
 // exploitability (% of the pot), which falls roughly geometrically, so progress is how far its log has moved from

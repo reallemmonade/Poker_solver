@@ -25,3 +25,7 @@ node tools/hand-trace.cjs --user <username> --hand h…    # one hand
 It only reads (SELECT) and needs `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Cloud sessions don't have them; run it on Maxam's Mac through the linked device (`cd ~/Desktop/Poker_Solver && git pull && node tools/hand-trace.cjs …`), where `.env.telescope.local` holds them. The output flags a spot solved more than once and a finished solve that was never shown or used to grade. In a browser console, `HandTrace.recent()` returns that tab's latest traces, and `--file <json>` formats one.
 
 When you add a new solve route, answer source or grading path, log it with `HandTrace.log(hand, type, {...})` so the trace stays complete.
+
+## Testing the solve flow end to end
+
+`node tools/solve-flow/run.cjs --hands 10 --tables hu,3way` plays real hands in the real app (headless Chromium via Playwright) against local copies of everything a solve passes through: the account server in memory, the real Mac bridge linked to it (with a stand-in TexasSolver, `tools/solve-flow/fake-texassolver.cjs`, and the real 3-way solver), and the cloud played by the bridge in `--once` mode. It never touches production. It reads each hand's trace and fails on a decision solved twice, a finished solve never shown or used to grade, a solve stuck after the hand, or a page error; traces and a report land in `solve-flow-report/`. `--seed` replays a run. Run it after changing anything in the solve, sync, bridge or grading flow.
