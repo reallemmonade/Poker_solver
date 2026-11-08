@@ -68,6 +68,7 @@
 !/tools/cloud/
 !/tools/cloud/modal_app.py
 !/tools/cloud/test-cloud.cjs
+!/tools/cloud/costs.cjs
 !/tools/chart-bots/
 !/tools/chart-bots/README.md
 !/tools/chart-bots/lib.cjs
