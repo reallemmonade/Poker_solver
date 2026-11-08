@@ -64,6 +64,7 @@
 !/tools/calibration/level2.sh
 !/tools/calibration/level2-sync.sh
 !/tools/split-libraries.cjs
+!/tools/hand-trace.cjs
 !/tools/cloud/
 !/tools/cloud/modal_app.py
 !/tools/cloud/test-cloud.cjs
@@ -87,6 +88,7 @@
 !/tools/postflop/charts-100bb.json.gz
 !/studio/
 !/studio/app.js
+!/studio/hand-trace.js
 !/studio/accounts.js
 !/studio/verify-accounts.cjs
 !/studio/action-bar.js
