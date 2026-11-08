@@ -40,12 +40,23 @@ function show(t){
  const lost=done.filter(j=>!shown.has(j));if(lost.length)console.log('   ⚠ finished solve never shown or used to grade: '+lost.join(', '));
  console.log('');
 }
+// The repo's @libsql/client when it is installed; otherwise Turso's HTTP API, so the script also runs from a checkout
+// with no npm install.
+function client(url,authToken){
+ try{const {createClient}=require('@libsql/client');return createClient({url,authToken});}catch{}
+ const base=url.replace(/^libsql:\/\//,'https://').replace(/\/$/,'');
+ return{async execute({sql,args=[]}){
+  const r=await fetch(base+'/v2/pipeline',{method:'POST',headers:{'Content-Type':'application/json',...authToken?{Authorization:'Bearer '+authToken}:{}},body:JSON.stringify({requests:[{type:'execute',stmt:{sql,args:args.map(v=>({type:'text',value:String(v)}))}},{type:'close'}]})});
+  const b=await r.json().catch(()=>null),res=b?.results?.[0];if(!r.ok||res?.type!=='ok')throw Error('Turso: '+(res?.error?.message||r.status));
+  const {cols,rows}=res.response.result;return{rows:rows.map(row=>Object.fromEntries(cols.map((c,i)=>[c.name,row[i]?.value??null])))};
+ }};
+}
 async function main(){
  if(opt('file')){let v=JSON.parse(fs.readFileSync(String(opt('file')),'utf8'));for(const t of Array.isArray(v)?v:[v])show(t);return;}
  loadEnv();
  const url=process.env.TURSO_DATABASE_URL,token=process.env.TURSO_AUTH_TOKEN;if(!url)throw Error('TURSO_DATABASE_URL is not set (pass --env <file> or run from the repo on the Mac that has .env.telescope.local).');
  const user=opt('user');if(!user||user===true)throw Error('Pass --user <username or email>.');
- const {createClient}=require('@libsql/client'),db=createClient({url:url.trim(),authToken:(token||'').trim()});
+ const db=client(url.trim(),(token||'').trim());
  const u=(await db.execute({sql:'SELECT id,username,name FROM citrus_users WHERE lower(username)=lower(?) OR lower(coalesce(email,\'\'))=lower(?) OR lower(name)=lower(?) LIMIT 2',args:[user,user,user]})).rows;
  if(!u.length)throw Error('No account named '+user+'.');if(u.length>1)throw Error('More than one account matches '+user+'; use the username.');
  const rows=(await db.execute({sql:"SELECT data FROM citrus_records WHERE user_id=? AND store='meta' AND id LIKE 'trace-%' ORDER BY t DESC",args:[u[0].id]})).rows;
