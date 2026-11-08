@@ -350,7 +350,13 @@ async function deliverSolveJob(force=false){
  let row=null;try{const db=await openDB();row=await new Promise((resolve,reject)=>{const r=db.transaction('solves').objectStore('solves').get(j.rowId);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}catch{}
  if(state.hand!==h||h.done||!row||row.key!==j.key||!validSpotResult(row.result))return;spotUI.cache.set(j.key,row.result);if(j.seed>0&&j.finishedAt>j.startedAt)recordSolveTime({route:'mac',target:j.target,street:j.street,kind:j.kind,seed:j.seed,learned:j.learned},(j.finishedAt-j.startedAt)/1000);
  finishAnalysis(row.result,{kind:'inspect',hand:h.clone(),baseKey:j.baseKey,cacheKey:j.key,solveOptions:j.options});
+ if(typeof guessRegrade==='function')guessRegrade(h,row.result);
 }
+// Acting while a full-size solve of a 1/3-only library spot is out: the decision (or the guess made there, in its
+// place) is graded by that solve when it lands instead of by the library.
+function fullerSolveWait(hand,solved,item){if(!solved?.solve?.library?.fewerSizes||activeSpotResult(hand)!==solved)return null;const j=spotJob(hand);if(!j||!(jobPending(j)||j.status==='done'))return null;if(!item.guessed)return item;
+ const at=hand.actionLog.length,g=hand.guessReveal;if(!g?.action||g.at!==at||g.regraded)return null;const old=state.currentGrades.find(r=>r.source==='guess'&&r.step===at);if(old&&old.referenceSource?.kind!=='postflop-library')return null;
+ return{...item,kind:'guess',action:g.action,guessed:false,replace:old,step:at};}
 // Decisions waiting on a Mac or cloud solve (see analyzeSpot) are graded once its answer syncs in. Each wait is also kept in
 // localStorage (hand id, action-log step, the action or guess to grade) so closing or reloading the app before the answer
 // lands doesn't lose the grade: after a reload the decision is rebuilt from the saved hand and graded into it.
@@ -508,9 +514,14 @@ function spotRangesHTML(result){
 }
 // The v4 flop library bets only 1/3 pot on the flop. On a live flop it offers a solve with 1/3, 2/3 and 1.5x pot,
 // on your Mac or in the cloud, which then answers this flop instead.
-function fewerSizesHTML(result){const h=state.hand;if(!result?.solve?.library?.fewerSizes||!h||h.done||h.street!==1||activeSpotResult(h)!==result||spotJob(h))return'';const plan=spotPlan(h);if(!plan||plan.route==='none')return'';
+function fewerSizesHTML(result){const h=state.hand;if(!result?.solve?.library?.fewerSizes||!h||h.done||h.street!==1||activeSpotResult(h)!==result)return'';
+ // The full-size solve sent from here: its progress shows in the prompt's place, and its answer replaces the library's once it lands.
+ const job=spotJob(h);if(job&&jobPending(job))return'<div class="fewer-sizes"><p class="small muted">Solving 1/3, 2/3 and 1.5x '+(job.target==='modal'?'in the cloud':job.target&&job.target!=='mac'?'on your server':'on your Mac')+'. It replaces this answer when it\'s done.</p>'+jobNoticeHTML(job)+'</div>';
+ if(job?.status==='done'){setTimeout(()=>deliverSolveJob(true),0);return'<div class="fewer-sizes"><p class="small muted">Loading the full solve…</p></div>';}
+ const failed=job?.status==='failed'?'<p class="small error">'+esc(jobText(job))+'</p>':'';
+ const plan=spotPlan(h);if(!plan||plan.route==='none')return failed;
  const note='<p class="small muted">Only 1/3 pot is solved here.'+(plan.blocked?' '+esc(plan.blocked)+(plan.jump?' <button type="button" class="ui-jump" data-jump="'+plan.jump.to+'">'+esc(plan.jump.label)+'</button>':''):' Solve with 1/3, 2/3 and 1.5x:')+'</p>';
- return'<div class="fewer-sizes">'+note+(plan.blocked?'':solvePromptHTML(plan,true))+'</div>';}
+ return'<div class="fewer-sizes">'+failed+note+(plan.blocked?'':solvePromptHTML(plan,true))+'</div>';}
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);
  const solve=result.solve,converged=spotCertified(result),approximate=spotApproximate(result),best=result.actions[result.best],frequent=result.reference.indexOf(Math.max(...result.reference));

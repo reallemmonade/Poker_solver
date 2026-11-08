@@ -46,15 +46,20 @@ function guessResult(h){let r=activeSpotResult(h);if(r?.supported)return r;try{r
 function guessLive(index){const h=state.hand;if(!h||h.done)return;const at=h.actionLog.length,solved=activeSpotResult(h),q=solved?.supported?null:studyReferenceQuery(h),actions=solved?.supported?solved.actions:q.actions,action=actions[index];if(!action)return;
  const tones=actionTones(actions,h);
  h.guessed=[...(h.guessed||[]),at];guessUnlock(h,at);
- h.guessReveal={at,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:{text:'Solve to grade',elo:null,cls:'none'}};
+ h.guessReveal={at,action,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:{text:'Solve to grade',elo:null,cls:'none'}};
  h.pendingGuess={at,action};guessSettle(h);
  saveLiveSession();renderPlay();}
 // Grades a guess as soon as its spot has an answer: at once when one is on hand, else when the solve lands while it is
 // still your turn. If you act first, chooseAction (app.js) grades the guess through the background assessment instead.
 function guessSettle(h){const g=h.pendingGuess;if(!g||g.at!==h.actionLog.length||h.done)return;const result=guessResult(h);if(!result)return;
  h.pendingGuess=null;let row=null;if(T.matchAction(result.actions,g.action)>=0)try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h});}catch{row=null;}
- const study=studioInterface.area==='study',counted=!!row&&!h.assisted&&!$('reveal').checked&&(study||!$('controlAll').checked);
- if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,counted);saveLiveSession();}
+ if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,guessCounted(h,row));saveLiveSession();}
+function guessCounted(h,row){return!!row&&!h.assisted&&!$('reveal').checked&&(studioInterface.area==='study'||!$('controlAll').checked);}
+// A guess graded by a 1/3-only flop library is graded again, in the same row, when the full-size solve sent from there
+// lands while it is still your turn (spot-ui.js deliverSolveJob). Once you act, fullerSolveWait does it instead.
+function guessRegrade(h,result){const at=h?.actionLog.length,g=h?.guessReveal;if(!g?.action||g.at!==at||g.regraded||h.pendingGuess||h.done||!result?.supported||T.matchAction(result.actions,g.action)<0)return;
+ const old=state.currentGrades.find(r=>r.source==='guess'&&r.step===at);if(old&&old.referenceSource?.kind!=='postflop-library')return;
+ let row=null;try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h,replace:old});}catch{row=null;}if(!row)return;g.regraded=true;g.verdict=guessVerdict(row,guessCounted(h,row));saveLiveSession();if(typeof renderPlay==='function')renderPlay();}
 // Hand replay: a finished review analysis waits behind the guess buttons.
 function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?<small>Guess to see the solver</small></div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
 function guessReplay(index){const g=guessGate.replay;if(!g)return;guessGate.replay=null;const box=$('reviewFeedback');
