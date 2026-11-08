@@ -102,7 +102,8 @@ git -C "$src" submodule update --init --recursive --quiet
 cd "$src"
 git checkout --quiet -- CMakeLists.txt
 # Per-hand root EVs in the dumped result ("evs"), used to calibrate the preflop model
-# (tools/preflop/calibrate.cjs). Reset first so a second install applies it cleanly.
+# (tools/preflop/calibrate.cjs), and an early stop once the file TEXASSOLVER_STOP_FILE names exists (a cloud solve
+# at its price cap still dumps its strategy so far). Reset first so a second install applies it cleanly.
 git checkout --quiet -- include src
 git apply "$here/texassolver-evs.patch"
 sed -i.bak -e 's/ *-fopenmp//g' -e '/CMAKE_OSX_DEPLOYMENT_TARGET/d' CMakeLists.txt

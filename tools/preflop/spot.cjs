@@ -1,6 +1,9 @@
 'use strict';
 // Solves one preflop spot that no chart covers (Solve this spot, through the Mac bridge).
-//   node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--parallel n] [--effort quick|standard|deep]
+//   node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--parallel n] [--effort quick|standard|deep] [--deadline ms]
+// --deadline (epoch milliseconds, a cloud solve's price cap): the spot stops sampling flops in time for the second pass
+// to finish by then, fits the pots from the flops it has (3 or more), and cuts the passes short at the deadline. It
+// prints "Deadline: ..." when that changed the answer.
 // spot.json: {config, actions, actor, heroCards}, the app's own hand (studio/game.js): the table, the preflop
 // actions so far and the player to act.
 //
@@ -65,10 +68,10 @@ function flops(count,seed){
  return[...out];
 }
 // One three-way flop through the 3-way solver: each slot's mean EV share of the pot by hand class.
-function solveFlop(bin,t,board,threads,dir){
+function solveFlop(bin,t,board,threads,dir,timeLimit=1200){
  const chips=x=>Math.max(1,Math.round(x*100)),lines=['game NLH3','board '+board,'pot '+chips(t.pot),'stack '+chips(t.behind),'min_bet 100',...t.ranges.map((r,s)=>'range'+s+' '+r),
   'bet flop all 0.33,0.66,1.5','bet turn all 0.66','bet river all 0.66','raise flop all 0.66','raise turn all 0.66','raise river all 0.66','cap flop 1','cap turn 1','cap river 1','allin flop 1','allin turn 1','allin river 1','allin_threshold 0.67',
-  ...t.agg>=0?[0,1,2].filter(s=>s!==t.agg).map(s=>'lead flop '+s+' 0'):[],'runouts '+RUNOUTS,'threads '+threads,'accuracy 1','max_iterations 200','time_limit 1200','output result.json'];
+  ...t.agg>=0?[0,1,2].filter(s=>s!==t.agg).map(s=>'lead flop '+s+' 0'):[],'runouts '+RUNOUTS,'threads '+threads,'accuracy 1','max_iterations 200','time_limit '+Math.max(10,Math.round(Math.min(1200,timeLimit))),'output result.json'];
  fs.writeFileSync(path.join(dir,'input.txt'),lines.join('\n')+'\n');
  return new Promise((resolve,reject)=>{const child=spawn(bin,['input.txt'],{cwd:dir,stdio:['ignore','ignore','pipe']});let err='';child.stderr.on('data',d=>{err=(err+d).slice(-500);});
   child.on('error',reject);child.on('close',code=>{try{if(code!==0)throw Error('The 3-way solver failed: '+(err.trim()||'exit '+code));const r=JSON.parse(fs.readFileSync(path.join(dir,'result.json'),'utf8'));
@@ -96,10 +99,11 @@ function fit(S,t,target){
  return{g:best.g,R:[best.r0,1,best.r2],ini:best.ini,error:Math.sqrt(bestL/target.reduce((s,x)=>s+x.w.reduce((a,b)=>a+b,0),0)),before:Math.sqrt(start/target.reduce((s,x)=>s+x.w.reduce((a,b)=>a+b,0),0))};
 }
 
-function iterate(S,count,report,from,to){const step=Math.max(1,Math.floor(count/20));for(let done=0;done<count;done+=step){S.iterate(Math.min(step,count-done));report(from+(to-from)*Math.min(1,(done+step)/count));}}
+// until: a deadline (epoch ms); the pass stops at the first step past it and returns false.
+function iterate(S,count,report,from,to,until=Infinity){const step=Math.max(1,Math.floor(count/20));for(let done=0;done<count;done+=step){if(done>0&&Date.now()>until)return false;S.iterate(Math.min(step,count-done));report(from+(to-from)*Math.min(1,(done+step)/count));}return true;}
 
-async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,effort='standard',equity3,flops:flopCount=0,maxThree=MAX_THREE,log=()=>{},progress=()=>{}}={}){
- const e={...EFFORTS[effort]||EFFORTS.standard,...flopCount>0?{flops:flopCount}:{}},started=Date.now(),x=convert(spot),opts={...x.opts,equity3};
+async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,effort='standard',equity3,flops:flopCount=0,maxThree=MAX_THREE,deadline=Infinity,log=()=>{},progress=()=>{}}={}){
+ const e={...EFFORTS[effort]||EFFORTS.standard,...flopCount>0?{flops:flopCount}:{}},started=Date.now(),x=convert(spot),opts={...x.opts,equity3};let cut=false;
  // A first pass, then (with three-way pots to fit) the flops, then a second pass. Shares of the time: rough.
  let S=new Solver(opts),spotNode=S.tree.nodes.find(n=>n.spot);
  if(!spotNode||spotNode.actor!==x.hero)throw Error('This line could not be rebuilt in the preflop solver.');
@@ -109,7 +113,9 @@ async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,e
  // 55 and T9s on the button to two limps), so a spot that can reach one is not answered.
  if(many)throw Error(FOUR_WAY);
  const plan=three.length?{first:.15,flops:.7}:{first:1,flops:0};
- iterate(S,three.length?e.first:e.second,p=>progress(p*plan.first),0,1);
+ const t1=Date.now();if(!iterate(S,three.length?e.first:e.second,p=>progress(p*plan.first),0,1,deadline))cut=true;
+ // The second pass takes about the first's time per iteration; the flops stop early enough to leave it that (and a margin).
+ const flopsUntil=deadline-((Date.now()-t1)*e.second/Math.max(1,e.first)*1.3+5000);
  const fits={},solved=[];
  if(three.length){
   if(!bin||!fs.existsSync(bin))throw Error('Three-way pots need the 3-way solver (tools/multiway-solver). Run tools/local-solver/install-mac.sh.');
@@ -123,12 +129,12 @@ async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,e
   const tasks=pots.flatMap(p=>p.boards.map(board=>({p,board}))),lanes=Math.max(1,Math.min(parallel,tasks.length)),each=Math.max(1,Math.floor(threads/lanes));let next=0,stop=null;
   try{
    await Promise.all(Array.from({length:lanes},async(_,lane)=>{const sub=path.join(dir,'lane'+lane);fs.mkdirSync(sub);
-    while(next<tasks.length&&!stop){const {p,board}=tasks[next++];
-     try{const r=await solveFlop(bin,p.info,board,each,sub);r.forEach((q,s)=>{for(let i=0;i<K;i++)if(q.w[i]>0){p.sum[s].sum[i]+=q.sum[i]/q.w[i]/q.pot;p.sum[s].w[i]+=1;}});p.ok++;}catch(error){if(/out of date/.test(error.message)){stop=error;break;}log('Flop '+board+': '+error.message);}
+    while(next<tasks.length&&!stop){if(Date.now()>=flopsUntil-10000){cut=true;break;}const {p,board}=tasks[next++];
+     try{const r=await solveFlop(bin,p.info,board,each,sub,(flopsUntil-Date.now())/1000);r.forEach((q,s)=>{for(let i=0;i<K;i++)if(q.w[i]>0){p.sum[s].sum[i]+=q.sum[i]/q.w[i]/q.pot;p.sum[s].w[i]+=1;}});p.ok++;}catch(error){if(/out of date/.test(error.message)){stop=error;break;}log('Flop '+board+': '+error.message);}
      done++;progress(plan.first+plan.flops*done/total);}}));
    if(stop)throw stop;
    for(const {t,slots,info,sum,ok} of pots){const node=t.node;
-    if(ok<Math.max(Math.min(3,e.flops),e.flops/2)){solved.push({key:node.key,players:slots,flops:ok,skipped:true});continue;}
+    if(ok<(cut?Math.min(3,e.flops):Math.max(Math.min(3,e.flops),e.flops/2))){solved.push({key:node.key,players:slots,flops:ok,skipped:true});continue;}
     // Target: each class's mean share over the flops it was dealt on, weighted by its reach in that slot.
     const target=sum.map((q,s)=>({share:Float64Array.from(q.sum,(v,i)=>q.w[i]>0?v/q.w[i]:0),w:Float64Array.from(q.w,(n,i)=>n>0?info.reachBySlot[s][i]*(classes[i].length===2?6:classes[i][2]==='s'?4:12):0)}));
     const f=fit(S,info,target);fits[node.key]={g:f.g,R:f.R,ini:f.ini};solved.push({key:node.key,players:slots,flops:ok,fit:fits[node.key],error:f.error,before:f.before,weight:t.weight});
@@ -136,12 +142,12 @@ async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,e
    }
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
   S=new Solver({...opts,threeFits:fits});spotNode=S.tree.nodes.find(n=>n.spot);
-  iterate(S,e.second,p=>progress(plan.first+plan.flops+(1-plan.first-plan.flops)*p),0,1);
+  if(!iterate(S,e.second,p=>progress(plan.first+plan.flops+(1-plan.first-plan.flops)*p),0,1,deadline))cut=true;
  }
  const gap=S.exploitability(),rows=Object.fromEntries(Object.entries(S.rows(spotNode)).map(([c,r])=>[c,r.map(x=>Math.round(x*1e4)/1e4)])),reach=pathReach(S,spotNode);
  return{version:1,actions:spotNode.actions.map(a=>({kind:a.kind,to:a.to??null,jam:!!a.jam})),heroClass:x.heroClass,hero:rows[x.heroClass],classes:rows,
   ranges:Object.fromEntries(reach.map((r,s)=>[s,classes.map((c,i)=>Math.round(r[i]*1000)/1000)]).filter(([s])=>!spotNode.history.some(h=>h.seat===+s&&h.kind==='fold'))),
-  classOrder:classes,heroSeat:x.hero,stack:x.stack,iterations:S.t,nashConv:gap.nashConv,threeWay:solved,manyWay:many,chipEV:x.chipEV,unequalStacks:x.unequal,seconds:(Date.now()-started)/1000,effort};
+  classOrder:classes,heroSeat:x.hero,stack:x.stack,iterations:S.t,nashConv:gap.nashConv,threeWay:solved,manyWay:many,chipEV:x.chipEV,unequalStacks:x.unequal,seconds:(Date.now()-started)/1000,effort,...cut?{capped:true}:{}};
 }
 
 // Estimated seconds for a spot on this computer: the passes, and the flops (about 150 s each for wide pots on a
@@ -168,9 +174,9 @@ if(require.main===module){
  (async()=>{
   try{
    const spot=JSON.parse(fs.readFileSync(argv[0],'utf8')),threads=Number(opt.threads)||Math.max(1,os.cpus().length-1),equity3=ensureEquity3(opt.equity3||process.env.CITRUS_EQUITY3||undefined,threads);let last=0;const t0=Date.now();
-   const result=await run(spot,{bin:opt['mw-solver']||path.join(__dirname,'..','multiway-solver','mw_solver'),threads,parallel:Number(opt.parallel)||1,effort:opt.effort,equity3,log:m=>console.log(m),
+   const result=await run(spot,{bin:opt['mw-solver']||path.join(__dirname,'..','multiway-solver','mw_solver'),threads,parallel:Number(opt.parallel)||1,effort:opt.effort,equity3,deadline:Number(opt.deadline)||Infinity,log:m=>console.log(m),
     progress:p=>{const now=Date.now();if(now-last<2000&&p<1)return;last=now;const s=(now-t0)/1000;console.log('Progress: '+p.toFixed(3)+' '+(p>.02?Math.round(s*(1-p)/p):-1));}});
-   fs.writeFileSync(argv[1],JSON.stringify(result));console.log('Done: '+result.iterations+' iterations, NashConv '+result.nashConv.toFixed(4)+' bb, '+Math.round(result.seconds)+' s');
+   fs.writeFileSync(argv[1],JSON.stringify(result));if(result.capped)console.log('Deadline: stopped early at the price cap, with the flops and iterations it had.');console.log('Done: '+result.iterations+' iterations, NashConv '+result.nashConv.toFixed(4)+' bb, '+Math.round(result.seconds)+' s');
   }catch(error){console.error('Error: '+error.message);process.exit(2);}
  })();
 }
