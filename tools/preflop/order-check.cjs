@@ -1,6 +1,7 @@
 'use strict';
 // Checks that first-in opens are in kicker order: on a node where everyone before has folded, a
-// hand should not fold (mostly) while the same hand with a lower kicker opens (Q9s folds, Q8s opens).
+// hand should not fold (mostly) while the same hand with a lower kicker opens (Q9s folds, Q8s opens),
+// or a suited connector or one-gapper while a lower one of the same gap opens (76s folds, 65s opens).
 // Real solvers are close to monotone here; a breach points at noise in the preflop model's fit.
 //   node tools/preflop/order-check.cjs chart.json[.gz] | bundle.json.gz [--max 0]
 // Counts, for every NLH chart, pairs where the lower kicker opens at least 50 points more often, and
@@ -15,6 +16,8 @@ const R='AKQJT98765432';
 const pairs=[];
 for(let i=0;i<13;i++)for(let j=i+1;j<13;j++)for(const s of ['s','o'])for(let k=j+1;k<13;k++)
  if(!(i===0&&s==='s'&&k>=9))pairs.push([R[i]+R[j]+s,R[i]+R[k]+s]);
+// Suited connectors and one-gappers against the lower ones of the same gap (76s against 65s, 97s against 75s).
+for(const gap of [1,2])for(let i=1;i+gap<13;i++)for(let k=i+1;k+gap<13;k++)pairs.push([R[i]+R[i+gap]+'s',R[k]+R[k+gap]+'s']);
 function charts(file){
  const raw=fs.readFileSync(file),data=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);
  return (data.packs||[data]).filter(p=>/^NLH/.test(p.name)).map(p=>P.validate(p));
