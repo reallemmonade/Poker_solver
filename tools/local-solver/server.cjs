@@ -15,8 +15,8 @@ const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'
 const L=require('../../studio/local-solver.js');
 const {createQueue}=require('./queue.cjs'),learn=require('./learn.cjs');
 
-const bootAt=Date.now(),args={name:'mac',rate:0,once:'',port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,memory:Math.round(os.totalmem()/1048576*.7)};
-for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory','rate'].includes(k)?Number(v):v;}
+const bootAt=Date.now(),args={name:'mac',rate:0,once:'',port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,parallel:0,memory:Math.round(os.totalmem()/1048576*.7)};
+for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory','rate','parallel'].includes(k)?Number(v):v;}
 if(!/^[a-z0-9-]{1,24}$/.test(args.name))throw Error('--name takes 1 to 24 lowercase letters, digits or dashes.');
 const once=args.once?JSON.parse(fs.readFileSync(args.once,'utf8')):null;
 // Pages allowed to call the bridge: the Render site, and the app served from
@@ -107,6 +107,8 @@ function solveSpot(spec){
 // Preflop lines no chart covers (POST /preflop-async): tools/preflop/spot.cjs in its own process group, so a cancel
 // also stops the 3-way solves it runs. These take minutes to hours, so they get PREFLOP_HOURS, not the usual limit.
 const PREFLOP_HOURS=12;
+// 3-way flop solves at once in a preflop spot (--parallel): one per 8 threads, since one solve gains little past that.
+const preflopLanes=threads=>Math.max(1,Math.floor(threads/8));
 function validatePreflop(body){
  const ok=(v,m)=>{if(!v)throw Error(m)},s=body?.spot;
  ok(s&&typeof s==='object'&&s.config&&typeof s.config==='object'&&Array.isArray(s.actions)&&s.actions.length<=60&&Number.isInteger(s.actor)&&Array.isArray(s.heroCards)&&s.heroCards.length===2&&s.heroCards.every(c=>Number.isInteger(c)&&c>=0&&c<52),'The preflop spot is malformed.');
@@ -116,7 +118,7 @@ function validatePreflop(body){
 function solvePreflop(spec,learning=false){
  return new Promise((resolve,reject)=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'citrus-preflop-')),input=path.join(dir,'spot.json'),out=path.join(dir,'result.json');fs.writeFileSync(input,JSON.stringify(spec.spot));
-  const started=Date.now(),child=spawn(process.execPath,[path.join(__dirname,'..','preflop','spot.cjs'),input,out,'--mw-solver',args['mw-solver'],'--threads',String(args.threads),'--effort',spec.effort],{detached:true,stdio:['ignore','pipe','pipe']});
+  const started=Date.now(),child=spawn(process.execPath,[path.join(__dirname,'..','preflop','spot.cjs'),input,out,'--mw-solver',args['mw-solver'],'--threads',String(args.threads),'--parallel',String(args.parallel>0?args.parallel:preflopLanes(args.threads)),'--effort',spec.effort],{detached:true,stdio:['ignore','pipe','pipe']});
   const kill=()=>{try{process.kill(-child.pid,'SIGKILL');}catch{try{child.kill('SIGKILL');}catch{}}};
   const mine=job={child:{kill},started,iterations:0,exploitability:null,fraction:0,remaining:null,cancelled:false,closed:null,learning};let tail='';mine.closed=new Promise(r=>child.on('close',r));
   const timer=setTimeout(kill,PREFLOP_HOURS*3600e3);
