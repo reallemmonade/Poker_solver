@@ -63,6 +63,8 @@ function matvec(M,v,out){
 // wheel aces (A5s-A2s) form a chain of their own.
 const CHAINS=[];
 for(let i=0;i<12;i++)for(const s of ['s','o']){const hands=[...ranks.slice(i+1)].map(k=>ranks[i]+k+s);if(i===0&&s==='s')CHAINS.push(hands.slice(0,8),hands.slice(8));else CHAINS.push(hands);}
+// Suited connectors and one-gappers, both cards falling (as in calibrate.cjs).
+for(const gap of [1,2])CHAINS.push([...ranks].slice(1,13-gap).map((_,i)=>ranks[i+1]+ranks[i+1+gap]+'s'));
 
 class Solver{
  constructor(options){
@@ -166,11 +168,15 @@ class Solver{
    const k=Float64Array.from(logk,(x,i)=>n[i]?Math.min(10,Math.max(.05,Math.exp(x/n[i]))):1);
    const last=list[list.length-1],opp=side==='ip'?last.rangeOop:last.rangeIp,own=side==='ip'?last.rangeIp:last.rangeOop,r=Float64Array.from(cls,c=>opp[c]||0);
    const model=new Float64Array(K);for(let i=0;i<K;i++){let won=0,seen=0;for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}model[i]=seen>0?won/seen:0;}
-   for(const chain of CHAINS){
-    const blocks=[];
-    for(const i of chain.map(c=>cls.indexOf(c))){if(!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:n[i]?(own[cls[i]]||0)+1e-3:1e-6,n:[i]});
-     while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
-    for(const b of blocks)for(const i of b.n)k[i]=Math.min(10,Math.max(.05,Math.exp(b.v)/model[i]));
+   // Classes sit in a kicker chain and possibly a connector chain: repeat until every chain holds.
+   for(let round=0;round<50;round++){let moved=false;
+    for(const chain of CHAINS){
+     const blocks=[];
+     for(const i of chain.map(c=>cls.indexOf(c))){if(!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:n[i]?(own[cls[i]]||0)+1e-3:1e-6,n:[i]});
+      while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
+     for(const b of blocks)for(const i of b.n){const v=Math.min(10,Math.max(.05,Math.exp(b.v)/model[i]));if(Math.abs(Math.log(v/k[i]))>1e-9)moved=true;k[i]=v;}
+    }
+    if(!moved)break;
    }
    const M=new Float64Array(K*K);
    // Shares above 1 are real: a hand can win more than the pot it reached the flop with.
