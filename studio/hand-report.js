@@ -11,7 +11,7 @@ function handReportScore(g){return!gradeMistake(g)?1:gradeCost(g)>0?Math.exp(-gr
 // Hero decisions in order, each matched to its grade by the action-log index it was made at.
 function handReportDecisions(rec){const hero=rec.hero??0,grades=(rec.grading||[]).filter(g=>g.hero===undefined||g.hero===hero),out=[];
  rec.actions.forEach((a,i)=>{if(a.seat!==hero||a.type&&a.type!=='action')return;const g=grades.find(x=>(x.step??x.actions?.length)===i)||null;out.push({action:a,step:i,grade:g});});return out;}
-function handReportSummary(rec){const ds=handReportDecisions(rec),graded=ds.filter(d=>d.grade),lost=graded.reduce((s,d)=>s+gradeCost(d.grade),0);
+function handReportSummary(rec){const ds=handReportDecisions(rec),graded=ds.filter(d=>d.grade&&(d.grade.peeked||gradeCounts(d.grade))),lost=graded.reduce((s,d)=>s+gradeCost(d.grade),0);
  return{ds,graded,lost,score:graded.length?Math.round(100*graded.reduce((s,d)=>s+handReportScore(d.grade),0)/graded.length):null,misses:graded.filter(d=>gradeMistake(d.grade)).length};}
 // Worth a sheet when you did more than fold a chart-correct hand preflop.
 function handReportWorth(rec){const s=handReportSummary(rec);return s.ds.some(d=>d.action.kind!=='fold'||d.grade&&gradeMistake(d.grade));}
@@ -23,7 +23,8 @@ function handReportGrading(){const h=handReport.hand;if(!h||$('gradeEvery')?.che
 function hrRow(d){const g=d.grade,tone=hrTone(g),street=HR_STREETS[d.action.street]||'',mine=hrActionText(d.action,g);let detail='',pill='';
  if(!g){detail='<div class="hr-sub">'+(handReportGrading()?'Grading…':'Not graded')+'</div>';pill='<span class="hr-pill hr-none">–</span>';}
  else if(g.peeked){detail='<div class="hr-sub">You looked at the analysis</div>';pill='<span class="hr-pill hr-bad">Peeked</span>';}
- else if(g.rated&&Array.isArray(g.options)&&g.options.some(o=>Number.isFinite(o.ev))){const evs=g.options.map(o=>o.ev).filter(Number.isFinite),max=Math.max(...evs),min=Math.min(...evs),you=g.options[g.choice]?.ev,best=g.options.find(o=>o.ev===max),span=Math.max(2,max-min),u=g.units==='bb'?'':' pts',pos=v=>Math.max(4,Math.min(100,100-92*(max-v)/span));
+ else if(gradeGuessedRanges(g)){detail='<div class="hr-sub">Not graded · no chart for how this hand got here</div>';pill='<span class="hr-pill hr-none">–</span>';}
+ else if(gradeSolved(g)&&Array.isArray(g.options)&&g.options.some(o=>Number.isFinite(o.ev))){const evs=g.options.map(o=>o.ev).filter(Number.isFinite),max=Math.max(...evs),min=Math.min(...evs),you=g.options[g.choice]?.ev,best=g.options.find(o=>o.ev===max),span=Math.max(2,max-min),u=g.units==='bb'?'':' pts',pos=v=>Math.max(4,Math.min(100,100-92*(max-v)/span));
   const miss=gradeMistake(g);detail=(miss&&best?'<div class="hr-sub">Best '+esc(best.label)+' '+hrNum(max)+u+' · You '+hrNum(you)+u+'</div>':'<div class="hr-sub">EV '+hrNum(you)+u+'</div>')+'<div class="hr-bar"><i class="hr-'+tone+'" style="width:'+pos(you).toFixed(1)+'%"></i><u style="left:'+pos(max).toFixed(1)+'%"></u></div>';
   pill=miss?'<span class="hr-pill hr-'+tone+'">−'+fmt(g.loss,1)+u+'</span>':'<span class="hr-pill hr-good" aria-label="Best">✓</span>';}
  else if(gradeSplit(g)==='after'||gradeOffChart(g)){detail='<div class="hr-sub">Not graded · chart unreliable here</div>';pill='<span class="hr-pill hr-none">–</span>';}

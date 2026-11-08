@@ -17,11 +17,12 @@ function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,han
 // answers grade the exact action, correct when the solver plays it at least 5% of the time. A size the chart doesn't have
 // (an approximate grade) and chip-EV charts don't count, so they show no rating change.
 function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
- const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=!!row.rated&&Number.isFinite(row.loss),offSize=!!row.referenceSource&&freq!==null&&gradeApprox(row)&&gradeSplit(row)!=='after'&&!gradeOffChart(row),
-  chart=!!row.referenceSource&&freq!==null&&!gradeApprox(row)&&!/chip-EV chart/.test(row.referenceSource.name||''),mistake=gradeMistake(row),cost=gradeCost(row);
+ const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=gradeSolved(row),offSize=!!row.referenceSource&&freq!==null&&gradeApprox(row)&&gradeSplit(row)!=='after'&&!gradeOffChart(row),
+  chart=gradeChart(row),mistake=gradeMistake(row),cost=gradeCost(row);
  const opts=(row.options||[]).filter(o=>Number.isFinite(o.f)),top=Math.max(0,...opts.map(o=>o.f)),pc=x=>fmt(x*100,x<.1?1:0)+'%',word=l=>String(l||'').split(' ')[0].toLowerCase();
  let text='Not graded';const split=gradeSplit(row),continues=split==='vsopen'&&!gradeFolds(row.options?.[row.choice]);
- if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
+ if(gradeGuessedRanges(row))text='Not graded · no chart for how this hand got here';
+ else if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
  else if(split==='after'&&freq!==null)text='Not graded · chart unreliable after a flat or 3-bet';
  else if(freq!==null&&gradeOffChart(row))text='Not graded · chart has no 3-bet bluffs';
  else if(offSize){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text=same&&same.f>=chartMistakeFrequency?'Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')':'Size not in the chart · not graded';}
