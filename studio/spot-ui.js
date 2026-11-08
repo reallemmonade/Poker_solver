@@ -300,6 +300,9 @@ async function cancelSolveJob(id,reason='tapped cancel'){const j=spotUI.jobs.get
 // Each table cancels only its own solves (Play, or Solve's own table); Hand replay solves are never cancelled here.
 function solveTable(){return typeof studioInterface!=='undefined'&&studioInterface.tab==='solve'?'solve':'play';}
 function cancelStaleSolveJobs(){if(!liveSession.ready)return;const me=deviceId(),h=state.hand,table=solveTable();let key=null;for(const [id,j] of spotUI.jobs){if(!jobPending(j)||j.device!==me||(j.table||'play')!==table)continue;if(key===null)key=h&&!h.done?PokerSpot.publicKey(observedData(h)):'';if(j.baseKey===key)continue;
+ // A solve you tapped and then acted before keeps running: it grades that decision when it lands (gradeFromJobs).
+ // Automatic follow-up solves still stop, so nothing runs that nobody asked for.
+ if(!j.auto&&(spotUI.gradeWaits.has(j.baseKey)||$('gradeEvery')?.checked&&h&&j.hand===h.dealId&&h.actionLog[j.observed?.actions?.length]?.seat===state.hero))continue;
  const live=!!h&&!h.done&&!(state.hero>=0&&h.folded[state.hero])&&j.observed?.board?.length===h.board.length&&jobOnLine(j,h);if(!live)cancelSolveJob(id,!h||h.done?'hand over':state.hero>=0&&h.folded[state.hero]?'you folded':j.observed?.board?.length!==h.board.length?'street moved on':'off this line');}}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cancel-job]');if(b){e.preventDefault();cancelSolveJob(b.dataset.cancelJob);}});
 function queuedSeconds(){let s=0;const now=Date.now();for(const j of spotUI.jobs.values())if(jobPending(j))s+=Math.max(0,(j.seconds||0)-(j.status==='running'?(now-(j.startedAt||now))/1000:0));return s;}
@@ -344,8 +347,10 @@ async function sendToMac(task,observed,opts,extraAction){
  // A flop, turn or river solve needs everyone's range; a preflop line solves the whole preflop game on the Mac
  // (tools/preflop/spot.cjs) and needs none, which is exactly the line no chart covers.
  if(observed.board.length&&!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
+ // A copy: observedData shares the live hand's action log and board, which keep growing after this decision.
+ observed=JSON.parse(JSON.stringify(observed));
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),hand:task.hand?.dealId||null,table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.big?{size:'big'}:{},...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),hand:task.hand?.dealId||null,auto:!!task.automatic,table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.big?{size:'big'}:{},...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
  const prior=spotUI.jobs.get(id);HandTrace.log(task.hand,'solve',{where:job.target==='modal'?'cloud':plan.server?'server':job.target,job:id.slice(9),replaces:prior?prior.status:null,street:plan.street,kind:plan.kind,effort:task.effort||null,seconds:job.seconds,auto:!!task.automatic,background:!!task.background,spot:HandTrace.spot(task.baseKey)});
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
