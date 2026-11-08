@@ -105,19 +105,21 @@ const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,M
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
 // with --name (tools/local-solver/link.cjs) beats as 'solver-<name>' and takes jobs while idle at its own rate.
-const CLOUD_STUCK_MS=3*60e3,CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',api:'https://range-lab-live-rooms.onrender.com',rate:.441,threads:16,boot:25},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
+const CLOUD_STUCK_MS=3*60e3,CLOUD_SOLVER={url:'https://maxam-lemmon--guava-solver-web.us-east.modal.run',api:'https://range-lab-live-rooms.onrender.com',rate:.441,threads:16,boot:25,big:{rate:1.637,threads:64,boot:40,flop:12,pass:.7}},SERVER_OFFLINE_MS=10*60000,CLOUD_KEY='citrus-cloud-solves';
 function cloudSolvesOn(){let v=null;try{v=localStorage.getItem(CLOUD_KEY)}catch{}return v!=='off';}
 function cloudReady(){return!!CLOUD_SOLVER.url&&cloudSolvesOn()&&typeof citrusAccount!=='undefined'&&!!citrusAccount.user;}
 // Where a queued solve goes: your Mac while it's online and free; else an idle server of yours; else the cloud; else
-// it waits for your Mac. Preflop lines that reach a 3-way flop take hours, so they wait for the Mac.
+// it waits for your Mac. Preflop lines that reach a 3-way flop (heavy: hours on a Mac) get the big cloud machine,
+// which solves 8 of their 3-way flops at once.
 // where: 'cloud' or 'mac' when you picked one (the Mac/Cloud switch), else the cheapest that's ready.
+function cloudTarget(heavy){const c=heavy?CLOUD_SOLVER.big:CLOUD_SOLVER;return{target:'modal',threads:c.threads,load:0,rate:c.rate,boot:c.boot,cloud:true,big:!!heavy};}
 function solveTarget(heavy,where=null){
  const now=Date.now(),mac=spotUI.mac,macQueue=[...spotUI.jobs.values()].some(j=>jobPending(j)&&(j.target||'mac')==='mac');
- if(where==='cloud'&&!heavy&&cloudReady())return{target:'modal',threads:CLOUD_SOLVER.threads,load:0,rate:CLOUD_SOLVER.rate,boot:CLOUD_SOLVER.boot,cloud:true};
+ if(where==='cloud'&&cloudReady())return cloudTarget(heavy);
  if(where==='mac')return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
  if(mac?.seen&&now-mac.seen<MAC_OFFLINE_MS&&!mac.busy&&!macQueue)return{target:'mac',threads:mac.threads,load:mac.load,rate:0};
  for(const s of spotUI.servers.values())if(s.seen&&now-s.seen<SERVER_OFFLINE_MS&&!s.busy&&!(s.load>.5)&&![...spotUI.jobs.values()].some(j=>jobPending(j)&&j.target===s.name))return{target:s.name,threads:s.threads,load:0,rate:Number(s.rate)||0,server:true};
- if(!heavy&&cloudReady())return{target:'modal',threads:CLOUD_SOLVER.threads,load:0,rate:CLOUD_SOLVER.rate,boot:CLOUD_SOLVER.boot,cloud:true};
+ if(cloudReady())return cloudTarget(heavy);
  return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
 }
 // Cents, rounded the way a price reads: under 1¢ shows as <1¢.
@@ -128,7 +130,7 @@ function cloudSpendThisMonth(){const d=new Date(),from=new Date(d.getFullYear(),
 function solveTimes(){try{return JSON.parse(localStorage.getItem('range-lab-solve-times')||'{}')||{}}catch{return{}}}
 // v2: the trees with a small bet, a big bet and an overbet (learned ratios from the one-size trees no longer apply).
 // v3 for on-device rivers: the faster river engine (the learned ratios from the old one would read 10x too slow).
-function solveTimeKey(plan){return(plan.target&&plan.target!=='mac'?plan.target:plan.route)+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:plan.route==='river'?'-v3':'-v2');}
+function solveTimeKey(plan){return(plan.target&&plan.target!=='mac'?plan.target+(plan.big?'-big':''):plan.route)+'-'+plan.street+(plan.kind&&plan.kind!=='nlh'?'-'+plan.kind:plan.route==='river'?'-v3':'-v2');}
 function recordSolveTime(plan,seconds){if(!plan||!(seconds>0)||plan.kind==='multiway'||plan.learned)return;const t=solveTimes(),key=solveTimeKey(plan),ratio=seconds/plan.seed,old=t[key];t[key]=old>0?.6*old+.4*ratio:ratio;try{localStorage.setItem('range-lab-solve-times',JSON.stringify(t))}catch{}}
 // How fast this device runs the solvers' kind of work (typed-array arithmetic over scattered indexes), measured in
 // about 0.2 s and kept for a week. The browser river times above were measured where this scores BENCH_REFERENCE
@@ -156,9 +158,9 @@ function spotPlan(hand,where=spotUI.where){
  else{
   const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0,where),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=1.3*(spr<7?32:spr<30&&c.seats>2?220:600);
-  const base=pre?preflopSeconds(hand,three):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const base=pre?preflopSeconds(hand,three,dest.big?CLOUD_SOLVER.big:null):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&dest.target==='mac'&&learnedFlopReady(hand);
-  plan={route:bridge?'texas':'mac',choices:!bridge&&three===0&&cloudReady()&&macOnline(),target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
+  plan={route:bridge?'texas':'mac',choices:!bridge&&cloudReady()&&macOnline(),target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,big:!!dest.big,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
   // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.
   // A bridge that can update itself does it from a tap, here or on your phone; an older one shows the setup command
   // on the Mac, and the phone sends you there.
@@ -184,8 +186,10 @@ function noChartRanges(hand){
 // How many players you can see the flop with from a preflop spot. In the solver's tree nobody else joins a raised pot
 // by calling, so a raised pot you call has the players already in it plus you; an unraised one also the big blind.
 function preflopFlopPlayers(hand){const n=hand.n,bb=(hand.button+(n===2?1:2))%n,pre=hand.actionLog.filter(a=>a.street===0),raised=pre.some(a=>a.kind==='raise'||a.kind==='bet'),vol=new Set(pre.filter(a=>['call','raise','bet'].includes(a.kind)&&!hand.folded[a.seat]&&a.seat!==hand.actor).map(a=>a.seat));return vol.size+1+(!raised&&!hand.folded[bb]&&bb!==hand.actor&&!vol.has(bb)?1:0);}
-// Mac seconds before thread scaling (see the notes above spotPlan); the effort factor scales the flops.
-function preflopSeconds(hand,three){const n=hand.n,its=three?1100:800;return its*(n===2?.01:.075*n)+three*40*150;}
+// Mac seconds before thread scaling (see the notes above spotPlan); the effort factor scales the flops. big: the big
+// cloud machine, which solves 8 of the 40 flops at once on 8 threads each (about 12 s a flop overall; a 3-bet pot's
+// flop took 55 s on 4 Linux threads) and runs the single-threaded passes at about 0.7x the Mac estimate.
+function preflopSeconds(hand,three,big=null){const n=hand.n,its=three?1100:800,pass=its*(n===2?.01:.075*n);return big?pass*big.pass+three*40*big.flop:pass+three*40*150;}
 // One line for a spot with no solve: what the solve button says instead.
 function unsolvableReason(hand){const plan=spotPlan(hand);return plan?.route==='none'?plan.reason:plan?.blocked||'';}
 // The number and its unit never split across lines.
@@ -337,7 +341,7 @@ async function sendToMac(task,observed,opts,extraAction){
  // (tools/preflop/spot.cjs) and needs none, which is exactly the line no chart covers.
  if(observed.board.length&&!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.big?{size:'big'}:{},...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
 }

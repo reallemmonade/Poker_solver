@@ -13,6 +13,11 @@ and goes into CLOUD_SOLVER.url in studio/spot-ui.js.
 
 Price (Modal's list price, November 2026): 8 physical cores at $0.0000131 per core-second plus 8 GiB at $0.00000222
 per GiB-second, so about $0.44 an hour. RATE must match it; the worker multiplies it by its own run time.
+
+Big jobs (job.size == "big": preflop lines that can reach a three-way flop, hours on a Mac) get a 32-core container
+(BIG_RATE, about $1.64 an hour) that solves 8 of their 3-way flops at once, so they finish in tens of minutes. Their
+price per solve is about the same as on 8 cores; only the wait shrinks. studio/spot-ui.js CLOUD_SOLVER.big must match.
+The preflop three-way equity table (about 2 minutes to build) is kept on a Modal Volume, so it's built once.
 """
 import json
 import os
@@ -25,6 +30,10 @@ import modal
 CORES = 8
 MEMORY_MB = 8192
 RATE = round(CORES * 0.0000131 * 3600 + MEMORY_MB / 1024 * 0.00000222 * 3600, 3)
+BIG_CORES = 32
+BIG_MEMORY_MB = 16384
+BIG_RATE = round(BIG_CORES * 0.0000131 * 3600 + BIG_MEMORY_MB / 1024 * 0.00000222 * 3600, 3)
+BIG_HOURS = 6
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 IGNORE = ["render-site", "**/*.png", "**/node_modules", "**/TexasSolver", "**/.cmake-venv", "**/plo_solver", "**/mw_solver", "**/equity3"]
 
@@ -42,23 +51,40 @@ image = (
 )
 app = modal.App("guava-solver", image=image)
 secret = modal.Secret.from_name("guava-cloud")
+cache = modal.Volume.from_name("guava-solver-cache", create_if_missing=True)
+CACHE = "/cache"
 ALLOWED_APIS = ("https://range-lab-live-rooms.onrender.com",)
 
 
-@app.function(cpu=CORES, memory=MEMORY_MB, timeout=3600, secrets=[secret])
+@app.function(cpu=CORES, memory=MEMORY_MB, timeout=3600, secrets=[secret], volumes={CACHE: cache})
 def solve(job: dict):
     """One job, start to finish, on this container's cores."""
+    run_job(job, CORES, MEMORY_MB, RATE, 3300)
+
+
+@app.function(cpu=BIG_CORES, memory=BIG_MEMORY_MB, timeout=BIG_HOURS * 3600, secrets=[secret], volumes={CACHE: cache})
+def solve_big(job: dict):
+    """A preflop line that reaches three-way flops: 8 flops at a time on 32 cores."""
+    run_job(job, BIG_CORES, BIG_MEMORY_MB, BIG_RATE, BIG_HOURS * 3600 - 300)
+
+
+def run_job(job: dict, cores: int, memory_mb: int, rate: float, timeout: int):
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "job.json")
         with open(path, "w") as f:
             json.dump(job, f)
-        print("Cloud solve", job["id"], "for", job["link"]["user"])
+        print("Cloud solve", job["id"], "for", job["link"]["user"], "on", cores, "cores")
+        table = os.path.join(CACHE, "equity3.bin")
+        had_table = os.path.exists(table)
         run = subprocess.run(
-            ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(RATE), "--once", path,
-             "--threads", str(CORES * 2), "--memory", str(int(MEMORY_MB * 0.8)), "--timeout", "3300"],
-            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json")},
+            ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(rate), "--once", path,
+             "--threads", str(cores * 2), "--parallel", str(max(1, cores // 4)), "--memory", str(int(memory_mb * 0.8)),
+             "--timeout", str(timeout)],
+            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json"), "CITRUS_EQUITY3": table},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
         print(run.stdout[-4000:])
+        if not had_table and os.path.exists(table):
+            cache.commit()
         # The worker reports its own failures on the job. If it crashed before it could, say so here, so the phone
         # shows why instead of waiting.
         if run.returncode != 0:
@@ -95,7 +121,7 @@ def web():
 
     @api.get("/")
     def info():
-        return {"ok": True, "rate": RATE, "threads": CORES * 2}
+        return {"ok": True, "rate": RATE, "threads": CORES * 2, "big": {"rate": BIG_RATE, "threads": BIG_CORES * 2}}
 
     @api.post("/solve")
     async def start(request: Request):
@@ -118,8 +144,9 @@ def web():
             raise HTTPException(403, "This account can't start cloud solves.")
         if job.get("target") != "modal":
             raise HTTPException(400, "This job isn't for the cloud.")
-        await solve.spawn.aio({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
+        worker = solve_big if job.get("size") == "big" and job.get("kind") == "preflop" else solve
+        await worker.spawn.aio({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
                      "link": {"api": origin, "token": token, "user": user["id"]}})
-        return {"started": True, "rate": RATE}
+        return {"started": True, "rate": BIG_RATE if worker is solve_big else RATE}
 
     return api

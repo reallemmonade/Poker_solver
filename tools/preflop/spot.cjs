@@ -1,6 +1,6 @@
 'use strict';
 // Solves one preflop spot that no chart covers (Solve this spot, through the Mac bridge).
-//   node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--effort quick|standard|deep]
+//   node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--parallel n] [--effort quick|standard|deep]
 // spot.json: {config, actions, actor, heroCards}, the app's own hand (studio/game.js): the table, the preflop
 // actions so far and the player to act.
 //
@@ -98,7 +98,7 @@ function fit(S,t,target){
 
 function iterate(S,count,report,from,to){const step=Math.max(1,Math.floor(count/20));for(let done=0;done<count;done+=step){S.iterate(Math.min(step,count-done));report(from+(to-from)*Math.min(1,(done+step)/count));}}
 
-async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),effort='standard',equity3,flops:flopCount=0,maxThree=MAX_THREE,log=()=>{},progress=()=>{}}={}){
+async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),parallel=1,effort='standard',equity3,flops:flopCount=0,maxThree=MAX_THREE,log=()=>{},progress=()=>{}}={}){
  const e={...EFFORTS[effort]||EFFORTS.standard,...flopCount>0?{flops:flopCount}:{}},started=Date.now(),x=convert(spot),opts={...x.opts,equity3};
  // A first pass, then (with three-way pots to fit) the flops, then a second pass. Shares of the time: rough.
  let S=new Solver(opts),spotNode=S.tree.nodes.find(n=>n.spot);
@@ -116,15 +116,18 @@ async function run(spot,{bin,threads=Math.max(1,os.cpus().length-1),effort='stan
   // The likeliest three-way pots under the spot, by how often the spot's players reach them together.
   const ranked=terminals(S,spotNode).filter(t=>t.node.type==='flop3'&&t.node.players.includes(x.hero)).map(t=>({...t,weight:t.node.players.reduce((w,p)=>w*mass(t.reach[p]),1)})).sort((a,b)=>b.weight-a.weight).slice(0,maxThree).filter(t=>t.weight>0);
   const total=ranked.length*e.flops;let done=0;const dir=fs.mkdtempSync(path.join(os.tmpdir(),'citrus-preflop-'));
+  // Every pot's flops go into one pool: `parallel` 3-way solves at a time, the threads split between them. On a
+  // big machine many smaller solves at once beat one wide one (each flop solve scales poorly past ~8 threads).
+  const pots=ranked.map((t,k)=>{const node=t.node,slots=node.players,dead=s=>(opts.anteEach||0)+(s===(x.config.seats===2?1:2)?opts.ante:0),behind=Math.min(...slots.map(s=>x.stack-(node.inv[s]-dead(s))));
+   return{t,slots,info:{pot:node.pot,behind:Math.max(.01,behind),agg:slots.indexOf(node.aggressor),ranges:slots.map(s=>rangeText(t.reach[s])),reachBySlot:slots.map(s=>t.reach[s])},sum:[0,1,2].map(()=>({sum:new Float64Array(K),w:new Float64Array(K)})),ok:0,boards:flops(e.flops,7919+k)};});
+  const tasks=pots.flatMap(p=>p.boards.map(board=>({p,board}))),lanes=Math.max(1,Math.min(parallel,tasks.length)),each=Math.max(1,Math.floor(threads/lanes));let next=0,stop=null;
   try{
-   for(const t of ranked){
-    const node=t.node,slots=node.players,dead=s=>(opts.anteEach||0)+(s===(x.config.seats===2?1:2)?opts.ante:0),behind=Math.min(...slots.map(s=>x.stack-(node.inv[s]-dead(s))));
-    const info={pot:node.pot,behind:Math.max(.01,behind),agg:slots.indexOf(node.aggressor),ranges:slots.map(s=>rangeText(t.reach[s])),reachBySlot:slots.map(s=>t.reach[s])};
-    const sum=[0,1,2].map(()=>({sum:new Float64Array(K),w:new Float64Array(K)}));let ok=0;
-    for(const board of flops(e.flops,7919+solved.length)){
-     try{const r=await solveFlop(bin,info,board,threads,dir);r.forEach((q,s)=>{for(let i=0;i<K;i++)if(q.w[i]>0){sum[s].sum[i]+=q.sum[i]/q.w[i]/q.pot;sum[s].w[i]+=1;}});ok++;}catch(error){if(/out of date/.test(error.message))throw error;log('Flop '+board+': '+error.message);}
-     done++;progress(plan.first+plan.flops*done/total);
-    }
+   await Promise.all(Array.from({length:lanes},async(_,lane)=>{const sub=path.join(dir,'lane'+lane);fs.mkdirSync(sub);
+    while(next<tasks.length&&!stop){const {p,board}=tasks[next++];
+     try{const r=await solveFlop(bin,p.info,board,each,sub);r.forEach((q,s)=>{for(let i=0;i<K;i++)if(q.w[i]>0){p.sum[s].sum[i]+=q.sum[i]/q.w[i]/q.pot;p.sum[s].w[i]+=1;}});p.ok++;}catch(error){if(/out of date/.test(error.message)){stop=error;break;}log('Flop '+board+': '+error.message);}
+     done++;progress(plan.first+plan.flops*done/total);}}));
+   if(stop)throw stop;
+   for(const {t,slots,info,sum,ok} of pots){const node=t.node;
     if(ok<Math.max(Math.min(3,e.flops),e.flops/2)){solved.push({key:node.key,players:slots,flops:ok,skipped:true});continue;}
     // Target: each class's mean share over the flops it was dealt on, weighted by its reach in that slot.
     const target=sum.map((q,s)=>({share:Float64Array.from(q.sum,(v,i)=>q.w[i]>0?v/q.w[i]:0),w:Float64Array.from(q.w,(n,i)=>n>0?info.reachBySlot[s][i]*(classes[i].length===2?6:classes[i][2]==='s'?4:12):0)}));
@@ -161,11 +164,11 @@ module.exports={run,estimate,convert,ensureEquity3,EFFORTS};
 
 if(require.main===module){
  const argv=process.argv.slice(2),opt={};for(let i=2;i<argv.length;i+=2)opt[argv[i].replace(/^--/,'')]=argv[i+1];
- if(argv.length<2){console.error('usage: node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--effort quick|standard|deep]');process.exit(1);}
+ if(argv.length<2){console.error('usage: node tools/preflop/spot.cjs spot.json result.json [--mw-solver path] [--threads n] [--parallel n] [--effort quick|standard|deep]');process.exit(1);}
  (async()=>{
   try{
-   const spot=JSON.parse(fs.readFileSync(argv[0],'utf8')),threads=Number(opt.threads)||Math.max(1,os.cpus().length-1),equity3=ensureEquity3(opt.equity3,threads);let last=0;const t0=Date.now();
-   const result=await run(spot,{bin:opt['mw-solver']||path.join(__dirname,'..','multiway-solver','mw_solver'),threads,effort:opt.effort,equity3,log:m=>console.log(m),
+   const spot=JSON.parse(fs.readFileSync(argv[0],'utf8')),threads=Number(opt.threads)||Math.max(1,os.cpus().length-1),equity3=ensureEquity3(opt.equity3||process.env.CITRUS_EQUITY3||undefined,threads);let last=0;const t0=Date.now();
+   const result=await run(spot,{bin:opt['mw-solver']||path.join(__dirname,'..','multiway-solver','mw_solver'),threads,parallel:Number(opt.parallel)||1,effort:opt.effort,equity3,log:m=>console.log(m),
     progress:p=>{const now=Date.now();if(now-last<2000&&p<1)return;last=now;const s=(now-t0)/1000;console.log('Progress: '+p.toFixed(3)+' '+(p>.02?Math.round(s*(1-p)/p):-1));}});
    fs.writeFileSync(argv[1],JSON.stringify(result));console.log('Done: '+result.iterations+' iterations, NashConv '+result.nashConv.toFixed(4)+' bb, '+Math.round(result.seconds)+' s');
   }catch(error){console.error('Error: '+error.message);process.exit(2);}
