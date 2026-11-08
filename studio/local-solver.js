@@ -340,7 +340,8 @@
  // A later decision on a kept street, answered from the tree as the first solve's own answer would be; null when
  // the line left the tree, or it is the other player's turn in it, or the hand is not in the solved range.
  function treeAnswer(result,data,hand){
-  const saved=result?.solve?.tree,street=data.board.length-2;if(!saved||saved.v!==1||saved.board.length!==data.board.length||saved.board.join()!==data.board.map(C.cardName).join())return null;
+  if(result?.solve?.tree?.game==='NLH3')return treeAnswerMW(result,data,hand);
+  const saved=result?.solve?.tree,street=data.board.length-2;if(!saved||saved.v!==1||saved.game||saved.board.length!==data.board.length||saved.board.join()!==data.board.map(C.cardName).join())return null;
   const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w?.node||w.node.player!==(data.actor===line.ip?'ip':'oop'))return null;
   const table=treeTable(saved,w.node),key=findCombo(table,comboKey(data.heroCards));if(!key)return null;
   const {actions,probs,index}=mapActions(hand,w.node,table[key],saved),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
@@ -350,10 +351,58 @@
    solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
     warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+String(q.warning||'')}};
  }
+
+ // The 3-way solver's output holds its street's whole tree too (actions with street totals, each combo's mix), so a
+ // three-way flop or turn solve keeps it the same way: each player's combos and starting weights, then the action
+ // nodes breadth first, keyed by the action indexes from the street's start. A later decision on that street reads
+ // it (treeAnswerMW). No EVs are kept, so those answers grade by frequency.
+ function mwStreetTree(raw,s,budget=TREE_BYTES){
+  const combos=raw.combos.map(l=>l.join(',')),weights=raw.weights.map(w=>b64(Uint8Array.from(w,x=>Math.max(0,Math.min(255,Math.round(x*255)))))),nodes=[],queue=[[raw.tree,'']];
+  let size=combos.reduce((n,c)=>n+c.length,0)+weights.reduce((n,c)=>n+c.length,0);
+  for(let q=0;q<queue.length;q++){
+   const [node,line]=queue[q];if(!node||!Array.isArray(node.actions)||!Array.isArray(node.strategy))continue;
+   const A=node.actions.length,H=node.strategy.length,out=new Uint8Array(H*A);
+   node.strategy.forEach((row,i)=>{if(!Array.isArray(row)||row.length!==A)return;const t=row.reduce((x,y)=>x+(y>0?y:0),0);if(!(t>0))return;let left=255,best=0;row.forEach((p,a)=>{if(p>row[best])best=a;});row.forEach((p,a)=>{if(a===best)return;const v=Math.min(left,Math.max(0,Math.round(p/t*255)));out[i*A+a]=v;left-=v;});out[i*A+best]=left;});
+   const table=b64(out);size+=table.length+line.length+40*A;if(size>budget)break;
+   nodes.push({line,player:node.player,actions:node.actions.map(a=>({kind:a.kind,to:a.to,allin:!!a.allin})),table});
+   (node.children||[]).forEach((child,i)=>queue.push([child,line?line+'/'+i:String(i)]));
+  }
+  if(!nodes.length)return null;
+  return{v:1,game:'NLH3',board:s.board.slice(),pot:s.pot,stack:s.stack,seats:s.seats.slice(),combos,weights,nodes};
+ }
+ // The street's line as the 3-way solver plays it (mwSpec): the three players in postflop order at the street's
+ // start, and each live player's action (street totals). null unless three play the street from its start.
+ function mwLine(data){
+  const config=G.normalize(data.config),street=data.board.length-2,h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[];let seats=null;
+  const open=()=>{if(seats||h.street!==street)return;const live=h.living();if(live.length!==3){seats=false;return;}const after=i=>(i-h.button+h.n)%h.n||h.n;seats=live.slice().sort((a,b)=>after(a)-after(b));};
+  for(const a of data.actions){open();if(a.street===street){if(!seats)return null;if(!seats.includes(a.seat)){if(a.kind!=='fold'&&a.kind!=='check')return null;}else{if(a.kind==='fold')return null;path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}}h.act(a);}
+  open();return seats?{seats,path}:null;
+ }
+ function mwWalk(saved,path){
+  let map=treeMaps.get(saved);if(!map){map=new Map(saved.nodes.map(n=>[n.line,n]));treeMaps.set(saved,map);}
+  const steps=[];let at='';
+  for(const step of path){const node=map.get(at);if(!node)return null;let i=-1;if(step.kind==='check'||step.kind==='call')i=node.actions.findIndex(a=>a.kind===step.kind);
+   else{const o=node.actions.map((a,k)=>({a,k})).filter(x=>x.a.kind===step.kind).sort((x,y)=>Math.abs(x.a.to-step.to)-Math.abs(y.a.to-step.to))[0];if(o&&Math.abs(o.a.to-step.to)<=Math.max(2,.01*step.to))i=o.k;}
+   if(i<0)return null;steps.push({node,i});at=at?at+'/'+i:String(i);}
+  return{line:at,node:map.get(at)||null,steps};
+ }
+ function mwTable(saved,node){const list=saved.combos[node.player].split(','),A=node.actions.length,t=node.bytes||(node.bytes=unb64(node.table)),out={};list.forEach((c,i)=>{let s=0;const r=[];for(let a=0;a<A;a++){r.push(t[i*A+a]);s+=t[i*A+a];}if(s>0)out[c]=r.map(x=>x/s);});return out;}
+ function mwReach(saved,p,steps){const list=saved.combos[p].split(','),w0=unb64(saved.weights[p]),w=new Map();list.forEach((c,i)=>{if(w0[i]>0)w.set(c,w0[i]/255);});for(const {node,i}of steps){if(node.player!==p)continue;const table=mwTable(saved,node);for(const [c,x]of w)w.set(c,x*(table[c]?table[c][i]:0));}return w;}
+ function treeAnswerMW(result,data,hand){
+  const saved=result.solve.tree;if(saved.board.length!==data.board.length||saved.board.join()!==data.board.map(C.cardName).join())return null;
+  const line=mwLine(data);if(!line||line.seats.join()!==saved.seats.join())return null;const w=mwWalk(saved,line.path);if(!w?.node||w.node.player!==line.seats.indexOf(data.actor))return null;
+  const table=mwTable(saved,w.node),name=data.heroCards.slice().sort((a,b)=>b-a).map(C.cardName).join(''),key=table[name]?name:table[name.slice(2)+name.slice(0,2)]?name.slice(2)+name.slice(0,2):null;if(!key)return null;
+  const {actions,probs,index}=mapMW(hand,w.node,table[key],null),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
+  const q=result.solve,sources=new Map((q.rangeAssumptions||[]).map(r=>[r.seat,r.source])),rangeAssumptions=[];
+  for(let p=0;p<3;p++){const seat=line.seats[p],r=reachText(mwReach(saved,p,w.steps),p===w.node.player?key:null);if(!r)return null;rangeAssumptions.push({seat,range:r.text,combinations:r.combinations,source:(sources.get(seat)||'Solved range')+', narrowed by this street\'s actions with the solved frequencies'});}
+  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:result.units||(hand.config.mode==='cash'?'bb':'prize units'),ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
+   solve:{version:1,method:'local-multiway',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,evAvailable:false,rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
+    warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+String(q.warning||'')}};
+ }
  // Both players' ranges for the next street's solve, narrowed by the kept street's whole line with the solved
  // frequencies, as combo ranges by seat ('' for everyone else); null when the line left the tree.
  function treeCarry(result,data,hero=null){
-  const saved=result?.solve?.tree;if(!saved||saved.v!==1)return null;const street=saved.board.length-2;if(data.board.length-2!==street+1||saved.board.join()!==data.board.slice(0,saved.board.length).map(C.cardName).join())return null;
+  const saved=result?.solve?.tree;if(!saved||saved.v!==1||saved.game)return null;const street=saved.board.length-2;if(data.board.length-2!==street+1||saved.board.join()!==data.board.slice(0,saved.board.length).map(C.cardName).join())return null;
   const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w||w.node||!line.path.length)return null;
   const ranges=Array(G.normalize(data.config).seats).fill(''),own=hero?comboKey(hero.cards):null;
   for(const [seat,who]of [[line.ip,'ip'],[line.oop,'oop']]){const list=treeCombos(saved,who),mine=own&&seat===hero.seat?list.find(c=>c===own||c===own.slice(2)+own.slice(0,2))||null:null,r=reachText(treeReach(saved,who,w.steps),mine);if(!r)return null;ranges[seat]=r.text;}
@@ -418,9 +467,10 @@
   assert(player===s.heroIndex&&index>=0,'The solver strategy does not include your hand.');
   const cash=engine.hand.config.mode==='cash',{actions,probs,mean,index:map}=mapMW(engine.hand,node,node.strategy[index],node.evs[index]),hasEV=cash&&mean.every(Number.isFinite),values=hasEV?mean:actions.map(()=>0),best=hasEV?values.indexOf(Math.max(...values)):probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0),converged=Number.isFinite(tree.exploitability)&&tree.exploitability<=s.accuracy,adjusted=(node.adjusted||[]).includes(index);
   let handMix=null;try{const table={};tree.combos[player].forEach((c,i)=>{table[c]=node.strategy[i];});handMix={seat:engine.hand.actor,classes:classMix(table,map,actions.length),combos:comboMix(table,map,actions.length)};}catch{}
+  let mwTree=null;try{mwTree=mwStreetTree(tree,s);}catch{}
   const street=STREETS[s.board.length-3],book=s.sizes[street],shortest=Math.min(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]))<Math.max(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]));
   return{supported:true,actions,reference:probs,mean:values,se:zeros,loss:hasEV?values.map(v=>values[best]-v):zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:cash?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),reliable:hasEV&&converged,...handMix?{handMix}:{},
-   solve:{version:1,method:'local-multiway',exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],bestEVRow:adjusted,sampledRunouts:tree.sampledRunouts,turnCards:tree.turnCards,riverCards:tree.riverCards,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:s.ranges.map(r=>Object.keys(r).length),
+   solve:{version:1,method:'local-multiway',...street!=='river'&&mwTree?{tree:mwTree}:{},exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],bestEVRow:adjusted,sampledRunouts:tree.sampledRunouts,turnCards:tree.turnCards,riverCards:tree.riverCards,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:s.ranges.map(r=>Object.keys(r).length),
     actionTree:{betSizes:book.bet,raiseSizes:book.raise,maxRaises:s.caps[street],jam:true},
     warning:'Solved by the 3-way solver on this computer for the ranges shown, with bets of '+book.bet.map(x=>Math.round(100*x)+'%').join(', ')+' of the pot and all-in on this street'+(s.board.length===3?', and one size (2/3 of the pot) on the turn and river':'')+'. Exploitability is the average gain of a best response for each player, in percent of the pot. Card removal between your two opponents is treated as independent.'+(tree.sampledRunouts?' To fit memory, '+tree.chance+' were dealt instead of every card.':'')+(shortest?' All three play the smallest stack.':'')+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(converged?'':' The solve stopped before reaching its accuracy target.')+(adjusted?' This line is rare in the solved strategy for your hand and its mix had not settled, so the best-EV action is shown.':'')}};
  }
@@ -514,6 +564,6 @@
    solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,streetTree,streetLine,walkTree,treeAnswer,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
