@@ -264,14 +264,11 @@ function followUpPlan(hand){
  if(!hand||hand.done||hand.street<1||spotJob(hand))return null;const me=deviceId();let last=null;
  for(const j of spotUI.jobs.values())if(j.device===me&&j.status!=='cancelled'&&j.status!=='failed'&&jobOnLine(j,hand)&&(!last||(j.createdAt||0)>(last.createdAt||0)))last=j;
  if(!last||lineJob(hand))return null;const plan=spotPlan(hand,last.target==='modal'?'cloud':'mac');if(!plan||plan.blocked||plan.route!=='mac')return null;
- const was=(last.observed?.board?.length||3)-3,now=hand.board.length-3;return{...plan,why:was<now?'street':'line'};
+ return plan;
 }
 // A solve still running for an earlier decision of this street on this hand's line: its tree answers this decision
 // when it lands, so nothing is sent again in the meantime.
 function lineJob(hand){if(!hand||hand.done||hand.street<1)return null;let found=null;for(const j of spotUI.jobs.values())if(jobPending(j)&&j.observed?.board?.length===hand.board.length&&jobOnLine(j,hand)&&(!found||(j.createdAt||0)>(found.createdAt||0)))found=j;return found;}
-const STREET_WORDS=['preflop','flop','turn','river'];
-// Why a decision later in a hand went off to be solved on its own, shown over its progress.
-function jobWhyHTML(j){const s=STREET_WORDS[(j.observed?.board?.length||3)-2]||'',prev=STREET_WORDS[(j.observed?.board?.length||3)-3]||'';return j.why==='street'?'<p class="small muted">The '+prev+' solve stops at the end of the '+prev+', so the '+s+' is solved now.</p>':j.why==='line'?'<p class="small muted">The earlier '+s+' solve doesn\'t cover this line (a bet size it didn\'t use), so this decision is solved on its own.</p>':'';}
 // Reads the saved answers of done Mac and cloud solves from earlier in this hand (each once), for their trees.
 async function loadHandTrees(hand){
  if(!hand||hand.done||hand.street<1)return false;let added=false;
@@ -340,7 +337,7 @@ async function sendToMac(task,observed,opts,extraAction){
  // (tools/preflop/spot.cjs) and needs none, which is exactly the line no chart covers.
  if(observed.board.length&&!opts.ranges.some(x=>String(x||'').trim()))throw Error('No chart ranges cover this line, so it can\'t be solved.');
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
- const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),table:task.kind==='review'?'review':solveTable(),...plan.why?{why:plan.why}:{},street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
+ const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5}:{}};
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
 }
@@ -531,8 +528,8 @@ function spotRangesHTML(result){
 // on your Mac or in the cloud, which then answers this flop instead.
 function fewerSizesHTML(result){const h=state.hand;if(!result?.solve?.library?.fewerSizes||!h||h.done||h.street!==1||activeSpotResult(h)!==result)return'';
  // The full-size solve sent from here: its progress shows in the prompt's place, and its answer replaces the library's once it lands.
- const job=spotJob(h);if(job&&jobPending(job))return'<div class="fewer-sizes"><p class="small muted">Solving 1/3, 2/3 and 1.5x '+(job.target==='modal'?'in the cloud':job.target&&job.target!=='mac'?'on your server':'on your Mac')+'. It replaces this answer when it\'s done.</p>'+jobNoticeHTML(job)+'</div>';
- if(job?.status==='done'){setTimeout(()=>deliverSolveJob(true),0);return'<div class="fewer-sizes"><p class="small muted">Loading the full solve…</p></div>';}
+ const job=spotJob(h);if(job&&jobPending(job))return'<div class="fewer-sizes">'+jobNoticeHTML(job)+'</div>';
+ if(job?.status==='done'){setTimeout(()=>deliverSolveJob(true),0);return'';}
  const failed=job?.status==='failed'?'<p class="small error">'+esc(jobText(job))+'</p>':'';
  const plan=spotPlan(h);if(!plan||plan.route==='none')return failed;
  const note='<p class="small muted">Only 1/3 pot is solved here.'+(plan.blocked?' '+esc(plan.blocked)+(plan.jump?' <button type="button" class="ui-jump" data-jump="'+plan.jump.to+'">'+esc(plan.jump.label)+'</button>':''):' Solve with 1/3, 2/3 and 1.5x:')+'</p>';
