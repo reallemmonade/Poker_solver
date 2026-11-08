@@ -29,13 +29,24 @@ function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsop
 function gradeBluffHand(cls){if(!/^[2-9TJQKA]{2}[so]?$/.test(cls||''))return false;const R='23456789TJQKA',hi=R.indexOf(cls[0]),lo=R.indexOf(cls[1]);if(hi===lo)return true;if(cls[2]!=='s')return false;
  return cls[0]==='A'||cls[0]==='K'&&lo>=7||lo>=8||hi-lo<=2&&lo>=2;}
 function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choice]&&!gradeFolds(g.options[g.choice])&&Number.isFinite(g.referenceFrequency)&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05)&&gradeBluffHand(comboOf(g.hand||''));}
+// A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
+// Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
+// legal hand (or the bots' learned guess) for each player, so its answer is shown but never graded, rated or a leak.
+// Read from the stored solve, so older grades follow the same rule.
+const GUESSED_RANGE=/^(All legal hands|History-conditioned starting range|Estimated preflop range)$/;
+function gradeGuessedRanges(g){const r=g?.solve?.rangeAssumptions;return Array.isArray(r)&&r.some(x=>x&&!x.folded&&GUESSED_RANGE.test(String(x.range||'')));}
+// A solver grade with a measured bb loss that counts; and a chart (or frequency-only) grade that counts.
+function gradeSolved(g){return!!g?.rated&&Number.isFinite(g.loss)&&!gradeGuessedRanges(g);}
+function gradeChart(g){return!!g?.referenceSource&&!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency);}
+// Whether a decision is graded at all: only these move the rating, count as leaks or score in the hand report.
+function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
 function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
-function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
+function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
 function gradeSizeOnly(g){if(!g||g.peeked||!g.referenceSource||!gradeMistake(g)||!Array.isArray(g.options))return false;const word=l=>String(l||'').split(' ')[0].toLowerCase(),mine=word(g.label||g.options[g.choice]?.label);
  return!!mine&&['bet','raise'].includes(mine)&&g.options.some((o,i)=>i!==g.choice&&o.label!==g.label&&word(o.label)===mine&&Number.isFinite(o.f)&&o.f>=(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05));}
-function gradeCost(g){return!g.peeked&&g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
+function gradeCost(g){return!g.peeked&&gradeSolved(g)&&g.units==='bb'&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,
   pot=c.startStreet>0?'Postflop':raises>=3?'4-bet+':raises===2?'3-bet':raises===1?'SRP':pre.some(a=>a.kind==='call')?'Limped':'Walk',
