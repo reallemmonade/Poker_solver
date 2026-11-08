@@ -11,12 +11,22 @@
 //     [--name NAME --rate DOLLARS_PER_HOUR]   another computer solving for your account: it takes the jobs the app
 //                                            sends to NAME (see queue.cjs; link it with link.cjs)
 //     [--once job.json]                      a cloud worker: solve the one job in job.json, then exit (tools/cloud)
+//     [--started MS --cap SECONDS]           a cloud worker's price cap: billed from MS (epoch milliseconds), its
+//                                            solve is told to stop and keep its answer so far a little before
+//                                            SECONDS, and is ended at SECONDS whatever it has
 const http=require('http'),fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process'),{Worker}=require('worker_threads');
 const L=require('../../studio/local-solver.js');
 const {createQueue}=require('./queue.cjs'),learn=require('./learn.cjs');
 
-const bootAt=Date.now(),args={name:'mac',rate:0,once:'',port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,parallel:0,memory:Math.round(os.totalmem()/1048576*.7)};
-for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory','rate','parallel'].includes(k)?Number(v):v;}
+const args={name:'mac',rate:0,once:'',started:0,cap:0,port:8787,threads:Math.max(1,os.cpus().length-1),solver:path.join(__dirname,'TexasSolver','install','console_solver'),'plo-solver':path.join(__dirname,'..','plo-solver','plo_solver'),'mw-solver':path.join(__dirname,'..','multiway-solver','mw_solver'),timeout:1800,parallel:0,memory:Math.round(os.totalmem()/1048576*.7)};
+for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['port','threads','timeout','memory','rate','parallel','started','cap'].includes(k)?Number(v):v;}
+const bootAt=args.started>0?args.started:Date.now();
+// The price cap (cloud workers): capAt ends the job; stopAt, a little before it (10% of the cap, 15 s to 2 min), tells
+// the running solve to stop and write what it has, so a capped solve still answers. Without a cap both are never.
+const capAt=args.cap>0?bootAt+args.cap*1000:Infinity,stopAt=args.cap>0?capAt-Math.min(180,Math.max(20,args.cap*.2))*1000:Infinity;
+let capHit=false;
+// Seconds a solve starting now may run before it is told to stop (soft) and before it is ended (hard).
+function budget(limit){const now=Date.now();return{soft:Math.max(1,Math.min(limit,(stopAt-now)/1000)),hard:Math.max(2,Math.min(limit,(capAt-now)/1000))};}
 if(!/^[a-z0-9-]{1,24}$/.test(args.name))throw Error('--name takes 1 to 24 lowercase letters, digits or dashes.');
 const once=args.once?JSON.parse(fs.readFileSync(args.once,'utf8')):null;
 // Pages allowed to call the bridge: the Render site, and the app served from
@@ -44,7 +54,7 @@ function selfUpdate(){
  console.log('Updating the solver. Log: '+log);
 }
 // A cloud worker never learns in the background: it is paid for by the second.
-const queue=createQueue({port:args.port,threads:args.threads,busy,name:args.name,rate:args.rate>0?args.rate:0,bootAt,once,onIdle:once&&(()=>{console.log('Cloud job finished.');process.exit(0);}),status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
+const queue=createQueue({port:args.port,threads:args.threads,busy,name:args.name,rate:args.rate>0?args.rate:0,bootAt,once,capAt,capped:()=>capHit,onIdle:once&&(()=>{console.log('Cloud job finished.');process.exit(0);}),status:()=>busy()&&{iterations:job.iterations,exploitability:job.exploitability,seconds:(Date.now()-job.started)/1000,...job.fraction!==undefined?{fraction:job.fraction,remaining:job.remaining}:{}},
  learn:once?null:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solve(learn.spec(want),true).then(out=>learn.save(want,out)),
  learnPreflop:once?null:want=>job?Promise.reject(Error('Another solve is already running on this computer.')):solvePreflop(validatePreflop({spot:want.spot,effort:'standard'}),true),stopLearning,update:canUpdate&&selfUpdate});
 function headers(req){
@@ -59,16 +69,19 @@ function solve(spec,learning=false){
   // The solver runs in its own folder and writes result.json there; a relative
   // name keeps temp paths with spaces out of the solver's input.
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-')),out=path.join(dir,'result.json'),file=path.join(dir,'input.txt'),plo=spec.game==='PLO4',mw=spec.game==='NLH3',own=plo||mw,bin=plo?args['plo-solver']:mw?args['mw-solver']:args.solver,name=plo?'The PLO solver':mw?'The 3-way solver':'TexasSolver';
-  // The PLO and 3-way solvers stop themselves a little before the bridge's timeout and still write their result.
-  fs.writeFileSync(file,own?L.input(spec,{threads:args.threads,output:'result.json',memoryMB:args.memory,timeLimit:args.timeout*.95}):L.input(spec,{threads:args.threads,output:'result.json'}));
-  const started=Date.now(),child=spawn(bin,own?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir});
+  // The PLO and 3-way solvers stop themselves a little before the bridge's timeout (or the price cap) and still
+  // write their result. TexasSolver stops after its current iteration once the stop file exists, and dumps as usual.
+  const time=budget(args.timeout),stopFile=path.join(dir,'stop');
+  fs.writeFileSync(file,own?L.input(spec,{threads:args.threads,output:'result.json',memoryMB:args.memory,timeLimit:Math.min(args.timeout*.95,time.soft)}):L.input(spec,{threads:args.threads,output:'result.json'}));
+  const started=Date.now(),child=spawn(bin,own?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,TEXASSOLVER_STOP_FILE:stopFile}});
   const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null,learning};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
-  const timer=setTimeout(()=>child.kill('SIGKILL'),args.timeout*1000);
-  child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)mine.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)mine.exploitability=+m[1];}});
+  const soft=setTimeout(()=>{try{fs.writeFileSync(stopFile,'');}catch{}},time.soft*1000);
+  const timer=setTimeout(()=>child.kill('SIGKILL'),time.hard*1000);child.on('close',()=>clearTimeout(soft));
+  child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)mine.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)mine.exploitability=+m[1];if(/^Stopped early/.test(line))console.log(name+': '+line.trim());}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
   child.on('error',error=>{clearTimeout(timer);if(job===mine)job=null;reject(Error('Could not start '+name+' at '+bin+': '+error.message+(own?'. Run tools/local-solver/install-mac.sh first.':'')));});
   child.on('close',code=>{
-   clearTimeout(timer);const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
+   clearTimeout(timer);if(Date.now()>=stopAt-5000)capHit=true;const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
    try{
     if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(cancelled?'The solve was cancelled.':code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
     resolve({tree:JSON.parse(fs.readFileSync(out,'utf8')),iterations,exploitability,seconds,threads:args.threads});
@@ -86,17 +99,17 @@ function validateSpot(body){
  ok(Number.isInteger(d.actor)&&ints(d.heroCards,4)&&ints(d.board,5)&&d.board.length>=3&&Array.isArray(d.actions)&&d.actions.length<=300,'The spot is malformed.');
  ok(o&&typeof o==='object'&&Array.isArray(o.ranges)&&o.ranges.length<=9&&o.ranges.every(r=>typeof r==='string'&&r.length<=400000),'The ranges are malformed.');
  return{data:d,extra:body.extra&&typeof body.extra==='object'?body.extra:null,options:{...o,
-  milliseconds:Math.min(Number(o.milliseconds)||600000,args.timeout*900),preparationMilliseconds:Math.min(args.timeout*300,300000),
+  milliseconds:Math.min(Number(o.milliseconds)||600000,budget(args.timeout).soft*900),preparationMilliseconds:Math.min(budget(args.timeout).soft*300,300000),
   exactMemoryMB:Math.min(Number(o.exactMemoryMB)||8192,Math.round(args.memory*.6))}};
 }
 function solveSpot(spec){
  return new Promise((resolve,reject)=>{
   const started=Date.now(),worker=new Worker(path.join(__dirname,'spot-worker.cjs'),{workerData:spec,resourceLimits:{maxOldGenerationSizeMb:args.memory}});
   const mine=job={child:{kill:()=>worker.terminate()},started,iterations:0,exploitability:null,cancelled:false,closed:null};let outcome=null;mine.closed=new Promise(r=>worker.on('exit',r));
-  const timer=setTimeout(()=>worker.terminate(),args.timeout*1000);
+  const timer=setTimeout(()=>worker.terminate(),budget(args.timeout).hard*1000);
   worker.on('message',m=>{if(m.progress){mine.iterations=m.progress.iterations;mine.exploitability=m.progress.exploitability;}else outcome=m;});
   worker.on('error',error=>{outcome={error:/memory/i.test(error.message)?'The multiway solve ran out of memory on this computer.':error.message};});
-  worker.on('exit',()=>{clearTimeout(timer);if(job===mine)job=null;
+  worker.on('exit',()=>{clearTimeout(timer);if(job===mine)job=null;if(Date.now()>=stopAt-5000)capHit=true;
    if(mine.cancelled)return reject(Error('The solve was cancelled.'));
    if(!outcome)return reject(Error('The multiway solve was stopped (time limit or out of memory).'));
    if(outcome.error)return reject(Error(outcome.error));
@@ -118,11 +131,11 @@ function validatePreflop(body){
 function solvePreflop(spec,learning=false){
  return new Promise((resolve,reject)=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'citrus-preflop-')),input=path.join(dir,'spot.json'),out=path.join(dir,'result.json');fs.writeFileSync(input,JSON.stringify(spec.spot));
-  const started=Date.now(),child=spawn(process.execPath,[path.join(__dirname,'..','preflop','spot.cjs'),input,out,'--mw-solver',args['mw-solver'],'--threads',String(args.threads),'--parallel',String(args.parallel>0?args.parallel:preflopLanes(args.threads)),'--effort',spec.effort],{detached:true,stdio:['ignore','pipe','pipe']});
+  const started=Date.now(),child=spawn(process.execPath,[path.join(__dirname,'..','preflop','spot.cjs'),input,out,'--mw-solver',args['mw-solver'],'--threads',String(args.threads),'--parallel',String(args.parallel>0?args.parallel:preflopLanes(args.threads)),'--effort',spec.effort,...stopAt<Infinity?['--deadline',String(Math.round(stopAt))]:[]],{detached:true,stdio:['ignore','pipe','pipe']});
   const kill=()=>{try{process.kill(-child.pid,'SIGKILL');}catch{try{child.kill('SIGKILL');}catch{}}};
   const mine=job={child:{kill},started,iterations:0,exploitability:null,fraction:0,remaining:null,cancelled:false,closed:null,learning};let tail='';mine.closed=new Promise(r=>child.on('close',r));
-  const timer=setTimeout(kill,PREFLOP_HOURS*3600e3);
-  child.stdout.on('data',d=>{for(const line of String(d).split(/[\r\n]+/)){const m=line.match(/^Progress: ([\d.]+) (-?\d+)/);if(m){mine.fraction=+m[1];mine.remaining=+m[2]>=0?+m[2]:null;}else if(line.trim())console.log('Preflop solve: '+line.trim());}});
+  const timer=setTimeout(kill,budget(PREFLOP_HOURS*3600).hard*1000);
+  child.stdout.on('data',d=>{for(const line of String(d).split(/[\r\n]+/)){const m=line.match(/^Progress: ([\d.]+) (-?\d+)/);if(m){mine.fraction=+m[1];mine.remaining=+m[2]>=0?+m[2]:null;}else if(line.trim()){if(/^Deadline:/.test(line))capHit=true;console.log('Preflop solve: '+line.trim());}}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
   child.on('error',error=>{clearTimeout(timer);if(job===mine)job=null;reject(error);});
   child.on('close',code=>{clearTimeout(timer);if(job===mine)job=null;

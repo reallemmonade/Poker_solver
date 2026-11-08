@@ -11,7 +11,9 @@
 // Other computers can run the same bridge for your account (server.cjs --name): each takes only the jobs the app sent
 // to it by that name ('mac' is this Mac), beats as 'solver-<name>' and, given its price (--rate, dollars an hour), puts
 // what each solve cost on the job. A cloud worker (--once <job>, tools/cloud) is started for one job: it gets the job
-// and the account's sync cursor with it, solves, pushes the answer and exits.
+// and the account's sync cursor with it, solves, pushes the answer and exits. It also has a price cap (capAt, from the
+// quote, see tools/cloud/modal_app.py): its solve is told to stop a little before it and still answers (marked capped),
+// and at capAt the job ends whatever it has.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
 const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=Number(process.env.CITRUS_QUEUE_POLL_MS)||20000,BEAT_MS=Number(process.env.CITRUS_QUEUE_BEAT_MS)||180000,PROGRESS_MS=Number(process.env.CITRUS_QUEUE_PROGRESS_MS)||10000,IDLE_LOAD=.5,WANT_DAYS=30;
 
@@ -32,7 +34,7 @@ function progressOf(job,s,first){
  const remaining=p>=.1?s.seconds*(1-p)/p:Math.max(est-s.seconds,est*.1);
  return{phase:'solving',p:Math.round(p*1000)/1000,remaining:Math.max(1,Math.round(remaining)),iterations:s.iterations||0,exploitability:Number.isFinite(e)?e:null,target:target||null};
 }
-function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log,name='mac',rate=0,once=null,onIdle=null,bootAt=Date.now()}){
+function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log,name='mac',rate=0,once=null,onIdle=null,bootAt=Date.now(),capAt=Infinity,capped=()=>false}){
  let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null,updateWant=null;const jobs=new Map(),wants=new Map();
  // What a solve has cost so far, in dollars: a cloud worker is billed from the moment it starts, its boot included.
  const costOf=from=>rate>0?Math.round(rate*(Date.now()-(once?bootAt:from))/36)/1e5:0,mine=j=>once?false:(j.target||'mac')===name;
@@ -71,12 +73,16 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   // regular round, and the phone should still see this computer as online. A report still pulling when the solve
   // ends sends nothing, or its 'running' row would land after the answer and the job would be solved again.
   const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,...rate>0?{cost:costOf(started.startedAt)}:{},progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(!once&&Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
-  const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);over=true;}const result=out.result;
+  // At the cap the job ends whatever it has: the bill stops here (the container exits right after).
+  const capTimer=once&&capAt<Infinity?setTimeout(async()=>{if(over)return;over=true;log('Reached the price cap; stopping.');const row={...started,status:'failed',finishedAt:Date.now(),capped:true,...rate>0?{cost:costOf(started.startedAt)}:{},message:'It reached its price cap before it had an answer.'};jobs.set(id,row);await api('POST','/api/sync',{rows:[meta(id,row,at())]}).catch(e=>log('Could not report the cap: '+e.message));current?.stop();onIdle?.();},Math.max(0,capAt-Date.now())):null;
+  const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);clearTimeout(capTimer);over=true;}const result=out.result;
   // Cancelled from the phone: the job row already says so, so nothing goes back.
   if(out.cancelled){log('Cancelled '+id+'.');return;}
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'},at())]});return;}
-  const ok=result?.supported===true,rows=[],{t:_,...base}=job,done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost:costOf(started.startedAt)}:{},message:ok?undefined:(out.error||result?.message||'No answer.').replace(/^Local solver: /,'')};
+  const ok=result?.supported===true,rows=[],{t:_,...base}=job,cost=rate>0?costOf(started.startedAt):0,cap=once&&capped(),done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost}:{},...cap?{capped:true}:{},message:ok?undefined:(cap?'It reached its price cap before it had an answer.':(out.error||result?.message||'No answer.').replace(/^Local solver: /,''))};
+  // A paid answer says what it cost next to what was quoted, so the phone shows "Done · 34¢" with the answer.
+  if(ok&&rate>0&&result.solve)result.solve.cloud={cost,...job.estimate>0?{estimate:job.estimate}:{},...cap?{capped:true}:{},worker:name};
   // The street's kept tree (studio/local-solver.js streetTree) loses its deepest nodes until the answer fits the
   // account's 256 KB a record, which would otherwise refuse the whole push.
   const rowBytes=()=>Buffer.byteLength(JSON.stringify({result,observed:job.observed,options:job.options}));
