@@ -17,6 +17,7 @@
   'sources-disagree':'Two answers for the same decision disagree a lot',
   'premium-fold':'The answer folds a premium hand preflop',
   'impossible-mix':'An answer\'s frequencies do not add up',
+  'ungraded-silently':'A decision you played got no grade, and the trace does not say why',
  };
  const STUCK_MS=15*60*1000;
  const used=e=>e.type==='show job'||e.type==='grade from job'||e.type==='answer'&&e.from==='finished job';
@@ -50,6 +51,14 @@
    const old=t.startedAt&&now-t.startedAt>STUCK_MS;if(!done&&old)add('grade-missing','decision '+(e.spot||'?')+' waited for a solve to grade it and was never graded',{spot:e.spot});
   }
   for(const e of ev)if(e.type==='grade wait dropped'&&e.status!=='cancelled')add('grade-missing','a decision ('+(e.action||'?')+') lost its grade: its solve ended '+(e.status||'?'),{job:e.job});
+  // Every decision you played ends graded, waiting on a solve, or with a "not graded (…)" line saying why. Checked once the
+  // hand has ended and gone quiet for two minutes (grades for the last decisions land after the hand), or right away
+  // when the caller knows the hand is settled (opts.settled, scripted play).
+  const lastMs=ev.reduce((m,e)=>Math.max(m,e.ms||0),0),quiet=opts.settled||t.startedAt&&now-(t.startedAt+lastMs)>120000;
+  if(quiet&&ev.some(e=>e.type==='end'))for(const a of ev)if(a.type==='act'&&a.spot&&a.gradeEvery!==false&&!a.guessed){
+   const told=ev.some(e=>e.spot===a.spot&&(e.type==='graded'||/^not graded/.test(e.type)||/^grade (waits|wait dropped|from job)/.test(e.type)));
+   if(!told)add('ungraded-silently',(a.action||'a decision')+' on '+(['preflop','the flop','the turn','the river'][a.street]||'?')+' got no grade (showing '+(a.showing||'nothing')+')',{spot:a.spot});
+  }
   // Answers: frequencies that do not add up, premium folds, and two sources that disagree on the same decision.
   const info=t.info||{},answers=new Map();
   for(const e of ev){

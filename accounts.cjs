@@ -6,6 +6,9 @@
 const crypto=require('node:crypto'),FunkySpots=require('./studio/funky-spots.js');
 const STORES=new Set(['hands','grades','solves','meta','prefs']),ROW_MAX=262144,BATCH_MAX=200,PAGE_BYTES=3*1048576,PAGE_ROWS=300,SESSION_DAYS=180;
 const QUOTA=(Number(process.env.ACCOUNT_QUOTA_MB)>0?Number(process.env.ACCOUNT_QUOTA_MB):50)*1048576;
+// Syncs one network may make in 10 minutes. The scripted test player (tools/solve-flow/run.cjs) polls far faster than a
+// real phone and Mac, so its in-memory server raises this.
+const SYNC_LIMIT=Number(process.env.SYNC_RATE_LIMIT)>0?Number(process.env.SYNC_RATE_LIMIT):600;
 const sha=text=>crypto.createHash('sha256').update(text).digest('hex');
 const newId=()=>'u'+crypto.randomBytes(9).toString('base64url');
 const newToken=()=>crypto.randomBytes(32).toString('base64url');
@@ -209,14 +212,14 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   if(kind==='auth'&&req.method==='POST'&&verb==='logout'){const {hash}=await signedIn(req);await (await db()).deleteSession(hash);return json(res,200,{ok:true});}
   if(kind==='auth'&&req.method==='GET'&&verb==='me'){const {user}=await signedIn(req),s=await db();return json(res,200,{user:publicUser(user),usage:{...await s.usage(user.id),quota:QUOTA}});}
   if(kind==='sync'&&req.method==='POST'&&!verb){
-   limit(req,'sync',600,10*60*1000);const {user}=await signedIn(req),s=await db(),data=await body(req,4*1048576),rows=validRows(data.rows);
+   limit(req,'sync',SYNC_LIMIT,10*60*1000);const {user}=await signedIn(req),s=await db(),data=await body(req,4*1048576),rows=validRows(data.rows);
    if(rows.length){const usage=await s.usage(user.id),old=await s.sizes(user.id,rows),after=usage.bytes+rows.reduce((sum,r,i)=>sum+r.size-old[i],0);if(after>QUOTA&&after>usage.bytes)throw err(507,'Your account is full ('+Math.round(QUOTA/1048576)+' MB). New work stays saved on this device.');}
    const since=Number.isSafeInteger(data.since)&&data.since>=0?data.since:null,accepted=rows.length?await s.push(user.id,rows):0;
    // When everything newer than the device's cursor is this upload, the device can skip past it instead of pulling its own rows back.
    const head=since===null?null:await s.head(user.id,since);return json(res,200,{accepted,...head&&head.count===accepted?{cursor:head.max}:{}});
   }
   if(kind==='sync'&&req.method==='GET'&&!verb){
-   limit(req,'sync',600,10*60*1000);const {user}=await signedIn(req),s=await db(),since=Math.max(0,Math.floor(Number(url.searchParams.get('since'))||0)),list=await s.pull(user.id,since,PAGE_ROWS+1);
+   limit(req,'sync',SYNC_LIMIT,10*60*1000);const {user}=await signedIn(req),s=await db(),since=Math.max(0,Math.floor(Number(url.searchParams.get('since'))||0)),list=await s.pull(user.id,since,PAGE_ROWS+1);
    const rows=[];let bytes=0;for(const r of list.slice(0,PAGE_ROWS)){if(rows.length&&bytes+r.size>PAGE_BYTES)break;bytes+=r.size;rows.push({store:r.store,id:r.id,t:r.t,data:JSON.parse(r.data)});}
    const cursor=rows.length?list[rows.length-1].seq:since;return json(res,200,{rows,cursor,more:list.length>rows.length});
   }
