@@ -176,13 +176,17 @@ function spotPlan(hand,where=spotUI.where){
  }
  // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
  // can't be sent, so it isn't offered (the solve would only stop with that error).
- if(!pre&&(plan.route==='mac'||plan.route==='texas')&&noChartRanges(hand))return{route:'none',street:hand.street,reason:'No chart covers how this hand got here, so it can\'t be solved.'};
+// While the charts load it waits: a solve sent then could only stop with that error.
+ const uncovered=!pre&&(plan.route==='mac'||plan.route==='texas')?noChartRanges(hand):false;
+ if(uncovered)return{route:'none',street:hand.street,reason:'No chart covers how this hand got here, so it can\'t be solved.'};
+ if(uncovered===null&&!plan.blocked)plan.blocked='Loading charts…';
  plan.street=hand.street;plan.kind=kind;Object.defineProperty(plan,'hand',{value:hand});const ratio=plan.learned?1:solveTimes()[solveTimeKey(plan)];plan.solve=plan.seed*(ratio>0?ratio:1);plan.seconds=plan.solve+plan.wait;return plan;
 }
 // True only when charts are loaded, you typed no ranges and none of them covers this hand's preflop line.
 const chartLineMemo=new WeakMap();
+// null while the charts are still loading: whether one covers the line isn't known yet.
 function noChartRanges(hand){
- if(($('spotRangeMode')?.value||'auto')!=='auto'||spotUI.rangeValues.some(x=>String(x||'').trim())||!preflopLibrary.packs.length||typeof chartsLoading==='function'&&chartsLoading())return false;
+ if(($('spotRangeMode')?.value||'auto')!=='auto'||spotUI.rangeValues.some(x=>String(x||'').trim()))return false;if(typeof chartsLoading==='function'&&chartsLoading())return null;if(!preflopLibrary.packs.length)return false;
  const pre=hand.actionLog.filter(a=>a.street===0).length,m=chartLineMemo.get(hand);if(m&&m.pre===pre)return m.none;
  let none=true;try{none=!PokerPreflop.postflopRanges(preflopLibrary.packs,hand.config,observedData(hand).actions);}catch{}
  chartLineMemo.set(hand,{pre,none});return none;}
@@ -446,6 +450,10 @@ async function analyzeSpot(hand,pending={kind:'inspect'},extraAction=null){
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){await loadHandTrees(hand);if(state.pending!==task)return;const carried=treeRanges(hand);if(carried){opts.ranges=carried.ranges;opts.rangeOrigin=carried.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const carried=await carriedPostflopRanges(hand);if(state.pending!==task)return;if(carried){opts.ranges=carried.ranges;opts.rangeOrigin=carried.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   if(opts.rangeMode==='auto'&&!opts.ranges.some(x=>x.trim())){const chart=chartPostflopRanges(hand,observed,opts);if(chart){opts.ranges=chart.ranges;opts.rangeOrigin=chart.origin;cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
+  // A heads-up river solved on this device after a multiway street: the players who folded keep the ranges they folded
+  // with, and solving with them makes the exact solver enumerate every player's cards together, which overruns its
+  // budget after half a minute and gives no answer. Their cards are averaged out instead, as for a preflop fold.
+  if((task.plan||spotPlan(hand))?.route==='river'&&opts.ranges.some(x=>String(x||'').trim())){const folded=new Set(hand.actionLog.filter(a=>a.kind==='fold').map(a=>a.seat));if([...folded].some(i=>i!==hand.actor&&String(opts.ranges[i]||'').trim()&&!/^all$/i.test(String(opts.ranges[i]).trim()))){opts.ranges=opts.ranges.map((x,i)=>folded.has(i)&&i!==hand.actor?'all':x);cacheKey=spotCacheKey(observed,opts,extraAction,reference.snapshot);task.cacheKey=cacheKey;}}
   let cached=spotUI.cache.get(cacheKey);if(!pending.force&&!cached)cached=await getSavedSpot(cacheKey);
   if(state.pending!==task)return;
   if(!pending.force&&validSpotResult(cached)){spotUI.cache.set(cacheKey,cached);if(!['quiz','quizPrepare','review'].includes(pending.kind))spotUI.last={baseKey:task.baseKey,options:task.solveOptions,cacheKey:task.cacheKey,result:cached};state.pending=null;lock();HandTrace.log(hand,'answer',{from:'saved solve',solvedBy:HandTrace.source(cached),spot:HandTrace.spot(baseKey)});finishAnalysis({...cached,reused:true},task);return;}
