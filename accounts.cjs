@@ -3,7 +3,7 @@
 // progress, settings) are rows keyed by store and id; the newest write by its client timestamp wins, and every
 // accepted write gets a fresh sequence number so devices pull only what changed since their last sync.
 // TURSO_DATABASE_URL picks Turso (libSQL), DATABASE_URL picks Postgres; without either the service keeps accounts in memory for local use.
-const crypto=require('node:crypto');
+const crypto=require('node:crypto'),FunkySpots=require('./studio/funky-spots.js');
 const STORES=new Set(['hands','grades','solves','meta','prefs']),ROW_MAX=262144,BATCH_MAX=200,PAGE_BYTES=3*1048576,PAGE_ROWS=300,SESSION_DAYS=180;
 const QUOTA=(Number(process.env.ACCOUNT_QUOTA_MB)>0?Number(process.env.ACCOUNT_QUOTA_MB):50)*1048576;
 const sha=text=>crypto.createHash('sha256').update(text).digest('hex');
@@ -37,6 +37,7 @@ function memoryStore(){
   async push(userId,list){const m=rows(userId);let accepted=0;for(const r of list){const key=r.store+'\u0000'+r.id,old=m.get(key);if(old&&old.t>=r.t)continue;m.set(key,{...r,seq:++seq});accepted++;}return accepted;},
   async head(userId,since){let count=0,max=since;for(const r of rows(userId).values())if(r.seq>since){count++;max=Math.max(max,r.seq);}return{count,max};},
   async pull(userId,since,limit){return[...rows(userId).values()].filter(r=>r.seq>since).sort((a,b)=>a.seq-b.seq).slice(0,limit);},
+  async recentTraces(after,limit){const out=[];for(const [userId,m] of records)for(const r of m.values())if(r.store==='meta'&&r.id.startsWith('trace-')&&r.t>after)out.push({user:users.get(userId)?.username||userId,t:r.t,data:r.data});return out.sort((a,b)=>b.t-a.t).slice(0,limit);},
   async deleteUser(userId){users.delete(userId);records.delete(userId);resets.delete(userId);for(const [k,s]of sessions)if(s.userId===userId)sessions.delete(k);},
   // Friend tables (server.cjs) are saved here so a restart or deploy keeps them. scope keeps the preview's tables apart from Render's.
   async getRoom(scope,code){return rooms.get(scope+' '+code)||null;},
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS guava_rooms(scope text NOT NULL,code text NOT NULL,da
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=nextval('citrus_record_seq') WHERE citrus_records.t<excluded.t`,[userId,list.map(x=>x.store),list.map(x=>x.id),list.map(x=>x.t),list.map(x=>x.size),list.map(x=>x.data)]);return r.rowCount;},
   async head(userId,since){const r=(await q('SELECT count(*)::int AS count,coalesce(max(seq),$2)::bigint AS max FROM citrus_records WHERE user_id=$1 AND seq>$2',[userId,since])).rows[0];return{count:r.count,max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=$1 AND seq>$2 ORDER BY seq LIMIT $3',[userId,since,limit])).rows.map(r=>({...r,t:Number(r.t),seq:Number(r.seq)}));},
+  async recentTraces(after,limit){return(await q(`SELECT u.username AS "user",r.t,r.data FROM citrus_records r JOIN citrus_users u ON u.id=r.user_id WHERE r.store='meta' AND r.id LIKE 'trace-%' AND r.t>$1 ORDER BY r.t DESC LIMIT $2`,[after,limit])).rows.map(r=>({user:r.user,t:Number(r.t),data:r.data}));},
   async deleteUser(userId){await q('DELETE FROM citrus_users WHERE id=$1',[userId]);},
   async getRoom(scope,code){return(await q('SELECT code,data,touched_at FROM guava_rooms WHERE scope=$1 AND code=$2',[scope,code])).rows[0]||null;},
   async saveRoom(scope,code,data,t){await q('INSERT INTO guava_rooms(scope,code,data,touched_at) VALUES($1,$2,$3,$4) ON CONFLICT(scope,code) DO UPDATE SET data=excluded.data,touched_at=excluded.touched_at',[scope,code,data,t]);},
@@ -116,6 +118,7 @@ function libsqlStore(url,authToken){
 ON CONFLICT(user_id,store,id) DO UPDATE SET t=excluded.t,size=excluded.size,data=excluded.data,seq=excluded.seq WHERE citrus_records.t<excluded.t`,args:[userId,x.store,x.id,x.t,x.size,x.data]})),'write');return results.reduce((n,r)=>n+r.rowsAffected,0);},
   async head(userId,since){const r=row(await q('SELECT count(*) AS count,coalesce(max(seq),?) AS max FROM citrus_records WHERE user_id=? AND seq>?',[since,userId,since]));return{count:Number(r.count),max:Number(r.max)};},
   async pull(userId,since,limit){return(await q('SELECT store,id,t,seq,size,data FROM citrus_records WHERE user_id=? AND seq>? ORDER BY seq LIMIT ?',[userId,since,limit])).rows.map(r=>({store:r.store,id:r.id,t:Number(r.t),seq:Number(r.seq),size:Number(r.size),data:r.data}));},
+  async recentTraces(after,limit){return(await q(`SELECT u.username AS user,r.t,r.data FROM citrus_records r JOIN citrus_users u ON u.id=r.user_id WHERE r.store='meta' AND r.id LIKE 'trace-%' AND r.t>? ORDER BY r.t DESC LIMIT ?`,[after,limit])).rows.map(r=>({user:r.user,t:Number(r.t),data:r.data}));},
   async deleteUser(userId){await db.batch([{sql:'DELETE FROM citrus_records WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_sessions WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_resets WHERE user_id=?',args:[userId]},{sql:'DELETE FROM citrus_users WHERE id=?',args:[userId]}],'write');},
   async getRoom(scope,code){return row(await q('SELECT code,data,touched_at FROM guava_rooms WHERE scope=? AND code=?',[scope,code]));},
   async saveRoom(scope,code,data,t){await q('INSERT INTO guava_rooms(scope,code,data,touched_at) VALUES(?,?,?,?) ON CONFLICT(scope,code) DO UPDATE SET data=excluded.data,touched_at=excluded.touched_at',[scope,code,data,t]);},
@@ -138,6 +141,12 @@ function chooseMailer(){
  return null;
 }
 
+// The key Claude's funky-spot review sends (GET /api/funky-spots): FUNKY_REVIEW_TOKEN when set, otherwise one derived from
+// the database key, so the Mac (which holds that key in .env.telescope.local) can work it out with tools/funky-spots.cjs --print-key.
+function reviewKey(env=process.env){
+ if(env.FUNKY_REVIEW_TOKEN)return env.FUNKY_REVIEW_TOKEN.trim();const base=(env.TURSO_AUTH_TOKEN||env.DATABASE_URL||'').trim();
+ return base?crypto.createHmac('sha256',base).update('guava-funky-review').digest('base64url').slice(0,40):'';
+}
 function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMailer()}){
  let ready=store?store.init().then(()=>true,e=>{console.error('Account database could not start:',e.message);lastError=e.message;ready=null;return false;}):null,lastError='';
  async function db(){if(!store)throw err(503,'Accounts are not switched on for this server yet.');if(!ready)ready=store.init().then(()=>true,e=>{lastError=e.message;ready=null;return false;});if(!await ready)throw err(503,'The account database is not reachable right now. Your work stays saved on this device.');return store;}
@@ -214,6 +223,17 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
    if(!full||!await checkPassword(typeof data.password==='string'?data.password:'',full.pass))throw err(401,'Wrong password.');
    await s.deleteUser(user.id);return json(res,200,{deleted:true});
   }
+  // Claude's review of funky spots (studio/funky-spots.js): every account's recent hand traces that trip a check, with
+  // the whole trace so each one can be triaged on its own. Read-only, and only for the review key (see reviewKey).
+  if(kind==='funky-spots'&&req.method==='GET'&&!verb){
+   limit(req,'funky',60,60*60*1000);const key=reviewKey(),m=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
+   if(!key)throw err(503,'No review key on this server.');if(!m||m[1].length!==key.length||!crypto.timingSafeEqual(Buffer.from(m[1]),Buffer.from(key)))throw err(401,'Wrong review key.');
+   const s=await db(),now=Date.now(),hours=Math.min(24*14,Math.max(1,Number(url.searchParams.get('hours'))||24)),max=Math.min(200,Math.max(1,Number(url.searchParams.get('limit'))||60));
+   const rows=await s.recentTraces(now-hours*36e5,1500),kinds={},flagged=[];let total=0;
+   for(const r of rows){let t;try{t=JSON.parse(r.data).value;}catch{continue;}if(!t||!t.hand)continue;const flags=FunkySpots.check(t,{now});if(!flags.length)continue;
+    total++;for(const f of flags)kinds[f.kind]=(kinds[f.kind]||0)+1;if(flagged.length<max)flagged.push({user:r.user,hand:t.hand,startedAt:t.startedAt,flags,trace:t});}
+   return json(res,200,{hours,scanned:rows.length,flaggedHands:total,kinds,labels:FunkySpots.KINDS,flagged});
+  }
   return json(res,404,{error:'Not found.'});
  };
  // Health line: which database, whether it answered, and whether reset email can be sent.
@@ -222,4 +242,4 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
  route.status=async()=>{if(!store)return{accounts:'off',reason:offReason};const ok=await(ready||db().then(()=>true,()=>false));return{accounts:store.kind,database:ok?'ok':'unreachable'+(lastError?': '+lastError.replace(/[a-z]+:\/\/\S+/gi,'[url]').slice(0,160):''),resetEmail:!!mail};};
  return route;
 }
-module.exports={createAccounts,memoryStore,postgresStore,libsqlStore};
+module.exports={createAccounts,reviewKey,memoryStore,postgresStore,libsqlStore};

@@ -29,3 +29,15 @@ When you add a new solve route, answer source or grading path, log it with `Hand
 ## Testing the solve flow end to end
 
 `node tools/solve-flow/run.cjs --hands 10 --tables hu,3way` plays real hands in the real app (headless Chromium via Playwright) against local copies of everything a solve passes through: the account server in memory, the real Mac bridge linked to it (with a stand-in TexasSolver, `tools/solve-flow/fake-texassolver.cjs`, and the real 3-way solver), and the cloud played by the bridge in `--once` mode. It never touches production. It reads each hand's trace and fails on a decision solved twice, a finished solve never shown or used to grade, a solve stuck after the hand, or a page error; traces and a report land in `solve-flow-report/`. `--seed` replays a run. Run it after changing anything in the solve, sync, bridge or grading flow.
+
+## Funky spots: problems caught without anyone reporting them
+
+`studio/funky-spots.js` checks every hand trace for things that look wrong: a decision solved twice, a finished solve never shown or used to grade, a solve stuck or failed, a decision that never got its grade, two answers for the same decision that disagree a lot, AA/KK folded preflop, frequencies that don't add up. The same checks run in the app at the end of each hand, in `tools/solve-flow/run.cjs`, in `tools/hand-trace.cjs`, and on the server.
+
+To review real hands from every account (last 24 h by default, each with its whole trace, grouped by kind):
+
+```
+FUNKY_REVIEW_TOKEN=<key> node tools/funky-spots.cjs [--hours 72] [--kind duplicate-solve] [--json]
+```
+
+The server (`GET /api/funky-spots`) answers only to the review key: `FUNKY_REVIEW_TOKEN` on Render, or when unset one derived from the database key (`node tools/funky-spots.cjs --print-key` on the Mac prints it). Triage each kind from its traces, fix the cause, and when a new kind of bug turns up, add a detector for it in `studio/funky-spots.js` so it is caught automatically next time.

@@ -6,7 +6,8 @@
 // TexasSolver (fake-texassolver.cjs) and the real 3-way solver cut to a few iterations (fast-mw-solver.cjs), and the cloud is the same bridge started in --once mode
 // for each job, the way the Modal worker runs it. Every other outside request from the page is blocked.
 //
-// For each hand it reads the app's own hand trace (studio/hand-trace.js) and fails on:
+// For each hand it reads the app's own hand trace (studio/hand-trace.js) and fails on any funky-spot check
+// (studio/funky-spots.js, the same checks the app and Claude's review run on real hands), which include:
 //   - the same decision solved more than once,
 //   - a solve that finished but was never shown or used to grade,
 //   - a solve still queued or running long after the hand ended,
@@ -16,7 +17,7 @@
 // Writes every trace and a summary to solve-flow-report/ (git-ignored). Needs Playwright with Chromium, a C++
 // compiler for the 3-way solver, and the repo's npm install.
 const fs=require('fs'),os=require('os'),path=require('path'),http=require('http'),{spawn,execFileSync}=require('child_process');
-const repo=path.resolve(__dirname,'../..'),args=process.argv.slice(2),opt=(k,d)=>{const i=args.indexOf('--'+k);return i<0?d:args[i+1]&&!args[i+1].startsWith('--')?args[i+1]:true;};
+const FunkySpots=require('../../studio/funky-spots.js'),repo=path.resolve(__dirname,'../..'),args=process.argv.slice(2),opt=(k,d)=>{const i=args.indexOf('--'+k);return i<0?d:args[i+1]&&!args[i+1].startsWith('--')?args[i+1]:true;};
 const HANDS=Number(opt('hands',12)),TABLES=String(opt('tables','hu,3way')).split(','),SEED=Number(opt('seed',7)),out=path.join(repo,'solve-flow-report'),work=fs.mkdtempSync(path.join(os.tmpdir(),'solve-flow-'));
 const CLOUD_URL='https://maxam-lemmon--guava-solver-web.us-east.modal.run';
 fs.mkdirSync(out,{recursive:true});
@@ -146,16 +147,15 @@ async function playHand(page,table,n){
 // What the trace must never show.
 function check(t){
  if(!t)return['no trace was recorded'];
- const p=[],ev=t.events,bySpot=new Map();
- for(const e of ev.filter(e=>e.type==='solve'))bySpot.set(e.spot,[...(bySpot.get(e.spot)||[]),e]);
- for(const [spot,list] of bySpot)if(list.length>1)p.push('decision '+spot+' solved '+list.length+' times ('+list.map(e=>e.where+'@'+(e.ms/1000).toFixed(1)+'s').join(', ')+')');
+ // The funky-spot checks the app and the server review run (studio/funky-spots.js), plus the live job states below.
+ // The stand-in TexasSolver makes up its strategies, so its answers disagreeing with a library is expected here.
+ const p=FunkySpots.check(t).filter(f=>f.kind!=='sources-disagree').map(f=>f.kind+': '+f.text),ev=t.events;
  const used=new Set(ev.filter(e=>e.type==='show job'||e.type==='grade from job'||e.type==='answer'&&e.from==='finished job').map(e=>e.job));
  for(const j of t.jobsNow){
-  if(j.status==='done'&&!used.has(j.job))p.push('solve '+j.job+' finished but was never shown or used to grade');
-  if(j.status==='queued'||j.status==='running')p.push('solve '+j.job+' still '+j.status+' 2 minutes after the hand');
+  if(j.status==='done'&&!used.has(j.job)&&!p.some(x=>x.includes(' '+j.job+' ')))p.push('solve-not-shown: solve '+j.job+' finished but was never shown or used to grade');
+  if(j.status==='queued'||j.status==='running')p.push('solve-stuck: solve '+j.job+' still '+j.status+' 2 minutes after the hand');
  }
- for(const e of ev.filter(e=>e.type==='error'||e.type==='solve error'))p.push(e.type+': '+e.message);
- return p;
+ return[...new Set(p)];
 }
 function summary(t){if(!t)return'';const c=k=>t.events.filter(e=>e.type===k).length;return c('solve')+' solves, '+c('show job')+' shown, '+c('grade from job')+' graded from jobs, '+c('graded')+' graded, '+c('cancel')+' cancelled';}
 

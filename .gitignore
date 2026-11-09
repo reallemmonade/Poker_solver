@@ -65,6 +65,7 @@
 !/tools/calibration/level2-sync.sh
 !/tools/split-libraries.cjs
 !/tools/hand-trace.cjs
+!/tools/funky-spots.cjs
 !/tools/solve-flow/
 !/tools/solve-flow/run.cjs
 !/tools/solve-flow/fake-texassolver.cjs
@@ -94,6 +95,7 @@
 !/studio/
 !/studio/app.js
 !/studio/hand-trace.js
+!/studio/funky-spots.js
 !/studio/accounts.js
 !/studio/verify-accounts.cjs
 !/studio/action-bar.js

@@ -25,6 +25,8 @@ const HandTrace=(()=>{
   t={v:1,hand:id,slot:nextSlot(),device:typeof deviceId==='function'?deviceId():'',startedAt:Date.now(),events:[],dropped:0};traces.set(id,t);
   while(traces.size>KEEP)traces.delete(traces.keys().next().value);return t;
  }
+ // Funky-spot checks (studio/funky-spots.js) on the finished hand; the flags sync with the trace and reach Claude's review.
+ function check(t){try{if(typeof FunkySpots!=='undefined')t.flags=FunkySpots.check(t);}catch{}}
  function save(t){dirty.add(t);clearTimeout(timer);timer=setTimeout(flush,2500);}
  function flush(){clearTimeout(timer);timer=0;for(const t of dirty){t.savedAt=Date.now();try{dbPut('meta',{id:'trace-'+(t.device||'x')+'-'+t.slot,value:t}).catch(()=>{});}catch{}}dirty.clear();}
  function log(hand,type,data){
@@ -43,10 +45,12 @@ const HandTrace=(()=>{
  function end(h){
   const t=trace(h);if(!t)return;t.info=small({...describe(h),...t.info&&{heroCards:t.info.heroCards}});
   try{t.board=cardText(h.board);const pos=G.positions(h.n,h.button);t.actions=[[],[],[],[]];for(const a of h.actionLog)(t.actions[a.street]||(t.actions[a.street]=[])).push((pos[a.seat]||'seat'+a.seat)+' '+a.kind+(a.target?' '+a.target/100+'bb':'')+(a.allIn?' all-in':''));while(t.actions.length&&!t.actions[t.actions.length-1].length)t.actions.pop();}catch{}
-  log(h,'end');flush();
+  log(h,'end');check(t);flush();
  }
  // Where an answer came from, in a few words.
+ // The answer for the hand being decided, as {action label: frequency}, so the funky-spot checks can compare answers.
+ function mix(result){try{if(!result?.supported||!Array.isArray(result.actions)||!Array.isArray(result.reference))return null;const out={};result.actions.forEach((a,i)=>{const f=Number(result.reference[i]);if(a?.label&&Number.isFinite(f))out[a.label]=(out[a.label]||0)+f;});return Object.keys(out).length?out:null;}catch{return null;}}
  function source(result){if(!result)return null;if(!result.supported)return'unsupported';const s=result.solve;return s?.method||s?.source||(result.referenceOnly?'chart':result.reused?'saved':'model');}
  addEventListener('pagehide',flush);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flush();});
- return{log,deal,end,flush,spot,source,recent:()=>[...traces.values()].reverse(),get:id=>traces.get(id)||null};
+ return{log,deal,end,flush,spot,source,mix,recent:()=>[...traces.values()].reverse(),flagged:()=>[...traces.values()].reverse().filter(t=>{check(t);return t.flags?.length;}),get:id=>traces.get(id)||null};
 })();
