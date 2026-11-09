@@ -1,0 +1,16 @@
+{
+  "name": "guava-poker-app",
+  "private": true,
+  "description": "iPhone and Mac app shell for Guava Poker. It loads https://guava.poker, so every web deploy updates the app.",
+  "scripts": {
+    "sync": "cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@capacitor/status-bar": "^8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
+  }
+}

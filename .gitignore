@@ -171,3 +171,15 @@
 /studio/render-site/
 # Chart bot reports (tools/chart-bots) are never committed.
 /out/
+# iPhone/Mac app shell (native/): everything but node_modules and Xcode build output.
+!/native/
+!/native/**
+/native/node_modules/
+/native/ios/App/output/
+/native/ios/App/build/
+/native/ios/App/App/public/
+/native/ios/App/App/capacitor.config.json
+/native/ios/App/App/config.xml
+/native/ios/capacitor-cordova-ios-plugins/
+**/xcuserdata/
+**/DerivedData/
