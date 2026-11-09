@@ -30,9 +30,9 @@ const {playability,PLAY}=require('./solve.cjs');
 const table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
 const classes=table.classes,K=classes.length,index=new Map(classes.map((c,i)=>[c,i])),combos=classes.map(c=>c.length===2?6:c[2]==='s'?4:12);
 
-const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',monotone:'1',check:'','per-spot':'','spot-flops':'20'};
+const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',monotone:'1',check:'','per-spot':'','spot-flops':'20','probe-weight':'0'};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
-if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--monotone 0] [--check dir] [--per-spot 1 [--spot-flops 20]]');process.exit(1);}
+if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--monotone 0] [--check dir] [--per-spot 1 [--spot-flops 20]] [--probe-weight 0.25]');process.exit(1);}
 
 // The two players at the flop, from the chart line "seat:kind:target/...": out of position is
 // first after the button (seat 0), and the aggressor is the last raiser (none in a limped pot).
@@ -57,7 +57,10 @@ for(const dir of dirs.split(','))for(const id of fs.readdirSync(dir)){
  if(!used)continue;flopCount+=used;
  for(const side of ['ip','oop']){
   const own=side==='ip'?spot.rangeIp:spot.rangeOop,opp=side==='ip'?spot.rangeOop:spot.rangeIp,target=new Float64Array(K),weight=new Float64Array(K),oppMass=new Float64Array(K);
-  for(let i=0;i<K;i++){oppMass[i]=(opp[classes[i]]||0)*combos[i];if(mass[side][i]>0){target[i]=sum[side][i]/mass[side][i];weight[i]=(own[classes[i]]||0)*combos[i]*used;}}
+  // --probe-weight w: a class solved at a probe weight (library.cjs --probe) counts as if it held w of
+  // its combos, so a hand the chart rarely plays in this role still informs its playability.
+  const pw=Number(args['probe-weight'])||0;
+  for(let i=0;i<K;i++){oppMass[i]=(opp[classes[i]]||0)*combos[i];if(mass[side][i]>0){target[i]=sum[side][i]/mass[side][i];weight[i]=Math.max(own[classes[i]]||0,pw)*combos[i]*used;}}
   // Matrix roles as in solve.cjs: a caller in position facing an out-of-position raiser uses
   // ipCaller/oopRaiser (initiative goes to the raiser); otherwise the player in position has it.
   const ini=r.aggressorIsOop?(side==='oop'?'self':'opp'):(side==='ip'?'self':'opp');
