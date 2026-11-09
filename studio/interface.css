@@ -67,6 +67,8 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
     installed iPhone app reports 100svh well short of the screen, which left a gap between the betting bar and the nav. */
  .ui-app .ui-live-grid{display:flex;flex-direction:row;align-items:stretch;gap:0;height:calc(var(--nav-top,calc(100svh - 62px - env(safe-area-inset-bottom))) - var(--pane-top,110px) - 6px);overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;margin:0}
  .ui-live-grid::-webkit-scrollbar{display:none}
+ /* Play fits the screen exactly: no padding under the screens, so the page itself never scrolls. */
+ .ui-app[data-area=play] .ui-shell{padding-bottom:0}
  .ui-live-grid>*{flex:0 0 100%;width:100%;height:100%;box-sizing:border-box;overflow-y:auto;overscroll-behavior-y:contain;scroll-snap-align:start;scroll-snap-stop:always}
  .ui-live-grid>.ui-table-pane{display:flex;flex-direction:column}
  .ui-live-grid>.ui-analysis,.ui-live-grid>.ui-history-pane{height:auto;max-height:100%;align-self:flex-start}

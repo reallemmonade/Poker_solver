@@ -127,7 +127,9 @@ function initInterface(){
  let paneTimer=0;liveGrid.addEventListener('scroll',()=>{clearTimeout(paneTimer);paneTimer=setTimeout(()=>{if(!swiping())return;const i=Math.round(liveGrid.scrollLeft/Math.max(1,liveGrid.clientWidth));if(i!==ui.pane){ui.pane=i;markPane();}},80);},{passive:true});
  // The pill under History/Table/Analysis rides the swipe, and you can also drag along the tabs to scrub between screens.
  const paneGlide=tabGlide(paneDots.querySelector('.ui-pane-tabs'),{items:'[data-pane]',scrub:true,progress:()=>swiping()?liveGrid.scrollLeft/Math.max(1,liveGrid.clientWidth):null});liveGrid.addEventListener('scroll',()=>paneGlide.update(false),{passive:true});
- if(window.ResizeObserver)new ResizeObserver(()=>showPane(ui.pane)).observe(liveGrid);addEventListener('resize',()=>showPane(ui.pane));window.visualViewport?.addEventListener('resize',()=>showPane(ui.pane));
+ // Re-measure whenever anything above the screens moves too: the installed iPhone app applies the top safe area after
+ // the first layout, which pushed the screens down without resizing them and hid Fold, Call and Raise under the nav.
+ if(window.ResizeObserver){const fit=new ResizeObserver(()=>showPane(ui.pane));fit.observe(liveGrid);for(let n=liveGrid.parentElement;n;n=n.parentElement)fit.observe(n,{box:'border-box'});const nav=document.querySelector('.ui-mobile-nav');if(nav)fit.observe(nav,{box:'border-box'});}for(const ev of ['resize','load','pageshow','orientationchange'])addEventListener(ev,()=>showPane(ui.pane));window.visualViewport?.addEventListener('resize',()=>showPane(ui.pane));
  // A new verdict on your decision lights the Analysis dot while you are looking at another screen.
  let seenFeedback='';new MutationObserver(()=>{const text=$('playFeedback').textContent.trim();if(text&&text!==seenFeedback){seenFeedback=text;if(!/^Choose an action\./.test(text)&&swiping()&&ui.pane!==2)paneDots.querySelector('[data-pane="2"]').classList.add('news');}}).observe($('playFeedback'),{childList:true,subtree:true,characterData:true});
  ui.showPane=showPane;
