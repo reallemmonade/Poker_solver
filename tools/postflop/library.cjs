@@ -125,8 +125,14 @@ function prepare(id,packs){
  // the chart (5% of its combos or more) at least x of its combos (TexasSolver drops weights under
  // 0.005), so the solve also prices hands the chart plays another way here, such as a flat it
  // could 3-bet instead.
- const floor=Number(args.floor)||0,seen=floor?plays(packs,def.chart):null;
- const classes=(w,seat)=>{const o={};P.classes.forEach((c,i)=>{const x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];if(x>=.005)o[c]=seen?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
+ // --probe x gives every class at least x of its combos in both ranges. A flop solve only measures
+ // the hands in a range, so without it a class is measured only in the roles the chart already
+ // plays it: 87s as the in-position opener, 65s and 86s only as the big blind, 76s and 97s barely at
+ // all, and the calibration then keeps the formula's guess for them (the cutoff folding 76s while
+ // opening 87s and 65s). A 1% probe barely moves the strategies but prices every hand in both roles;
+ // calibrate.cjs --probe-weight counts those measurements.
+ const floor=Number(args.floor)||0,probe=Number(args.probe)||0,seen=floor?plays(packs,def.chart):null;
+ const classes=(w,seat)=>{const o={};P.classes.forEach((c,i)=>{let x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];x=Math.max(x,probe);if(x>=.005)o[c]=seen||probe?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));
  return{id,label:def.label,pack,range,pot:h.pot,stack:Math.min(h.stacks[ip],h.stacks[oop]),ip,oop,rangeIp:classes(range.seats[ip],ip),rangeOop:classes(range.seats[oop],oop)};
 }
@@ -264,5 +270,5 @@ if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x]');}
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x]');}
 module.exports={SPOTS,TREE,PER_SPOT,PER_SPOT_6MAX,prepare,spec,nodes,turnNodes,args};
