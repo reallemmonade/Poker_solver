@@ -59,6 +59,19 @@ function pass(text){console.log('PASS '+text);count++;}
  assert.deepEqual(classesOf(of(0)),PF.classes.filter(pair).sort(),'The opener\'s grid is not their opening range');assert.equal(classesOf(of(1)).length,169,'The big blind\'s grid is not every hand');assert.deepEqual(PF.nearest([chart],new G.Hand(chart.config,{rng:G.rng(6)})).rangeAssumptions.map(x=>x.seat),[0],'An open shows grids for players yet to act');
  assert.deepEqual(r.handMix.seat,1);assert.deepEqual(r.actions.map(a=>a.kind),['fold','call','raise']);assert.deepEqual([r.handMix.classes.AKo,r.handMix.classes['72o']],[[0,.25,.75],[1,0,0]],'The actor\'s grid colours miss the chart strategy');
  pass('A preflop chart answer gives each live player\'s range at the decision and the actor\'s strategy, so the analysis draws their grids');}
+// Chart trees have no overcalls: facing an open and a flat the chart offers fold or squeeze only. The answer borrows the
+// seat's call against the open alone, keeps the squeeze, and is approximate (never graded).
+{const PF=require('./preflop.js'),src={name:'Overcall',url:'https://example.com/overcall',solver:'check',settings:'check',createdAt:'2026-01-01'},ace=c=>c[0]==='A',open={seat:0,kind:'raise',to:2.5};
+ const chart=PF.validate({format:PF.FORMAT,name:'Overcall',source:src,config:{variant:'NLH',seats:3,stacks:[100,100,100],sb:.5,bb:1,button:0},nodes:[{seat:0,history:[],actions:[{kind:'fold'},{kind:'raise',to:2.5}],strategy:PF.classes.map(()=>[0,1000])},
+  {seat:1,history:[open],actions:[{kind:'fold'},{kind:'call'},{kind:'raise',to:10}],strategy:PF.classes.map(c=>ace(c)?[0,1000,0]:[1000,0,0])},
+  {seat:2,history:[open,{seat:1,kind:'fold'}],actions:[{kind:'fold'},{kind:'call'},{kind:'raise',to:10}],strategy:PF.classes.map(c=>ace(c)?[0,250,750]:[1000,0,0])},
+  {seat:2,history:[open,{seat:1,kind:'call'}],actions:[{kind:'fold'},{kind:'raise',to:12.5}],strategy:PF.classes.map(c=>ace(c)?[600,400]:[1000,0])}]});
+ const h=new G.Hand(chart.config,{rng:G.rng(6)});h.act({kind:'raise',target:250});h.act({kind:'call'});h.holes[2]=G.Core.cards('AsKs');
+ for(const r of [PF.query(chart,h),PF.nearest([chart],h)]){assert.ok(PF.isResult(r));assert.deepEqual(r.actions.map(a=>a.kind),['fold','call','raise'],'Facing an open and a flat the answer has no Call row');
+  assert.deepEqual(r.reference.map(x=>Math.round(x*1000)/1000),[.35,.25,.4],'The overcall is not the flat against the open alone, out of the folds');assert.ok(r.offTree&&r.overcall&&/no overcalls/.test(r.referenceSource.name),'A borrowed overcall is not marked approximate');
+  assert.deepEqual([r.handMix.classes.AKs,r.handMix.classes['72o']],[[.35,.25,.4],[1,0,0]],'The grid colours miss the borrowed call');}
+ const alone=new G.Hand(chart.config,{rng:G.rng(6)});alone.act({kind:'raise',target:250});alone.act({kind:'fold'});alone.holes[2]=G.Core.cards('AsKs');const a=PF.query(chart,alone);assert.ok(!a.offTree&&!a.overcall,'A chart call is marked as borrowed');
+ pass('Facing an open and a flat, a chart answer borrows the seat\'s call against the open alone and is approximate');}
  // An exact-depth chart match (query, not nearest) carries the grids too.
  {const PF=require('./preflop.js'),src={name:'Exact',url:'https://example.com/exact',solver:'check',settings:'check',createdAt:'2026-01-01'},pair=c=>c.length===2;
   const chart=PF.validate({format:PF.FORMAT,name:'Exact',source:src,config:{variant:'NLH',seats:2,stacks:[20,20],sb:.5,bb:1,button:0},nodes:[{seat:0,history:[],actions:[{kind:'fold'},{kind:'raise',to:2}],strategy:PF.classes.map(c=>pair(c)?[0,1000]:[1000,0])},{seat:1,history:[{seat:0,kind:'raise',to:2}],actions:[{kind:'fold'},{kind:'call'}],strategy:PF.classes.map(()=>[0,1000])}]});

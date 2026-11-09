@@ -46,7 +46,12 @@ function gradeSolved(g){return!!g?.rated&&Number.isFinite(g.loss)&&!gradeGuessed
 function gradeChart(g){return!!g?.referenceSource&&!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency);}
 // Whether a decision is graded at all: only these move the rating, count as leaks or score in the hand report.
 function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
-function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+// No chart tree has overcalls (one flat per open keeps every flop heads-up), so a seat facing an open and a flat gets fold
+// or squeeze from the chart, and since PokerPreflop borrows its call from the flat against the open alone (approximate).
+// Neither is graded; older grades, made when the chart offered no call at all, are found from the saved line and options.
+function gradeOvercall(g){if(gradeSplit(g)!=='vsopen')return false;let raised=false,flat=false;for(const a of g.actions){if(a.kind==='raise'||a.kind==='bet')raised=true;else if(raised&&a.kind==='call'&&a.seat!==g.hero)flat=true;}
+ return flat&&(!!g.overcall||!(g.options||[]).some(o=>/^call\b/i.test(o?.label||'')));}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
