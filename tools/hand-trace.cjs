@@ -11,7 +11,7 @@
 //
 // The database comes from TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, read from the environment or from an env file
 // (--env <file>; by default .env.telescope.local or .env in the repo, which hold the production Turso keys on Maxam's Mac).
-const fs=require('node:fs'),path=require('node:path');
+const fs=require('node:fs'),path=require('node:path'),FunkySpots=require('../studio/funky-spots.js');
 const args=process.argv.slice(2),opt=name=>{const i=args.indexOf('--'+name);return i<0?null:args[i+1]&&!args[i+1].startsWith('--')?args[i+1]:true;};
 const repo=path.resolve(__dirname,'..');
 
@@ -34,10 +34,8 @@ function show(t){
  if(t.actions)console.log('   actions: '+t.actions.map(s=>Array.isArray(s)?s.join(', '):s).join(' | '));
  if(t.dropped)console.log('   ('+t.dropped+' middle events dropped to keep the trace small)');
  for(const e of t.events)console.log('   '+line(e));
- const solves=t.events.filter(e=>e.type==='solve'),bySpot=new Map();for(const e of solves)bySpot.set(e.spot,(bySpot.get(e.spot)||0)+1);
- const dupes=[...bySpot].filter(([,n])=>n>1);if(dupes.length)console.log('   ⚠ the same spot was solved more than once: '+dupes.map(([s,n])=>s+'×'+n).join(', '));
- const done=t.events.filter(e=>e.type==='job'&&e.status==='done').map(e=>e.job),shown=new Set(t.events.filter(e=>e.type==='show job'||e.type==='grade from job'||e.type==='answer'&&e.from==='finished job').map(e=>e.job));
- const lost=done.filter(j=>!shown.has(j));if(lost.length)console.log('   ⚠ finished solve never shown or used to grade: '+lost.join(', '));
+ // The funky-spot checks (studio/funky-spots.js), the same ones the app, the server review and scripted play run.
+ for(const f of FunkySpots.check(t))console.log('   ⚠ '+f.kind+': '+f.text);
  console.log('');
 }
 // The repo's @libsql/client when it is installed; otherwise Turso's HTTP API, so the script also runs from a checkout
@@ -67,4 +65,5 @@ async function main(){
  console.log(traces.length+' hand trace(s) for '+u[0].username+', newest first. Times are seconds from the deal; spot= is a hash of the decision.\n');
  for(const t of traces)show(t);
 }
-main().catch(e=>{console.error(e.message||e);process.exitCode=1;});
+if(require.main===module)main().catch(e=>{console.error(e.message||e);process.exitCode=1;});
+module.exports={show,loadEnv,client};
