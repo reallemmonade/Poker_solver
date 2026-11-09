@@ -29,6 +29,12 @@ function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsop
 function gradeBluffHand(cls){if(!/^[2-9TJQKA]{2}[so]?$/.test(cls||''))return false;const R='23456789TJQKA',hi=R.indexOf(cls[0]),lo=R.indexOf(cls[1]);if(hi===lo)return true;if(cls[2]!=='s')return false;
  return cls[0]==='A'||cls[0]==='K'&&lo>=7||lo>=8||hi-lo<=2&&lo>=2;}
 function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choice]&&!gradeFolds(g.options[g.choice])&&Number.isFinite(g.referenceFrequency)&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05)&&gradeBluffHand(comboOf(g.hand||''));}
+// The charts' realization model underpays suited connectors and one-gappers below T9s when opening first in: the
+// 6-max cutoff folds 76s, 75s and 97s while opening 87s and 65s, and a refit that keeps them in order only pulled
+// 87s down (tools/preflop/order-check.cjs, PR #276). Until measured open lines fix the charts, a first-in decision
+// with one of those hands, open or fold, is not graded.
+function gradeOpenConnector(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||g.actions.some(a=>a.kind==='raise'||a.kind==='bet'))return false;
+ const c=comboOf(g.hand||''),R='23456789TJQKA',hi=R.indexOf(c[0]),lo=R.indexOf(c[1]);return c[2]==='s'&&hi<=R.indexOf('9')&&hi-lo>=1&&hi-lo<=2;}
 // A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
 // Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
 // legal hand (or the bots' learned guess) for each player, so its answer is shown but never graded, rated or a leak.
@@ -40,7 +46,7 @@ function gradeSolved(g){return!!g?.rated&&Number.isFinite(g.loss)&&!gradeGuessed
 function gradeChart(g){return!!g?.referenceSource&&!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency);}
 // Whether a decision is graded at all: only these move the rating, count as leaks or score in the hand report.
 function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
-function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
