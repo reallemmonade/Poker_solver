@@ -40,4 +40,4 @@ To review real hands from every account (last 24 h by default, each with its who
 FUNKY_REVIEW_TOKEN=<key> node tools/funky-spots.cjs [--hours 72] [--kind duplicate-solve] [--json]
 ```
 
-The server (`GET /api/funky-spots`) answers only to the review key: `FUNKY_REVIEW_TOKEN` on Render, or when unset one derived from the database key (`node tools/funky-spots.cjs --print-key` on the Mac prints it). Triage each kind from its traces, fix the cause, and when a new kind of bug turns up, add a detector for it in `studio/funky-spots.js` so it is caught automatically next time.
+The server (`GET /api/funky-spots`) answers only to the review key. In project threads it is in `/mnt/project-files/funky-spots/review-key` (`FUNKY_REVIEW_TOKEN=$(cat /mnt/project-files/funky-spots/review-key)`); the server holds only its SHA-256 (`REVIEW_KEY_SHA256` in `accounts.cjs`). `FUNKY_REVIEW_TOKEN` on Render or `--print-key` on the Mac also work. Triage each kind from its traces, fix the cause, and when a new kind of bug turns up, add a detector for it in `studio/funky-spots.js` so it is caught automatically next time.
