@@ -141,6 +141,8 @@ function chooseMailer(){
  return null;
 }
 
+// Claude's review key, kept in the project's private files; only its SHA-256 is here, so no server setting is needed.
+const REVIEW_KEY_SHA256='8a5fabaf04fb55bbce822cecf1b35dfe3079195bfb0518559bc55f7171aee62f';
 // The key Claude's funky-spot review sends (GET /api/funky-spots): FUNKY_REVIEW_TOKEN when set, otherwise one derived from
 // the database key, so the Mac (which holds that key in .env.telescope.local) can work it out with tools/funky-spots.cjs --print-key.
 function reviewKey(env=process.env){
@@ -227,7 +229,8 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   // the whole trace so each one can be triaged on its own. Read-only, and only for the review key (see reviewKey).
   if(kind==='funky-spots'&&req.method==='GET'&&!verb){
    limit(req,'funky',60,60*60*1000);const key=reviewKey(),m=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
-   if(!key)throw err(503,'No review key on this server.');if(!m||m[1].length!==key.length||!crypto.timingSafeEqual(Buffer.from(m[1]),Buffer.from(key)))throw err(401,'Wrong review key.');
+   const sent=m?m[1]:'',same=(a,b)=>a.length===b.length&&crypto.timingSafeEqual(Buffer.from(a),Buffer.from(b));
+   if(!(key&&same(sent,key))&&!same(sha(sent),REVIEW_KEY_SHA256))throw err(401,'Wrong review key.');
    const s=await db(),now=Date.now(),hours=Math.min(24*14,Math.max(1,Number(url.searchParams.get('hours'))||24)),max=Math.min(200,Math.max(1,Number(url.searchParams.get('limit'))||60));
    const rows=await s.recentTraces(now-hours*36e5,1500),kinds={},flagged=[];let total=0;
    for(const r of rows){let t;try{t=JSON.parse(r.data).value;}catch{continue;}if(!t||!t.hand)continue;const flags=FunkySpots.check(t,{now});if(!flags.length)continue;
