@@ -8,6 +8,8 @@ const STORES=new Set(['hands','grades','solves','meta','prefs']),ROW_MAX=262144,
 const QUOTA=(Number(process.env.ACCOUNT_QUOTA_MB)>0?Number(process.env.ACCOUNT_QUOTA_MB):50)*1048576;
 // Syncs one network may make in 10 minutes. The scripted test player (tools/solve-flow/run.cjs) polls far faster than a
 // real phone and Mac, so its in-memory server raises this.
+// Per account, whatever network the tries come from: wrong passwords per 15 minutes, reset emails and wrong reset codes per hour.
+const LOGIN_FAILS=20,RESET_MAILS=5,RESET_FAILS=10;
 const SYNC_LIMIT=Number(process.env.SYNC_RATE_LIMIT)>0?Number(process.env.SYNC_RATE_LIMIT):600;
 const sha=text=>crypto.createHash('sha256').update(text).digest('hex');
 const newId=()=>'u'+crypto.randomBytes(9).toString('base64url');
@@ -183,23 +185,25 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
     const user={id:newId(),username,name,email,pass:await hashPassword(password)};if(!await s.createUser(user))throw err(409,await s.userByName(username)?'That username is taken.':'That email already has an account.');
     return json(res,201,await startSession(s,user));
    }
-   // Sign in with the username or the email on the account.
-   const user=username&&await findUser(s,username),ok=await checkPassword(password,user?user.pass:await DUMMY);if(!user||!ok)throw err(401,'Wrong username, email or password.');
+   // Sign in with the username or the email on the account. Wrong passwords also count per account, so guesses spread over
+   // many networks still hit a limit.
+   const user=username&&await findUser(s,username);if(user)limit('user '+user.id,'login-fail',LOGIN_FAILS,15*60*1000,false);const ok=await checkPassword(password,user?user.pass:await DUMMY);if(!user||!ok){if(user)limit('user '+user.id,'login-fail',LOGIN_FAILS,15*60*1000);throw err(401,'Wrong username, email or password.');}
    return json(res,200,await startSession(s,user));
   }
-  // Forgotten password: a six-digit code goes to the account's email and is good for 15 minutes and five tries.
+  // Forgotten password: a six-digit code goes to the account's email and is good for 15 minutes and five tries. Each account
+  // also gets at most RESET_MAILS codes and RESET_FAILS wrong codes an hour, so asking for fresh codes can't add up to a guess.
   if(kind==='auth'&&req.method==='POST'&&verb==='forgot'){
    limit(req,'forgot',8,15*60*1000);const s=await db(),data=await body(req);if(!mail)throw err(503,'Password reset by email is not set up on this server yet.');
    const user=await findUser(s,data.login);
-   if(user?.email){const old=await s.getReset(user.id);if(!old||old.expires-RESET_MS<Date.now()-60000){const code=String(crypto.randomInt(0,1e6)).padStart(6,'0');await s.saveReset(user.id,resetHash(user.id,code),Date.now()+RESET_MS);
+   if(user?.email){const old=await s.getReset(user.id);if(!old||old.expires-RESET_MS<Date.now()-60000){let quiet=false;try{limit('user '+user.id,'forgot-mail',RESET_MAILS,60*60*1000);}catch{quiet=true;}if(!quiet){const code=String(crypto.randomInt(0,1e6)).padStart(6,'0');await s.saveReset(user.id,resetHash(user.id,code),Date.now()+RESET_MS);
     try{await mail(user.email,'Your Guava Poker code: '+code,'Hi '+(user.name||user.username)+',\n\nYour code to reset your Guava Poker password is '+code+'. It works for 15 minutes.\n\nYour username is '+user.username+'.\n\nIf you did not ask for this, ignore this email; your password stays the same.');}
-    catch(e){console.error('Reset email failed:',e.message);await s.deleteReset(user.id);throw err(502,'The email could not be sent. Try again in a few minutes.');}}}
+    catch(e){console.error('Reset email failed:',e.message);await s.deleteReset(user.id);throw err(502,'The email could not be sent. Try again in a few minutes.');}}}}
    return json(res,200,{sent:true});
   }
   if(kind==='auth'&&req.method==='POST'&&verb==='reset'){
    limit(req,'reset',30,15*60*1000);const s=await db(),data=await body(req),user=await findUser(s,data.login),code=String(data.code||'').replace(/\D/g,''),password=typeof data.password==='string'?data.password:'';
-   const r=user&&await s.getReset(user.id);if(!r||r.expires<Date.now()||r.tries>=5)throw err(400,'That code expired. Ask for a new one.');
-   const want=Buffer.from(r.code_hash,'hex'),got=Buffer.from(resetHash(user.id,code),'hex');if(code.length!==6||!crypto.timingSafeEqual(want,got)){await s.bumpReset(user.id);throw err(400,'Wrong code.');}
+   if(user)limit('user '+user.id,'reset-fail',RESET_FAILS,60*60*1000,false);const r=user&&await s.getReset(user.id);if(!r||r.expires<Date.now()||r.tries>=5)throw err(400,'That code expired. Ask for a new one.');
+   const want=Buffer.from(r.code_hash,'hex'),got=Buffer.from(resetHash(user.id,code),'hex');if(code.length!==6||!crypto.timingSafeEqual(want,got)){await s.bumpReset(user.id);limit('user '+user.id,'reset-fail',RESET_FAILS,60*60*1000);throw err(400,'Wrong code.');}
    if(password.length<8||password.length>200)throw err(400,'Use a password of at least 8 characters.');
    await s.setPassword(user.id,await hashPassword(password));await s.deleteReset(user.id);return json(res,200,await startSession(s,user));
   }
@@ -232,7 +236,7 @@ function createAccounts({json,err,body,limit,store=chooseStore(),mail=chooseMail
   // the whole trace so each one can be triaged on its own. Read-only, and only for the review key (see reviewKey).
   if(kind==='funky-spots'&&req.method==='GET'&&!verb){
    limit(req,'funky',60,60*60*1000);const key=reviewKey(),m=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
-   const sent=m?m[1]:'',same=(a,b)=>a.length===b.length&&crypto.timingSafeEqual(Buffer.from(a),Buffer.from(b));
+   const sent=m?m[1]:'',same=(a,b)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);};
    if(!(key&&same(sent,key))&&!same(sha(sent),REVIEW_KEY_SHA256))throw err(401,'Wrong review key.');
    const s=await db(),now=Date.now(),hours=Math.min(24*14,Math.max(1,Number(url.searchParams.get('hours'))||24)),max=Math.min(200,Math.max(1,Number(url.searchParams.get('limit'))||60));
    const rows=await s.recentTraces(now-hours*36e5,1500),kinds={},flagged=[];let total=0;

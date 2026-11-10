@@ -14,8 +14,12 @@ const token=()=>crypto.randomBytes(24).toString('base64url');
 const seatHash=secret=>crypto.createHash('sha256').update(String(secret)).digest('base64url');
 const shuffleRandom=()=>crypto.randomBytes(6).readUIntBE(0,6)/2**48;
 const safeName=value=>String(value||'Player').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,24)||'Player';
-const clientIp=req=>{const xff=(process.env.RENDER||process.env.TRUST_PROXY)&&String(req.headers['x-forwarded-for']||'').split(',').map(s=>s.trim()).filter(Boolean).pop();return xff||req.socket?.remoteAddress||'?';};
-function limit(req,kind,max,windowMs,count=true){const key=kind+' '+clientIp(req),now=Date.now();let e=hits.get(key);if(!e||now-e.at>windowMs){if(!count)return;if(hits.size>50000)hits.clear();e={at:now,n:0};hits.set(key,e);}if((count?++e.n:e.n)>max)throw err(429,'Too many requests from this network. Wait a few minutes and try again.');}
+// Render puts Cloudflare in front of every service. Cloudflare sets CF-Connecting-IP to the caller's address (replacing any
+// copy the caller sent), while the last X-Forwarded-For entry is a Cloudflare edge that changes from request to request, so
+// limits keyed on it never filled up. Behind any other proxy (TRUST_PROXY), the last X-Forwarded-For entry is the caller.
+const clientIp=req=>{const h=req.headers;if(process.env.RENDER){const cf=String(h['cf-connecting-ip']||h['true-client-ip']||'').trim();if(cf)return cf;}const xff=(process.env.RENDER||process.env.TRUST_PROXY)&&String(h['x-forwarded-for']||'').split(',').map(s=>s.trim()).filter(Boolean).pop();return xff||req.socket?.remoteAddress||'?';};
+// Rate limit per network, or per account when `req` is a string key (so guesses spread over many networks still add up).
+function limit(req,kind,max,windowMs,count=true){const key=kind+' '+(typeof req==='string'?req:clientIp(req)),now=Date.now();let e=hits.get(key);if(!e||now-e.at>windowMs){if(!count)return;if(hits.size>50000)hits.clear();e={at:now,n:0};hits.set(key,e);}if((count?++e.n:e.n+1)>max)throw err(429,'Too many requests from this network. Wait a few minutes and try again.');}
 const stale=(room,now)=>now-room.touchedAt>(room.handNumber?ROOM_TTL:IDLE_TTL);
 function expire(){const now=Date.now();for(const [key,room]of rooms)if(stale(room,now))rooms.delete(key);for(const [key,e]of hits)if(now-e.at>10*60*1000)hits.delete(key);}
 function lookup(key){const id=String(key||'').toUpperCase(),room=rooms.get(id);if(room&&stale(room,Date.now())){rooms.delete(id);return undefined;}return room;}
@@ -98,4 +102,4 @@ setInterval(()=>{expire();for(const room of rooms.values())try{tick(room)}catch(
 if(require.main===module){const server=http.createServer(handle);server.listen(PORT,'0.0.0.0',()=>console.log(`Guava Poker server listening on ${PORT}`));
  // On a deploy or restart: stop taking table calls, save every table, then exit so the new server picks them up.
  const stop=async()=>{if(shuttingDown)return;shuttingDown=true;await flushRooms();await flushRooms();process.exit(0);};process.on('SIGTERM',stop);process.on('SIGINT',stop);}
-module.exports={handle,rooms,flushRooms,restoreRoom,roomData};
+module.exports={handle,rooms,flushRooms,restoreRoom,roomData,clientIp};
