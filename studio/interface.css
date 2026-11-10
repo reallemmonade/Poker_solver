@@ -341,3 +341,5 @@ body:not(.friend-game) .friend-bar{display:none!important}
 
 /* Analysis card header: title, Solve and Hide share one centre line and one text-button style */
 .ui-analysis-title{align-items:center;margin-bottom:12px}.ui-analysis-title h2{margin:0}.ui-analysis.ui-analysis-hidden .ui-analysis-title{margin-bottom:0}.ui-analysis-toggle{display:inline-flex;align-items:center;height:28px;line-height:1;padding:0 2px}
+
+.range-grid.plo-grid{grid-template-columns:auto repeat(4,1fr);gap:2px;max-width:420px}.plo-grid>b{font-size:10px;font-weight:600;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:2px 4px}.plo-grid>b:nth-child(5n+1){justify-content:flex-start}.range-grid.plo-grid span{aspect-ratio:auto;min-height:30px;font-size:11px;letter-spacing:0;font-variant-numeric:tabular-nums}

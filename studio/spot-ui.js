@@ -543,7 +543,21 @@ function comboPick(r,mix,tones){
  for(const old of rangeCombos.keys())if(old<id-12)rangeCombos.delete(old);
  return{id,k:rangePicked&&rangePicked.sig===sig?rangePicked.k:null};
 }
+// PLO has no 13x13 grid: each player's range is a grid of hand shapes (rows: aces, two pair, pair, rundown, gapped,
+// disconnected; columns: double-suited, single-suited, rainbow, 3+ of a suit). The actor's cells split into action colors
+// and show how often that shape is played (not folded); others fill by how often they hold it. PLO charts are approximate.
+function ploRangesHTML(result){
+ const pr=result.ploRange,h=state.hand,names=h&&pr.seats.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,tones=actionTones(result.actions,h),fold=result.actions.findIndex(a=>a.kind==='fold');
+ const seats=pr.seats.slice().sort((p,q)=>(q.seat===pr.seat)-(p.seat===pr.seat));
+ const grid=r=>{const mine=r.seat===pr.seat;let cells='<i></i>'+pr.cols.map(c=>'<b>'+esc(c)+'</b>').join('');
+  pr.rows.forEach((row,i)=>{cells+='<b>'+esc(row)+'</b>';pr.cols.forEach((col,j)=>{const c=i*4+j,x=r.w[c]<RANGE_MIN?0:r.w[c],m=mine&&x>0&&pr.mix[c],title=esc(row+' · '+col),mark=mine&&c===pr.hero&&h&&pr.seat===state.hero?'data-hand ':'';
+   cells+=m?'<span '+mark+'class="mixed" style="'+actionMixStyle(m,tones)+';opacity:'+(.35+.65*x).toFixed(2)+'" title="'+title+' · '+m.map(p=>Math.round(p*100)+'%').join(' / ')+'">'+Math.round(100*x*(1-(fold>=0?m[fold]:0)))+'%</span>'
+    :'<span '+mark+(x>0?'':'class="none" ')+'style="--w:'+(x>0?Math.max(.12,x):0).toFixed(2)+'" title="'+title+'">'+(x>0?Math.round(x*100)+'%':'')+'</span>';});});
+  return'<div class="range-grid plo-grid" role="img" aria-label="PLO range by hand shape">'+cells+'</div>';};
+ return'<div class="spot-ranges"><h3>Ranges · approximate</h3><div class="range-grids">'+seats.map(r=>'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong> · '+(r.share<.005?'<1':Math.round(r.share*100))+'% of hands</figcaption>'+(r.seat===pr.seat?actionKeyHTML(result.actions,tones,h):RANGE_KEY)+grid(r)+'</figure>').join('')+'</div></div>';
+}
 function spotRangesHTML(result){
+ if(result?.ploRange?.seats?.length)return ploRangesHTML(result);
  const all=result?.solve?.rangeAssumptions||result?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&all.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
  // Weighted share of the hands left in the deck: a combo held a tenth of the time counts a tenth, so a capped range does not read as wide.
