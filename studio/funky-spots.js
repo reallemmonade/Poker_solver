@@ -29,9 +29,9 @@
  function check(t,opts={}){
   if(!t||!Array.isArray(t.events))return[];
   const now=opts.now||Date.now(),ev=t.events,flags=[],add=(kind,text,extra)=>flags.push({kind,text,...extra});
-  // The same decision solved twice. A solve that replaces a failed or cancelled one is a retry, not a duplicate.
-  const bySpot=new Map();for(const e of ev)if(e.type==='solve'&&e.spot&&!['failed','cancelled'].includes(e.replaces))bySpot.set(e.spot,[...(bySpot.get(e.spot)||[]),e]);
-  for(const [spot,list] of bySpot)if(list.length>1)add('duplicate-solve','decision '+spot+' solved '+list.length+' times ('+list.map(e=>(e.where||'?')+'@'+((e.ms||0)/1000).toFixed(1)+'s').join(', ')+')',{spot});
+  // The same decision solved twice. A solve that replaces a failed or cancelled one is a retry, and a solve with different inputs (the played size added to the tree) is a new solve, not a duplicate.
+  const bySpot=new Map();for(const e of ev)if(e.type==='solve'&&e.spot&&!['failed','cancelled'].includes(e.replaces)){const k=e.spot+'|'+(e.inputs||'');bySpot.set(k,[...(bySpot.get(k)||[]),e]);}
+  for(const [k,list] of bySpot)if(list.length>1){const spot=k.split('|')[0];add('duplicate-solve','decision '+spot+' solved '+list.length+' times ('+list.map(e=>(e.where||'?')+'@'+((e.ms||0)/1000).toFixed(1)+'s').join(', ')+')',{spot});}
   // Job lifecycle: the last status each job reached.
   const last=new Map(),lastAt=new Map();for(const e of ev)if(e.type==='job'&&e.job){last.set(e.job,e);lastAt.set(e.job,e.ms||0);}
   const shown=new Set(ev.filter(used).map(e=>e.job));

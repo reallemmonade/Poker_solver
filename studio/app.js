@@ -86,7 +86,7 @@ function chooseAction(action){if(!state.hand||state.hand.done||playBusy()||table
  if(fuller){spotUI.gradeWaits.set(baseKey,fuller);keepGradeWait(baseKey,fuller);gradeFromJobs();return;}
  // Reuse the finished analysis of this decision, or let the running one grade it; otherwise queue a solve (which adds a custom size the tree lacks).
  // A guess made before the spot had an answer (guess-gate.js) is what gets graded here, in place of the table action.
- if(solved?.supported&&T.matchAction(solved.actions,item.action)>=0)finishAnalysis(solved,{...item,cacheKey:spotUI.last?.cacheKey,solveOptions:spotUI.last?.options});else if(solved&&!solved.supported)return;else if(task)Object.assign(task,item,{automatic:false,converted:true});else{state.gradeQueue.push(item);if(state.gradeQueue.length>20)state.gradeQueue.shift();pumpGrades();}}
+ if(solved?.supported&&(T.matchAction(solved.actions,item.action)>=0||(item.action?.kind==='bet'||item.action?.kind==='raise')&&gradeMatch(solved,item)))finishAnalysis(solved,{...item,cacheKey:spotUI.last?.cacheKey,solveOptions:spotUI.last?.options});else if(solved&&!solved.supported)return;else if(task)Object.assign(task,item,{automatic:false,converted:true});else{state.gradeQueue.push(item);if(state.gradeQueue.length>20)state.gradeQueue.shift();pumpGrades();}}
 function pumpGrades(){if(state.busy||tableView.playing||!state.gradeQueue.length||$('uiGameDialog')?.open)return false;const item=state.gradeQueue.shift();analyze(item.hand,{...item},item.action);return true}
 // What the hand report needs from a grade: the decision's place in the action log, the label as the bet bar shows it,
 // and each option's EV (solver grades only) and frequency.
