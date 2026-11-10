@@ -373,7 +373,7 @@ async function sendToMac(task,observed,opts,extraAction){
  observed=JSON.parse(JSON.stringify(observed));
  const plan=task.plan,factor=plan.efforts?SOLVE_EFFORTS[task.effort]?.factor||1:1,id='solvejob-'+hash(task.cacheKey);
  const job={v:1,status:'queued',key:task.cacheKey,rowId:'spot-'+hash(task.cacheKey),baseKey:task.baseKey,observed,options:opts,extraAction:extraAction||null,seconds:Math.round(plan.solve*factor),seed:plan.seed*factor,device:deviceId(),hand:task.hand?.dealId||null,auto:!!task.automatic,table:task.kind==='review'?'review':solveTable(),street:plan.street,kind:plan.kind,learned:!!plan.learned,createdAt:Date.now(),target:plan.target||'mac',...plan.big?{size:'big'}:{},...plan.rate>0?{rate:plan.rate,estimate:Math.round(planCost(plan,factor)*1e5)/1e5,cap:Math.round(planCost(plan,factor)*CLOUD_CAP*1e5)/1e5}:{}};
- const prior=spotUI.jobs.get(id);HandTrace.log(task.hand,'solve',{where:job.target==='modal'?'cloud':plan.server?'server':job.target,job:id.slice(9),replaces:prior?prior.status:null,street:plan.street,kind:plan.kind,effort:task.effort||null,seconds:job.seconds,auto:!!task.automatic,background:!!task.background,spot:HandTrace.spot(task.baseKey)});
+ const prior=spotUI.jobs.get(id);HandTrace.log(task.hand,'solve',{where:job.target==='modal'?'cloud':plan.server?'server':job.target,job:id.slice(9),replaces:prior?prior.status:null,street:plan.street,kind:plan.kind,effort:task.effort||null,seconds:job.seconds,auto:!!task.automatic,background:!!task.background,inputs:task.cacheKey?hash(task.cacheKey):null,spot:HandTrace.spot(task.baseKey)});
  await dbPut('meta',{id,value:job});const t=Date.now();spotUI.jobs.set(id,job);citrusAccount.run();watchSolveJobs();
  if(job.target==='modal')startCloudSolve(id,job,t);
 }
