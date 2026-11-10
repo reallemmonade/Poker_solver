@@ -5,8 +5,9 @@
 // your account's changes every 20 seconds, solves queued spots one at a time through its own endpoints (a job the
 // phone cancels stops at the next progress check, within 10 seconds), and
 // pushes each answer back as the saved spot the phone looks for, then marks the job done or failed. Every few
-// minutes it also pushes a 'macsolver' heartbeat (last seen, threads, load) so the phone can say whether this
-// computer is online and busy. With nothing queued and the computer otherwise idle, it learns the flops your devices
+// minute it also pushes a 'macsolver' heartbeat (last seen, threads, load, how often it beats) so the phone can
+// tell whether this computer is awake and free: a Mac that's asleep or closed stops beating, and after two missed
+// beats the phone stops offering it. With nothing queued and the computer otherwise idle, it learns the flops your devices
 // asked for ('flopwant-' rows, see learn.cjs) one at a time, and marks each done.
 // Other computers can run the same bridge for your account (server.cjs --name): each takes only the jobs the app sent
 // to it by that name ('mac' is this Mac), beats as 'solver-<name>' and, given its price (--rate, dollars an hour), puts
@@ -15,7 +16,7 @@
 // quote, see tools/cloud/modal_app.py): its solve is told to stop a little before it and still answers (marked capped),
 // and at capAt the job ends whatever it has.
 const fs=require('fs'),os=require('os'),path=require('path'),{Worker}=require('worker_threads');
-const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=Number(process.env.CITRUS_QUEUE_POLL_MS)||20000,BEAT_MS=Number(process.env.CITRUS_QUEUE_BEAT_MS)||180000,PROGRESS_MS=Number(process.env.CITRUS_QUEUE_PROGRESS_MS)||10000,IDLE_LOAD=.5,WANT_DAYS=30;
+const FILE=process.env.CITRUS_BRIDGE_LINK||path.join(os.homedir(),'.citrus-poker-bridge.json'),POLL_MS=Number(process.env.CITRUS_QUEUE_POLL_MS)||20000,BEAT_MS=Number(process.env.CITRUS_QUEUE_BEAT_MS)||60000,PROGRESS_MS=Number(process.env.CITRUS_QUEUE_PROGRESS_MS)||10000,IDLE_LOAD=.5,WANT_DAYS=30;
 
 // How far a running solve has got, pushed with the job every 10 seconds. TexasSolver and the PLO solver report
 // exploitability (% of the pot), which falls roughly geometrically, so progress is how far its log has moved from
@@ -37,6 +38,8 @@ function progressOf(job,s,first){
 function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=null,stopLearning=async()=>{},update=null,log=console.log,name='mac',rate=0,once=null,onIdle=null,bootAt=Date.now(),capAt=Infinity,capped=()=>false}){
  let link=null,cursor=0,running=null,timer=null,beat=0,current=null,learning=null,updateWant=null;const jobs=new Map(),wants=new Map();
  // What a solve has cost so far, in dollars: a cloud worker is billed from the moment it starts, its boot included.
+ // A job the phone moved to the cloud while this computer slept belongs to the cloud now.
+ const movedAway=j=>!once&&!!j&&(j.target||'mac')!==name;
  const costOf=from=>rate>0?Math.round(rate*(Date.now()-(once?bootAt:from))/36)/1e5:0,mine=j=>once?false:(j.target||'mac')===name;
  // Open jobs and wanted flops are kept with the cursor: a restart pulls only what changed since, so they would be lost.
  const open=(m,...states)=>[...m].filter(([,v])=>states.includes(v.status));
@@ -48,7 +51,7 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),name,rate,features:update?['preflop','update','targets','trees','mwtrees']:['preflop','targets','trees','mwtrees'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),beat:BEAT_MS,name,rate,features:update?['preflop','update','targets','trees','mwtrees']:['preflop','targets','trees','mwtrees'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
    for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id)&&(!once||r.id===once.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}
@@ -72,12 +75,14 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   // Progress goes up every 10 seconds while the solve runs, and the heartbeat with it: a long solve holds the
   // regular round, and the phone should still see this computer as online. A report still pulling when the solve
   // ends sends nothing, or its 'running' row would land after the answer and the job would be solved again.
-  const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'){current?.stop();return;}const rows=[meta(id,{...started,...rate>0?{cost:costOf(started.startedAt)}:{},progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(!once&&Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
+  const first={},report=async()=>{try{await pull();}catch{}if(over)return;if(jobs.get(id)?.status==='cancelled'||movedAway(jobs.get(id))){current?.stop();return;}const rows=[meta(id,{...started,...rate>0?{cost:costOf(started.startedAt)}:{},progress:{...progressOf(job,status(),first),at:Date.now()}},at())];if(!once&&Date.now()-beat>BEAT_MS){beat=Date.now();rows.push(heartbeat());}return api('POST','/api/sync',{rows}).catch(e=>log('Solve queue progress: '+e.message));};
   // At the cap the job ends whatever it has: the bill stops here (the container exits right after).
   const capTimer=once&&capAt<Infinity?setTimeout(async()=>{if(over)return;over=true;log('Reached the price cap; stopping.');const row={...started,status:'failed',finishedAt:Date.now(),capped:true,...rate>0?{cost:costOf(started.startedAt)}:{},message:'It reached its price cap before it had an answer.'};jobs.set(id,row);await api('POST','/api/sync',{rows:[meta(id,row,at())]}).catch(e=>log('Could not report the cap: '+e.message));current?.stop();onIdle?.();},Math.max(0,capAt-Date.now())):null;
   const ticker=setInterval(report,PROGRESS_MS);let out;try{out=await solve(job);}finally{clearInterval(ticker);clearTimeout(capTimer);over=true;}const result=out.result;
-  // Cancelled from the phone: the job row already says so, so nothing goes back.
+  // Cancelled from the phone, or moved to the cloud while this computer slept: the job row already says so, so
+  // nothing goes back.
   if(out.cancelled){log('Cancelled '+id+'.');return;}
+  if(!once){try{await pull();}catch{}if(movedAway(jobs.get(id))){log('Moved elsewhere while this computer was away: '+id+'.');return;}}
   // A solve started from the app on this computer meanwhile holds the solver: try again on the next round.
   if(!result&&/already running/.test(out.error||'')||result&&!result.supported&&/already running/.test(result.message||'')){jobs.set(id,job);await api('POST','/api/sync',{rows:[meta(id,{...job,status:'queued'},at())]});return;}
   const ok=result?.supported===true,rows=[],{t:_,...base}=job,cost=rate>0?costOf(started.startedAt):0,cap=once&&capped(),done={...base,status:ok?'done':'failed',startedAt:started.startedAt,finishedAt:Date.now(),worker:name,...rate>0?{rate,cost}:{},...cap?{capped:true}:{},message:ok?undefined:(cap?'It reached its price cap before it had an answer.':(out.error||result?.message||'No answer.').replace(/^Local solver: /,''))};

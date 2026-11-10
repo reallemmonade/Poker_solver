@@ -116,8 +116,8 @@ function cloudTarget(heavy){const c=heavy?CLOUD_SOLVER.big:CLOUD_SOLVER;return{t
 function solveTarget(heavy,where=null){
  const now=Date.now(),mac=spotUI.mac,macQueue=[...spotUI.jobs.values()].some(j=>jobPending(j)&&(j.target||'mac')==='mac');
  if(where==='cloud'&&cloudReady())return cloudTarget(heavy);
- if(where==='mac')return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
- if(mac?.seen&&now-mac.seen<MAC_OFFLINE_MS&&!mac.busy&&!macQueue)return{target:'mac',threads:mac.threads,load:mac.load,rate:0};
+ if(where==='mac'&&macOnline())return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
+ if(macOnline()&&!mac.busy&&!macQueue)return{target:'mac',threads:mac.threads,load:mac.load,rate:0};
  for(const s of spotUI.servers.values())if(s.seen&&now-s.seen<SERVER_OFFLINE_MS&&!s.busy&&!(s.load>.5)&&![...spotUI.jobs.values()].some(j=>jobPending(j)&&j.target===s.name))return{target:s.name,threads:s.threads,load:0,rate:Number(s.rate)||0,server:true};
  if(cloudReady())return cloudTarget(heavy);
  return{target:'mac',threads:mac?.threads,load:mac?.load,rate:0};
@@ -145,7 +145,17 @@ function deviceSpeed(){try{const saved=JSON.parse(localStorage.getItem(BENCH_KEY
 function deviceSlowdown(){return Math.min(8,Math.max(.25,BENCH_REFERENCE/Math.max(.1,deviceSpeed())));}
 function onDeviceRoute(plan){return plan?.route==='river'||plan?.route==='plo-river';}
 // You can pick the Mac or the cloud whenever both could take the solve; the pick lasts for this visit (spotUI.where).
-function macOnline(){const m=spotUI.mac;return!!m?.seen&&Date.now()-m.seen<MAC_OFFLINE_MS;}
+// A Mac that's asleep or closed stops beating, so it's away once it misses two beats: a bridge that says how often it
+// beats ('beat', every minute since this was added) is away after two of them plus 30 s; an older one, which beats
+// every 3 minutes, after 4.5 minutes.
+function macFreshMs(m=spotUI.mac){return m?.beat>0?Math.min(MAC_OFFLINE_MS,2*m.beat+30000):4.5*60000;}
+function macOnline(m=spotUI.mac){return!!m?.seen&&Date.now()-m.seen<macFreshMs(m);}
+// Before offering your Mac, check it's still there: sync now if the last look is over 30 s old (opening the app and
+// coming back to it sync too). Its answer re-renders the solve choice.
+function freshenMac(){const now=Date.now();if(typeof citrusAccount==='undefined'||!citrusAccount.user||!spotUI.mac?.seen||now-(spotUI.macChecked||0)<30000)return;spotUI.macChecked=now;try{citrusAccount.run();}catch{}}
+// The Mac can go to sleep while nothing syncs, so every 15 s the solve choice is redrawn if it went away or came
+// back, and solves this device left waiting on a Mac that went to sleep move to the cloud.
+spotUI.macWas=null;setInterval(()=>{if(document.visibilityState==='hidden')return;const on=macOnline();if(spotUI.macWas!==null&&on!==spotUI.macWas){spotUI.last=null;if(typeof renderPlay==='function'&&state.hand)renderPlay();}spotUI.macWas=on;rescueMacJobs();},15000);
 function spotPlan(hand,where=spotUI.where){
  if(!hand||hand.done)return null;
  const c=hand.config,live=hand.living(),simple=!c.rules.low&&!c.bounties.some(x=>x>0),small=typeof smallMemoryDevice==='function'&&smallMemoryDevice();
@@ -172,7 +182,8 @@ function spotPlan(hand,where=spotUI.where){
    if(u&&(u.status==='wanted'||u.status==='updating')&&Date.now()-(u.at||0)<UPDATE_MS)plan.blocked='Updating your Mac\'s solver…';
    else if(self||bridge){plan.blocked=(u?.status==='failed'?'Update failed: '+u.message+' ':'')+'Your Mac\'s solver needs an update.';plan.jump={to:self?'mac-update':'mac-setup',label:'Update'};}
    else plan.blocked='Your Mac\'s solver needs an update. Open this app on your Mac to update it.';}
-  else if(!bridge&&dest.target==='mac'){if(!pre&&hb?.seen&&(hb.features||[]).includes('update')&&!((hb.features||[]).includes('trees')&&(kind!=='mw3'||(hb.features||[]).includes('mwtrees'))))plan.updateHint=true;const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!hb?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(Date.now()-hb.seen>MAC_OFFLINE_MS)plan.note='Your Mac is offline. It starts when it\'s back.';}
+  else if(!bridge&&dest.target==='mac'){freshenMac();if(!pre&&hb?.seen&&(hb.features||[]).includes('update')&&!((hb.features||[]).includes('trees')&&(kind!=='mw3'||(hb.features||[]).includes('mwtrees'))))plan.updateHint=true;const user=typeof citrusAccount!=='undefined'&&citrusAccount.user;if(!user){plan.blocked='Sign in on this device and on your Mac to send it to your Mac.';plan.jump={to:'account',label:'Sign in'};}else if(!hb?.seen)plan.note='Open the app on your Mac once, signed in, with the solver on.';else if(!macOnline(hb)){plan.blocked='Your Mac is asleep.';if(CLOUD_SOLVER.url&&!cloudSolvesOn())plan.jump={to:'cloud-solves',label:'Use the cloud'};}}
+  else if(plan.choices)freshenMac();
  }
  // A flop, turn or river solve needs everyone's range, which comes from the preflop chart: a line no chart covers
  // can't be sent, so it isn't offered (the solve would only stop with that error).
@@ -251,7 +262,7 @@ async function updateMacSolver(){const at=Date.now(),url=$('spotLocalSolver')?.v
  spotUI.last=null;if(state.hand)renderPlay();}
 async function loadSolveJobs(){try{const rows=await dbAll('meta');const before=spotUI.jobs;spotUI.jobs=new Map(rows.filter(r=>/^solvejob-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));traceJobChanges(before,spotUI.jobs);spotUI.wants=new Map(rows.filter(r=>/^flopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));spotUI.preflopWants=new Map(rows.filter(r=>/^preflopwant-/.test(r.id)&&r.value&&typeof r.value==='object').map(r=>[r.id,r.value]));const learned=[...spotUI.wants.values()].filter(w=>w.status==='done').length;if(localBridge.up&&learned>spotUI.learned)checkLocalBridge();spotUI.learned=learned;const mac=rows.find(r=>r.id==='macsolver')?.value;spotUI.mac=mac&&typeof mac==='object'?mac:null;spotUI.servers=new Map(rows.filter(r=>/^solver-[a-z0-9-]+$/.test(r.id)&&r.value&&typeof r.value==='object'&&r.value.name).map(r=>[r.id,r.value]));const up=rows.find(r=>r.id==='macupdate')?.value;if(up&&typeof up==='object'&&(up.at||0)>=(spotUI.macUpdate?.at||0))spotUI.macUpdate=up;
   // Done once the Mac's heartbeat shows the new solver.
-  if(spotUI.macUpdate&&(spotUI.mac?.features||[]).includes('preflop')&&(spotUI.mac.seen||0)>(spotUI.macUpdate.at||0))spotUI.macUpdate=null;}catch{}watchSolveJobs();}
+  if(spotUI.macUpdate&&(spotUI.mac?.features||[]).includes('preflop')&&(spotUI.mac.seen||0)>(spotUI.macUpdate.at||0))spotUI.macUpdate=null;rescueMacJobs();}catch{}watchSolveJobs();}
 // The latest solve sent for this spot. A cancelled one counts as none: you already know, and Solve this spot is offered again.
 function spotJob(hand){if(!hand||hand.done||!spotUI.jobs.size)return null;const key=PokerSpot.publicKey(observedData(hand));let found=null;for(const j of spotUI.jobs.values())if(j.baseKey===key&&(!found||j.createdAt>found.createdAt))found=j;return found?.status==='cancelled'?null:found;}
 function jobPending(j){return j.status==='queued'||j.status==='running';}
@@ -332,17 +343,20 @@ function jobState(j){
  if(j.target==='modal'){const waited=Date.now()-(j.createdAt||Date.now());if(waited>CLOUD_STUCK_MS)return{text:'The cloud hasn\'t started ('+agoText(waited).replace(' ago','')+').',retry:true};return{text:'Starting in the cloud',label:'Starting in the cloud',time:(j.estimate>0?quoteText(j.estimate):''),p:0,queued:true};}
  if(j.target&&j.target!=='mac'){const s=spotUI.servers.get('solver-'+j.target);if(!s?.seen||Date.now()-s.seen>SERVER_OFFLINE_MS)return{text:'Waiting for your server'+(s?.seen?' · last seen '+agoText(Date.now()-s.seen):'')};return{text:'Queued on your server',label:'Queued',time:'',p:0,queued:true};}
  if(!mac?.seen)return{text:'Waiting for your Mac. It hasn\'t connected yet: open the app on your Mac, signed in, with Solver on your Mac turned on.'};
- if(Date.now()-mac.seen>MAC_OFFLINE_MS)return{text:'Waiting for your Mac · last seen '+agoText(Date.now()-mac.seen)};
+ if(!macOnline(mac))return{text:'Waiting for your Mac · asleep since '+agoText(Date.now()-mac.seen)};
  const wait=solveTimeText(Math.max(0,queuedSeconds()-Math.max(0,j.seconds||0))+(j.seconds||60));return{text:'Queued · '+wait,label:'Queued',time:wait,p:0,queued:true};
 }
 function jobText(j){return jobState(j).text;}
 // A pending solve takes the Solve button's place (.solve-job hides #analyze): the bar fills as it runs, ✕ cancels,
 // striped while queued. Anything that needs words (waiting for the Mac, no progress reports) stays a notice.
 // A solve still queued for your Mac can go to the cloud instead: the same row, now for the cloud.
-function canMoveToCloud(j){return j.status==='queued'&&(j.target||'mac')==='mac'&&(j.kind!=='preflop'||(j.seconds||0)<1800)&&cloudReady();}
+// A running one can too once your Mac has gone to sleep: the Mac drops it when it wakes (queue.cjs).
+function canMoveToCloud(j){return(j.status==='queued'||j.status==='running'&&!macOnline())&&(j.target||'mac')==='mac'&&(j.kind!=='preflop'||(j.seconds||0)<1800)&&cloudReady();}
+// Solves this device sent to a Mac that has since gone to sleep go to the cloud by themselves.
+function rescueMacJobs(){if(!spotUI.mac?.seen||macOnline())return;const me=deviceId();for(const [id,j] of spotUI.jobs)if(jobPending(j)&&j.device===me&&canMoveToCloud(j)){HandTrace.log(j.hand,'mac asleep',{job:id.slice(9),was:j.status,seen:spotUI.mac.seen});moveJobToCloud(id);}}
 function cloudMoveSeconds(j){return Math.max(5,j.seconds||60)+CLOUD_SOLVER.boot;}
 async function moveJobToCloud(id){const j=spotUI.jobs.get(id);if(!j||!canMoveToCloud(j))return;const estimate=Math.round(cloudMoveSeconds(j)/3600*CLOUD_SOLVER.rate*1e5)/1e5;
- const value={...j,target:'modal',rate:CLOUD_SOLVER.rate,estimate,cap:Math.round(estimate*CLOUD_CAP*1e5)/1e5,createdAt:Date.now()};HandTrace.log(j.hand,'move to cloud',{job:id.slice(9),was:j.status});await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
+ const {progress:_p,startedAt:_s,worker:_w,...rest}=j,value={...rest,status:'queued',target:'modal',rate:CLOUD_SOLVER.rate,estimate,cap:Math.round(estimate*CLOUD_CAP*1e5)/1e5,createdAt:Date.now()};HandTrace.log(j.hand,'move to cloud',{job:id.slice(9),was:j.status});await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cloud-job]');if(b){e.preventDefault();moveJobToCloud(b.dataset.cloudJob);}});
 async function retryCloudJob(id){const j=spotUI.jobs.get(id);if(!j||!jobPending(j)||j.target!=='modal')return;HandTrace.log(j.hand,'cloud retry',{job:id.slice(9)});const value={...j,createdAt:Date.now()};await dbPut('meta',{id,value});const t=Date.now();spotUI.jobs.set(id,value);citrusAccount.run();watchSolveJobs();startCloudSolve(id,value,t);if(state.hand)renderPlay();}
 document.addEventListener('click',e=>{const b=e.target.closest?.('[data-cloud-retry]');if(b){e.preventDefault();retryCloudJob(b.dataset.cloudRetry);}});

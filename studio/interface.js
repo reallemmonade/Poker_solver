@@ -163,6 +163,7 @@ function initInterface(){
  function flash(el){if(!el)return;el.scrollIntoView({block:'center',behavior:glide()});el.classList.remove('ui-jump-flash');void el.offsetWidth;el.classList.add('ui-jump-flash');}
  function jumpTo(name){document.querySelectorAll('dialog[open]').forEach(d=>d!==settingsDialog&&d.close());
   if(name==='mac-setup'){showDialog(settingsDialog);spotSettings.open=true;const s=spotSettings.querySelector('.ui-solver-setup')||document.querySelector('.ui-solver-setup');if(s){s.open=true;flash(s);}return;}
+  if(name==='cloud-solves'){showDialog(settingsDialog);spotSettings.open=true;const f=$('uiCloudSolves')?.closest('.field');if(f)flash(f);return;}
   if(name==='mac-update'){settingsDialog.close();updateMacSolver();return;}
   if(name==='recording'){showDialog(settingsDialog);grading.open=true;flash(grading);return;}
   if(name==='account'){settingsDialog.close();citrusAccount.open();return;}
