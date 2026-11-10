@@ -20,6 +20,9 @@
  function raisePercent(target,facing,base){return 100*(target-facing)/(2*(base+facing));}
  const round=x=>Math.round(x*1e6)/1e6;
 
+ // This street's actions between the two players left. A third player who folded here (the pot went heads-up mid-street)
+ // put nothing in on this street, so that fold is not part of their line; a fold by one of the two left ends the hand.
+ function streetActions(data,street,live){const acts=data.actions.filter(a=>a.street===street);return acts.filter(a=>!(a.kind==='fold'&&!live.includes(a.seat)&&acts.filter(b=>b.seat===a.seat).length===1));}
  // Builds the solver spec for the current decision, or explains why it cannot.
  function spec(data,ranges,opt={}){
   const config=G.normalize(data.config);if(config.variant==='PLO4')return ploSpec(data,ranges,opt,config);
@@ -47,7 +50,7 @@
   let allinThreshold=LOCAL_TREE.allinThreshold;
   // Add the sizes actually used on this street so the real line exists in the tree.
   const path=[],paid={[ip]:0,[oop]:0};let facing=0;
-  for(const a of data.actions.filter(a=>a.street===current)){
+  for(const a of streetActions(data,current,live)){
    const who=a.seat===ip?'ip':'oop',book=sizes[who][STREETS[street]];
    if(a.kind==='check')path.push({kind:'check'});
    else if(a.kind==='call'){path.push({kind:'call'});paid[a.seat]=facing;}
@@ -88,7 +91,7 @@
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
   const street=current-1,stack=Math.min(start.stacks[ip],start.stacks[oop]);assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
   const sizes={},caps={};for(let s=street;s<3;s++){sizes[STREETS[s]]={};caps[STREETS[s]]=PLO_TREE.cap[s];for(const who of ['ip','oop'])sizes[STREETS[s]][who]={bet:[PLO_TREE.bet[s]],raise:[PLO_TREE.raise]};}
-  const path=[];for(const a of data.actions.filter(a=>a.street===current)){assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}
+  const path=[];for(const a of streetActions(data,current,live)){assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}
   const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
   const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
   const rangeIp=combos(ip),rangeOop=combos(oop),heroRange=data.actor===ip?rangeIp:rangeOop;
