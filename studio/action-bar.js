@@ -33,6 +33,10 @@ const ActionBar=(()=>{
     const std=(r.preflop?[[2,'2x'],[2.5,'2.5x'],[3,'3x'],[4,'4x']].map(([m,label])=>[m*base,label]):[.33,.66,1.5].map(p=>[r.currentBet+p*(r.pot+r.toCall),share(p)])).map(([t,label])=>[Math.max(t,r.min),label,t]).filter(([t])=>snap(t,r)<Math.min(r.max,cover(r)-1e-9)&&(r.preflop||!jamLike(snap(t,r),r))).map(([t,label,raw])=>({label,target:snap(t,r),raw}));
     // Facing a bet, a size that lands on the minimum raise reads "Min" (with a short stack 1/3 pot is often exactly the min raise);
     // so does a bet the 1bb minimum pushed up (1/3 of a 2bb limped pot is 0.67bb, so that preset bets 1bb and says so).
+    // Preflop with one solved size (an open: 2.2bb in tournaments, 2.5bb cash, 2bb short), that size is a preset and the default,
+    // and the standard multiples within 15% of it drop out, so no off-tree size sits next to it.
+    if(r.preflop&&sl.length===1&&sl[0].label!=='All-in'){const t=sl[0].target,near=p=>Math.abs(Math.log(p.target/t))<=Math.log(1.15)+1e-9;
+      std.splice(0,std.length,...[...std.filter(p=>!near(p)),{label:sl[0].label,target:t}].sort((a,b)=>a.target-b.target));}
     return [...std.filter((p,i)=>std.findIndex(q=>q.target===p.target)===i).map(p=>!r.preflop&&Math.abs(p.target-r.min)<.005&&(r.kind==='raise'||p.raw<r.min-1e-9)?{...p,label:'Min'}:p),...(r.max>=cover(r)-1e-9?[{label:'All-in',target:clamp(cover(r),r)}]:[{label:'Pot',target:r.max}])];
   }
   function betLabel(r,amount){return(amount>=cover(r)-1e-9?'All-in':r.kind==='raise'?'Raise to':'Bet')+' <span>'+bbText(amount)+'</span>';}
