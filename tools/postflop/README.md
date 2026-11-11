@@ -68,6 +68,19 @@ Otherwise the app solves the spot as before: in the browser, or with TexasSolver
 
 **Turn strategies:** `solve --turn 1` also keeps, next to each flop, the turn's first decisions on the check-check, bet-call and check-bet-call flop lines, two actions deep (`<flop>.turn.json.gz`; the solver dumps two streets, which needs no more solving). `bundle-turn --out postflop-work` packs them into one `turn-<spot>.ctl` per spot, with each flop compressed on its own. Import a `.ctl` file like a library: the app stores its flops apart and unpacks one only when a hand of that spot reaches its turn. Turn decisions on those lines then come from it, and live solves of the turn and river start from both players' ranges narrowed by their own flop and turn actions with the solved frequencies. A 6-max 100bb flop takes about 0.7 MB. `check-turn.cjs --turn turn-<spot>.ctl --charts <bundle>` checks a file the way `check.cjs` checks a library, and `studio/verify-import.cjs <charts> <library> <turn file>` imports one in the app.
 
+## Balance gate
+
+`balance-check.cjs` checks a library before it ships, the way `tools/preflop/balance-check.cjs` gates charts. It reads bundles, split spot files (`studio/libraries/flops/*.json.gz`) or a solve folder:
+
+```
+node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --md balance.md   # exits 2 if a spot fails
+node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --mark            # then bundle as usual
+```
+
+Per spot: exploitability (weighted mean above 1.5% pot, or over 10% of flops above 2%, fails), tables (rows sum to 255, the root covers the range), the first bet's fold rate against its alpha (25+ points over fails, 10+ warns), top-3% hands folding to a normal-sized first bet (over 5% fails), and the share of air in first bets (warns under 3% or over 85%). A flop above 2% pot or with a top-3% hand folding most of the time fails on its own.
+
+`--mark` writes the verdict into the files (`spot.gate`, kept by `bundle` and `bundle-turn`). The app still shows a failed spot's or flop's answers but does not grade them; the hand trace logs `not graded (flop library failed balance check: …)`.
+
 ## PLO
 
 `plo-library.cjs` does the same for pot-limit Omaha with this project's PLO solver (`tools/plo-solver`). It uses the app's PLO tree: one bet size per street and pot-sized raises. On a Mac, double-click `tools/postflop/run-plo-library.command`. It writes to `~/Desktop/Poker_Solver/plo-work`, and the bundle is `plo-postflop-library.json.gz`, imported like the NLH one.
