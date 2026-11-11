@@ -137,7 +137,9 @@ assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,cu
  lib.spots[0].gate={flops:{[key]:'exploitability 2.5% pot'}};const g=PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h);
  assert.equal(g.solve.library.ungraded,'exploitability 2.5% pot');assert.ok(/not graded/.test(g.warning||g.solve.warning||JSON.stringify(g)));delete lib.spots[0].gate;
  assert.equal(PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h).solve.library.ungraded,undefined);
- pass('A flop library flop that failed the balance check answers but is marked ungraded');}
+ lib.spots[0].gate={lines:{'CHECK/BET':'over-folds'}};assert.equal(PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h).solve.library.ungraded,'over-folds');
+ lib.spots[0].gate={lines:{'BET':'donk over-folds'}};assert.equal(PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h).solve.library.ungraded,undefined);delete lib.spots[0].gate;
+ pass('A flop library flop or first-bet line that failed the balance check answers but is marked ungraded');}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
 await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');
