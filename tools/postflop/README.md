@@ -77,9 +77,9 @@ node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --md balance.md   # 
 node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --mark            # then bundle as usual
 ```
 
-Per spot: exploitability (weighted mean above 1.5% pot, or over 10% of flops above 2%, fails), tables (rows sum to 255, the root covers the range), the first bet's fold rate against its alpha (25+ points over fails, 10+ warns), top-3% hands folding to a normal-sized first bet (over 5% fails), and the share of air in first bets (warns under 3% or over 85%). A flop above 2% pot or with a top-3% hand folding most of the time fails on its own.
+Per spot: exploitability, tables (rows sum to 255, the root covers the range), the first bet's fold rate against its alpha, top-3% hands folding to a normal-sized first bet (over 5% fails), and the share of air in first bets (warns under 3% or over 85%). Exploitability is measured per flop, so a flop above 2% pot is ungraded on its own; the spot fails as a whole only when its weighted mean is above 3% (above 1.5%, or over 10% of flops above 2%, it passes in part: only those flops lose grading). A first-bet line whose fold rate is 25+ points over alpha (10+ warns) loses grading on that line only (`gate.lines`: `BET` facing a donk, `CHECK/BET` facing a bet after a check). A flop with a top-3% hand folding most of the time also fails on its own. Folders with flops but no `spot.json` are listed as skipped. Exits 2 when anything fails or is skipped.
 
-`--mark` writes the verdict into the files (`spot.gate`, kept by `bundle` and `bundle-turn`). The app still shows a failed spot's or flop's answers but does not grade them; the hand trace logs `not graded (flop library failed balance check: …)`.
+`--mark` writes the verdict into the files (`spot.gate` with `fail`, `flops` and `lines`, kept by `bundle` and `bundle-turn`). The app still shows a failed spot's or flop's answers but does not grade them; the hand trace logs `not graded (flop library failed balance check: …)`.
 
 ## PLO
 

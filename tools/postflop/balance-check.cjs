@@ -29,7 +29,7 @@ const G=require('../../studio/game.js'),Lib=require('../../studio/postflop-libra
 
 // Thresholds. A spot fails when its weighted mean exploitability is above MEAN_EXPL or more than
 // BAD_SHARE of its flop weight is above FLOP_EXPL; a flop fails on its own above FLOP_EXPL.
-const T={FLOP_EXPL:2,MEAN_EXPL:1.5,BAD_SHARE:.1,OVERFOLD:.1,OVERFOLD_FAIL:.25,FLOP_OVERFOLD:.3,NUT_FOLD:.05,NUT_TOP:.03,ROW_SUM:3,BLUFF_MIN:.03,BLUFF_MAX:.85};
+const T={FLOP_EXPL:2,MEAN_EXPL:1.5,SPOT_EXPL:3,BAD_SHARE:.1,OVERFOLD:.1,OVERFOLD_FAIL:.25,FLOP_OVERFOLD:.3,NUT_FOLD:.05,NUT_TOP:.03,ROW_SUM:3,BLUFF_MIN:.03,BLUFF_MAX:.85};
 
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 // Every spot in the inputs: {spot, file, write(spot)} where write saves --mark results back.
@@ -42,6 +42,7 @@ function spots(inputs){
    const flopsDir=fs.existsSync(path.join(input,'flops'))?path.join(input,'flops'):null;
    if(flopsDir){out.push(...spots(fs.readdirSync(flopsDir).filter(f=>/\.json(\.gz)?$/.test(f)).map(f=>path.join(flopsDir,f))));continue;}
    const dirs=fs.existsSync(path.join(input,'spot.json'))?[input]:fs.readdirSync(input).map(d=>path.join(input,d)).filter(d=>fs.existsSync(path.join(d,'spot.json')));
+   for(const d of fs.readdirSync(input).map(d=>path.join(input,d)))if(!fs.existsSync(path.join(d,'spot.json'))&&fs.statSync(d).isDirectory()&&fs.readdirSync(d).some(x=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(x)))skipped.push(path.basename(d));
    for(const dir of dirs){
     const spot=JSON.parse(fs.readFileSync(path.join(dir,'spot.json'),'utf8'));spot.flops={};
     for(const f of fs.readdirSync(dir).filter(x=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(x))){try{const r=JSON.parse(fs.readFileSync(path.join(dir,f),'utf8'));spot.flops[r.key]={weight:r.weight,iterations:r.iterations,exploitability:r.exploitability,nodes:r.nodes};}catch(e){spot.broken=(spot.broken||[]).concat(f);}}
@@ -56,7 +57,7 @@ function spots(inputs){
  return out;
 }
 
-const RANKS='23456789TJQKA';
+const RANKS='23456789TJQKA',skipped=[];
 const classOf=(a,b)=>C.handClass([a,b]);
 const boardOf=key=>C.cards(key);
 // Every node's actor and its rows; reach of each combo for one player along a path.
@@ -92,7 +93,7 @@ function air(a,b,board){
 }
 
 function checkSpot(spot){
- const flops=Object.entries(spot.flops||{}),res={id:spot.id,label:spot.label||spot.id,chart:spot.chart?.name||'',flops:flops.length,fails:[],warns:[],badFlops:{},overfolds:{},stats:{}};
+ const flops=Object.entries(spot.flops||{}),res={id:spot.id,label:spot.label||spot.id,chart:spot.chart?.name||'',flops:flops.length,fails:[],partial:[],warns:[],badFlops:{},badLines:{},overfolds:{},stats:{}};
  if(spot.broken)res.fails.push(spot.broken.length+' unreadable flop files');
  if(!flops.length){res.fails.push('no flops');return res;}
  let W=0,EX=0,bad=0,maxEx=0,iters=[];
@@ -127,13 +128,16 @@ function checkSpot(spot){
   }
  }
  const mean=EX/W;res.stats={meanExpl:+mean.toFixed(3),maxExpl:+maxEx.toFixed(3),badShare:+(bad/W).toFixed(3),iterations:[Math.min(...iters),Math.max(...iters)],rowsOff:rowBad,rows:rowAll,rootMissing:rootMiss};
- if(mean>T.MEAN_EXPL)res.fails.push('mean exploitability '+mean.toFixed(2)+'% pot (max '+T.MEAN_EXPL+')');
- if(bad/W>T.BAD_SHARE)res.fails.push(Math.round(100*bad/W)+'% of flops above '+T.FLOP_EXPL+'% pot');
+ if(mean>T.MEAN_EXPL)res[mean>T.SPOT_EXPL?'fails':'partial'].push('mean exploitability '+mean.toFixed(2)+'% pot (max '+T.MEAN_EXPL+')');
+ if(bad/W>T.BAD_SHARE)res[mean>T.SPOT_EXPL?'fails':'partial'].push(Math.round(100*bad/W)+'% of flops above '+T.FLOP_EXPL+'% pot');
  if(rowBad>rowAll*.001)res.fails.push(rowBad+' of '+rowAll+' rows do not sum to 255');
  if(rootMiss)res.fails.push(rootMiss+' in-range combos have no row at the root');
  res.stats.defence={};
  for(const [label,d]of defence){if(!d.w)continue;const fold=d.fold/d.w,alpha=d.alpha/d.w;res.stats.defence[label]={fold:+fold.toFixed(3),alpha:+alpha.toFixed(3)};
-  if(!d.allin&&fold>alpha+T.OVERFOLD)res[fold>alpha+T.OVERFOLD_FAIL?'fails':'warns'].push(label+': folds '+Math.round(100*fold)+'% vs alpha '+Math.round(100*alpha)+'% (any two cards bluff)');
+  const why=label+': folds '+Math.round(100*fold)+'% vs alpha '+Math.round(100*alpha)+'% (any two cards bluff)';
+  // An over-fold fails only its line (the donk, or the bet after a check): those decisions go ungraded.
+  if(!d.allin&&fold>alpha+T.OVERFOLD_FAIL){res.partial.push(why);const line=label.startsWith('IP vs donk')?'BET':'CHECK/BET';res.badLines[line]=(res.badLines[line]?res.badLines[line]+'; ':'')+why;}
+  else if(!d.allin&&fold>alpha+T.OVERFOLD)res.warns.push(why);
   if(!d.allin&&fold<.02)res.warns.push(label+': almost never folds ('+(100*fold).toFixed(1)+'%)');}
  if(nut.all){const f=nut.fold/nut.all;res.stats.nutFold=+f.toFixed(4);if(f>T.NUT_FOLD)res.fails.push('top '+Math.round(T.NUT_TOP*100)+'% hands fold '+(100*f).toFixed(1)+'% to the first bet');}
  if(bluff.all){const b=bluff.air/bluff.all;res.stats.airInBets=+b.toFixed(3);if(b<T.BLUFF_MIN)res.warns.push('first bets have no air ('+(100*b).toFixed(1)+'%)');if(b>T.BLUFF_MAX)res.warns.push('first bets are '+Math.round(100*b)+'% air');}
@@ -144,19 +148,19 @@ if(require.main===module){
  const args=process.argv.slice(2),opt=k=>{const i=args.indexOf(k);return i>=0?args[i+1]:null;};
  const inputs=args.filter((a,i)=>!a.startsWith('--')&&!['--json','--md'].includes(args[i-1]));
  if(!inputs.length){console.log('Usage: node tools/postflop/balance-check.cjs <library files or folders> [--json file] [--md file] [--mark]');process.exit(1);}
- const all=spots(inputs),results=[];let fails=0;
+ const all=spots(inputs),results=[];let fails=0,partial=0;
  for(const {spot,file,write}of all){
-  const r=checkSpot(spot);r.file=file;results.push(r);if(r.fails.length)fails++;
+  const r=checkSpot(spot);r.file=file;results.push(r);if(r.fails.length)fails++;else if(r.partial.length)partial++;
   const s=r.stats,d=Object.entries(s.defence||{}).map(([k,v])=>k+' '+Math.round(v.fold*100)+'/'+Math.round(v.alpha*100)).join(', ');
-  console.log((r.fails.length?'FAIL':'ok  ')+' '+r.label+' ['+r.id+'] '+r.flops+' flops, expl mean '+s.meanExpl+' max '+s.maxExpl+'% pot'+(s.airInBets!=null?', air '+Math.round(s.airInBets*100)+'%':'')+(s.nutFold!=null?', nut folds '+(s.nutFold*100).toFixed(1)+'%':'')+(d?'\n       fold/alpha %: '+d:'')+(r.fails.length?'\n       -- '+r.fails.join('; '):'')+(r.warns.length?'\n       warn: '+r.warns.join('; '):'')+(Object.keys(r.overfolds).length?'\n       '+Object.keys(r.overfolds).length+' flops fold 30+ points over alpha (warning): '+Object.entries(r.overfolds).slice(0,3).map(([k,v])=>k+' '+v).join('; '):'')+(Object.keys(r.badFlops).length?'\n       '+Object.keys(r.badFlops).length+' flops flagged: '+Object.entries(r.badFlops).slice(0,4).map(([k,v])=>k+' '+v).join('; ')+(Object.keys(r.badFlops).length>4?' ...':''):''));
+  console.log((r.fails.length?'FAIL':r.partial.length?'PART':'ok  ')+' '+r.label+' ['+r.id+'] '+r.flops+' flops, expl mean '+s.meanExpl+' max '+s.maxExpl+'% pot'+(s.airInBets!=null?', air '+Math.round(s.airInBets*100)+'%':'')+(s.nutFold!=null?', nut folds '+(s.nutFold*100).toFixed(1)+'%':'')+(d?'\n       fold/alpha %: '+d:'')+(r.fails.length?'\n       -- '+r.fails.join('; '):'')+(r.partial.length?'\n       -- partial (only flagged flops/lines ungraded): '+r.partial.join('; '):'')+(r.warns.length?'\n       warn: '+r.warns.join('; '):'')+(Object.keys(r.overfolds).length?'\n       '+Object.keys(r.overfolds).length+' flops fold 30+ points over alpha (warning): '+Object.entries(r.overfolds).slice(0,3).map(([k,v])=>k+' '+v).join('; '):'')+(Object.keys(r.badFlops).length?'\n       '+Object.keys(r.badFlops).length+' flops flagged: '+Object.entries(r.badFlops).slice(0,4).map(([k,v])=>k+' '+v).join('; ')+(Object.keys(r.badFlops).length>4?' ...':''):''));
   if(args.includes('--mark')){
-   const gate=r.fails.length||Object.keys(r.badFlops).length?{checked:new Date().toISOString().slice(0,10),...r.fails.length?{fail:r.fails.join('; ')}:{},flops:r.badFlops}:null;
+   const gate=r.fails.length||Object.keys(r.badFlops).length||Object.keys(r.badLines).length?{checked:new Date().toISOString().slice(0,10),...r.fails.length?{fail:r.fails.join('; ')}:{},flops:r.badFlops,...Object.keys(r.badLines).length?{lines:r.badLines}:{}}:null;
    if(gate)spot.gate=gate;else delete spot.gate;delete spot.broken;write(spot);
   }
  }
- const pass=results.length-fails;console.log(`\n${pass} of ${results.length} spots pass, ${fails} fail. Flagged flops: ${results.reduce((s,r)=>s+Object.keys(r.badFlops).length,0)}.`);
+ const pass=results.length-fails-partial;console.log(`\n${pass} of ${results.length} spots pass, ${partial} pass in part (flagged flops or lines ungraded), ${fails} fail (whole spot ungraded). Flagged flops: ${results.reduce((s,r)=>s+Object.keys(r.badFlops).length,0)}.`+(skipped.length?` Skipped ${skipped.length} folders with flops but no spot.json: ${skipped.join(', ')}.`:''));
  if(opt('--json'))fs.writeFileSync(opt('--json'),JSON.stringify({thresholds:T,results},null,1));
- if(opt('--md'))fs.writeFileSync(opt('--md'),'| Spot | Flops | Expl. mean / max (% pot) | Fold vs alpha (first bet) | Air in bets | Nut folds | Verdict |\n|---|---|---|---|---|---|---|\n'+results.map(r=>`| ${r.label} | ${r.flops} | ${r.stats.meanExpl} / ${r.stats.maxExpl} | ${Object.entries(r.stats.defence||{}).map(([k,v])=>k+' '+Math.round(v.fold*100)+'/'+Math.round(v.alpha*100)).join('; ')} | ${r.stats.airInBets!=null?Math.round(r.stats.airInBets*100)+'%':''} | ${r.stats.nutFold!=null?(r.stats.nutFold*100).toFixed(1)+'%':''} | ${r.fails.length?'FAIL: '+r.fails.join('; '):'pass'}${r.warns.length?'; warn: '+r.warns.join('; '):''}${Object.keys(r.badFlops).length?' ('+Object.keys(r.badFlops).length+' flops ungraded)':''} |`).join('\n')+'\n');
- process.exit(fails?2:0);
+ if(opt('--md'))fs.writeFileSync(opt('--md'),'| Spot | Flops | Expl. mean / max (% pot) | Fold vs alpha (first bet) | Air in bets | Nut folds | Verdict |\n|---|---|---|---|---|---|---|\n'+results.map(r=>`| ${r.label} | ${r.flops} | ${r.stats.meanExpl} / ${r.stats.maxExpl} | ${Object.entries(r.stats.defence||{}).map(([k,v])=>k+' '+Math.round(v.fold*100)+'/'+Math.round(v.alpha*100)).join('; ')} | ${r.stats.airInBets!=null?Math.round(r.stats.airInBets*100)+'%':''} | ${r.stats.nutFold!=null?(r.stats.nutFold*100).toFixed(1)+'%':''} | ${r.fails.length?'FAIL: '+r.fails.join('; '):r.partial.length?'PARTIAL: '+r.partial.join('; '):'pass'}${Object.keys(r.badLines).length?' (lines ungraded: '+Object.keys(r.badLines).join(', ')+')':''}${r.warns.length?'; warn: '+r.warns.join('; '):''}${Object.keys(r.badFlops).length?' ('+Object.keys(r.badFlops).length+' flops ungraded)':''} |`).join('\n')+'\n');
+ process.exit(fails||partial||skipped.length?2:0);
 }
 module.exports={checkSpot,spots,T};
