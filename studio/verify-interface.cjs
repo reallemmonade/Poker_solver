@@ -132,7 +132,12 @@ assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,cu
  const r=PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h),[ip,oop]=r.solve.rangeAssumptions;
  assert.deepEqual(S.parseRange(ip.range,{hole:2},[]).map(x=>G.Core.handClass(x.cards)).filter((c,i,a)=>a.indexOf(c)===i).sort(),PF.classes.filter(c=>c.length===2).sort(),'The bettor\'s grid is not their betting range: '+ip.range);
  assert.ok(/(^|,)AKo(,|$)/.test(oop.range)&&/(^|,)AKs:0\.5(,|$)/.test(oop.range),'The caller\'s grid misses the chart weights: '+oop.range);
- pass('A flop library answer gives both players\' ranges at the decision, so the analysis draws their grids');}
+ pass('A flop library answer gives both players\' ranges at the decision, so the analysis draws their grids');
+ // A flop that failed tools/postflop/balance-check.cjs (--mark) still answers but carries the reason, so it is not graded.
+ lib.spots[0].gate={flops:{[key]:'exploitability 2.5% pot'}};const g=PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h);
+ assert.equal(g.solve.library.ungraded,'exploitability 2.5% pot');assert.ok(/not graded/.test(g.warning||g.solve.warning||JSON.stringify(g)));delete lib.spots[0].gate;
+ assert.equal(PL.query([lib],{name:'t',key:'t',game:'NLH',labels:PF.classes,live:[0,1],seats:{0:PF.classes.map(()=>1),1:PF.classes.map(half)}},h).solve.library.ungraded,undefined);
+ pass('A flop library flop that failed the balance check answers but is marked ungraded');}
 await c('Runtime.enable');await c('Page.enable');await c('Emulation.setDeviceMetricsOverride',{width:1440,height:1050,deviceScaleFactor:1,mobile:false});
 await c('Page.navigate',{url:pathToFileURL(path.join(studio,'render-site/index.html')).href});await wait('typeof studioInterface!=="undefined"&&studioInterface.ready&&state.autoAnalyzeReady');
 await ev('state.autoAnalyze=false;$("autoAnalyze").checked=false;$("gradeEvery").checked=false;if(state.pending?.automatic)$("spotStop").onclick();dbPut("meta",{id:"autoAnalyze",value:false})');await wait('!state.busy');await ev('stopTableMotion();renderPlay()');

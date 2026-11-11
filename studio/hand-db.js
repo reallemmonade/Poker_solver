@@ -32,9 +32,10 @@ function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choic
 // The charts' realization model underpays suited connectors and one-gappers below T9s when opening first in: the
 // 6-max cutoff folds 76s, 75s and 97s while opening 87s and 65s, and a refit that keeps them in order only pulled
 // 87s down (tools/preflop/order-check.cjs, PR #276). Until measured open lines fix the charts, a first-in decision
-// with one of those hands, open or fold, is not graded.
+// with one of those hands, open or fold, is not graded. One-gappers run up to J9s: 7-9 handed 50/100bb cash charts
+// fold J9s while opening T8s (order-check, 2026-11-11).
 function gradeOpenConnector(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||g.actions.some(a=>a.kind==='raise'||a.kind==='bet'))return false;
- const c=comboOf(g.hand||''),R='23456789TJQKA',hi=R.indexOf(c[0]),lo=R.indexOf(c[1]);return c[2]==='s'&&hi<=R.indexOf('9')&&hi-lo>=1&&hi-lo<=2;}
+ const c=comboOf(g.hand||''),R='23456789TJQKA',hi=R.indexOf(c[0]),lo=R.indexOf(c[1]);return c[2]==='s'&&hi-lo>=1&&hi-lo<=2&&hi<=R.indexOf(hi-lo===2?'J':'9');}
 // A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
 // Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
 // legal hand (or the bots' learned guess) for each player, so its answer is shown but never graded, rated or a leak.
