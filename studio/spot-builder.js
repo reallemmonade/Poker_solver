@@ -39,6 +39,24 @@ function openSpotBuilder(){
  renderSpotBuilder();const d=b.dialog;if(!d.open){document.body.classList.add('ui-dialog-open');d.showModal();}
 }
 function spotConfig(){const b=spotBuilder,base={...state.config,seats:b.n,startStreet:0};return G.normalize({...base,...studyFormatFields(base,b.format),seats:b.n,button:0,...spotPrizeFields(),stacks:spotStacks(),bounties:Array(b.n).fill(0),startStreet:0,board:'',pot:0});}
+// Preflop, the builder offers the raise sizes the chart for this format and depth was solved with at this decision (2.2bb
+// tournament opens, 2.5bb cash, 2bb short), so a built line stays on the chart's tree; other sizes go in the custom box.
+// Phones hold only the chart the table needs, so the builder fetches the chart for its own format and depth once and redraws.
+const spotChartFetches=new Set();
+function spotEnsureChart(h){
+ const m=typeof bundleManifest!=='undefined'&&bundleManifest;if(!m)return;
+ const c=h.config,mode=c.mode==='cash'||!(c.ante>0)?'cash':'icm',stack=G.bb(Math.max(...h.initial)),
+  fit=m.packs.filter(p=>p.variant===c.variant&&p.mode===mode&&p.seats===c.seats).sort((a,b)=>Math.abs(Math.log(a.stack/stack))-Math.abs(Math.log(b.stack/stack)))[0];
+ if(!fit||spotChartFetches.has(fit.file)||preflopLibrary.packs.some(p=>p.name===fit.name&&p.config.seats===fit.seats))return;spotChartFetches.add(fit.file);
+ phoneFetch(fit.file).then(input=>{if(preflopLibrary.packs.some(p=>p.name===fit.name&&p.config.seats===fit.seats))return;const pack=PokerPreflop.validate(input);memoryOnly.add(pack);
+  const old=preflopLibrary.packs.filter(p=>memoryOnly.has(p));if(old.length>=2)preflopLibrary.packs.splice(preflopLibrary.packs.indexOf(old[0]),1);preflopLibrary.packs.push(pack);
+  if(spotBuilder.step==='line')renderSpotBuilder();}).catch(()=>{}).finally(()=>spotChartFetches.delete(fit.file));
+}
+function spotActions(h){const acts=G.modelActions(h,state.abstraction);if(h.street!==0||!h.legal().canRaise)return acts;let q=null;spotEnsureChart(h);
+ try{const c=spotConfig(),packs=preflopLibrary.packs.filter(p=>p.config.variant===c.variant&&p.config.seats===c.seats);q=packs.length?PokerPreflop.nearest(packs,h):null;}catch{q=null;}
+ const l=h.legal(),all=l.allInTo,sizes=q?.actions?[...new Set(q.actions.filter((a,i)=>a.kind==='raise'&&a.target<all&&a.target>=l.minRaiseTo&&a.target<=l.maxRaiseTo&&q.reference?.[i]!==null).map(a=>a.target))].sort((a,b)=>a-b):[];
+ if(!sizes.length)return acts;const raises=sizes.map((t,i)=>({id:'k'+i,kind:'raise',target:t,label:'Raise to '+fmt(G.bb(t))+' bb'}));
+ return[...acts.filter(a=>a.kind!=='raise'&&a.kind!=='bet'),...raises,...acts.filter(a=>(a.kind==='raise'||a.kind==='bet')&&a.target>=all)];}
 function spotKnownCards(){const b=spotBuilder;return new Map([...b.hands.flatMap((h,seat)=>h.map((c,i)=>[c,{seat,i}])),...b.board.map((c,i)=>[c,{seat:-1,i}])].filter(([c])=>c!==null));}
 function spotGridHTML(){const used=spotKnownCards();if(spotBuilder.frozen)spotBuilder.frozen.forEach((h,seat)=>h.forEach((c,i)=>{if(!used.has(c))used.set(c,{seat,i})}));let grid='';
  for(const suit of[3,2,1,0])for(let r=12;r>=0;r--){const card=r*4+suit,taken=used.has(card);grid+='<button type="button" class="sb-card'+(taken?' taken':'')+'" data-sb-card="'+card+'" aria-label="'+cardSpeech(card)+'">'+spotCardLabel(card)+'</button>';}
@@ -94,7 +112,7 @@ function renderSpotLine(){
   later+='<div class="sb-street sb-later"><span>'+['Preflop','Flop','Turn','River'][st]+'</span><span class="sb-slots">'+[0,1,2,3,4].slice(from,st+2).map(i=>spotSlotHTML(-1,i,b.board[i],['Flop','Flop','Flop','Turn','River'][i])).join('')+'</span></div>';}}
  let panel='';
  if(h.done)panel='<p class="muted small">The hand is over. Undo to stop earlier.</p>';
- else{const acts=G.modelActions(h,state.abstraction),tones=actionTones(acts,h),l=h.legal(),me=h.actor===hero,hand=b.frozen[h.actor];
+ else{const acts=spotActions(h),tones=actionTones(acts,h),l=h.legal(),me=h.actor===hero,hand=b.frozen[h.actor];
   panel='<div class="sb-turn"><div class="sb-turn-head"><b>'+names[h.actor]+(me?' · You':'')+'</b><span class="sb-turn-cards">'+(b.randomSeats.includes(h.actor)?'<span class="muted small">random</span>':hand.map(spotCardLabel).join(''))+'</span><span class="muted small">'+(l.toCall?'to call '+fmt(G.bb(l.callCost))+' · ':'')+'pot '+fmt(G.bb(h.pot))+'</span></div>'+
    '<div class="sb-acts">'+acts.map((a,i)=>h.street===0&&a.kind==='fold'?'':'<button type="button" class="sb-actbtn" data-sb-act="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],h).replace(/ · .*/,''))+'</button>').join('')+'</div>'+
    (l.canRaise?'<div class="sb-custom"><input class="input" id="sbCustom" type="number" inputmode="decimal" min="0" step="0.1" placeholder="'+(h.currentBet?'Raise to':'Bet')+' (bb total)"><button type="button" class="btn secondary" data-sb-custom>'+(h.currentBet?'Raise':'Bet')+'</button></div>':'')+'</div>';}
@@ -134,10 +152,10 @@ function spotBuilderClick(event){
  else if('sbReset' in t.dataset){b.stack=STUDY_FORMATS[b.format].stack;b.prize='chip';b.board=Array(5).fill(null);spotResetSeats(0);b.step='setup';b.line=[];b.frozen=null;}
  else if('sbLine' in t.dataset){if(!spotCheck())return;b.seed=1+Math.floor(Math.random()*1e9);spotFreeze();b.line=[];b.target=null;b.step='line';}
  else if('sbBack' in t.dataset){b.step='setup';b.frozen=null;b.line=[];b.target=null;}
- else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=G.modelActions(h,state.abstraction)[+t.dataset.sbAct];if(a)b.line.push(a);}
+ else if(t.dataset.sbAct){const {hand:h}=spotLineHand(),a=spotActions(h)[+t.dataset.sbAct];if(a)b.line.push(a);}
  else if('sbCustom' in t.dataset){const {hand:h}=spotLineHand(),l=h.legal(),v=+$('sbCustom').value,target=Math.min(G.units(v),l.maxRaiseTo);
   if(!(v>0)||target<=h.currentBet||target<l.minRaiseTo&&target!==l.allInTo){spotError('Enter the street total in bb: at least '+fmt(G.bb(Math.min(l.minRaiseTo,l.maxRaiseTo)))+', at most '+fmt(G.bb(l.maxRaiseTo))+'.');return;}
-  const kind=h.currentBet?'raise':'bet',match=G.modelActions(h,state.abstraction).find(a=>a.kind===kind&&a.target===target);b.line.push(match||{kind,target,id:'u'+target,label:(kind==='raise'?'Raise to ':'Bet ')+fmt(G.bb(target))+' bb'});}
+  const kind=h.currentBet?'raise':'bet',match=spotActions(h).find(a=>a.kind===kind&&a.target===target);b.line.push(match||{kind,target,id:'u'+target,label:(kind==='raise'?'Raise to ':'Bet ')+fmt(G.bb(target))+' bb'});}
  else if('sbUndo' in t.dataset)b.line.pop();
  else if('sbDeal' in t.dataset){dealBuiltSpot(false);return;}
  else if('sbStudy' in t.dataset){dealBuiltSpot(true);return;}
