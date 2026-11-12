@@ -12,12 +12,20 @@
 //     widened (fold share scaled by the bluff break-even ratio) when it is smaller.
 //  4. Depths with no chart (30bb, 70bb, 130bb ...): the whole preflop strategy the app serves
 //     there (via nearest) is written into that depth's own game, and its NashConv measured in
-//     the chart model. Exact charts score about 0.0004 bb/hand.
+//     the chart model. Exact charts score about 0.0004 bb/hand. The same probe at a depth that has a
+//     chart is the control: the app must serve that chart, so it must score the chart's own claimed
+//     NashConv (within CONTROL_FACTOR x claim + CONTROL_SLACK) and every row written must be the chart's
+//     stored row, or the run fails (exit 1).
 // "Auto-profit" compares how often everyone folds with the share a pure bluff needs to break
 // even (risk / (risk + pot)); above it, raising any two cards at that size wins outright.
 //   node tools/chart-bots/offtree.cjs [--library ...] [--quick] [--calibration file] [--jobs 4] [--out dir]
+//        [--kinds open,3bet,flop,depth] [--seats 6] [--depths 20,100] [--modes cash]   (the last three filter the preflop probes)
 const path=require('path'),L=require('./lib.cjs'),C=require('./coverage.cjs');
 const {G,P,PL}=L;
+// Own-chart control: 14 bundled charts (2 to 9 seats, 10 to 1000bb, cash and MTT) served through the app all
+// score within 0.0002 bb/hand of their claim, which is the claim's rounding. Before November 2026 the probe
+// itself broke this (0.22 against 0.0004 at 6-max 100bb), which hid what the no-chart depths really score.
+const CONTROL_FACTOR=1.5,CONTROL_SLACK=0.0005;
 
 function reference(packs,hand){
  try{for(const pack of packs){const q=P.query(pack,hand);if(q)return{q,exact:true};}const q=P.nearest(packs,hand);return q?{q,exact:false}:null;}
@@ -111,9 +119,17 @@ function flopSweep(spot,o){
 // that chart's own (read from its text, as the other bots do) when the depth has a chart, and
 // otherwise the one library.cjs would solve there with the --calibration file, if one is given.
 function unfiltered(lib,metas){return metas.map(m=>{const pack=L.P.validate(L.loadPack(lib,m).raw);for(const n of pack.nodes){n.offPath=false;n.path=null;}return pack;});}
+// The control's verdict: null when the depth has no chart. rowsOff counts the rows (a hand class at a decision)
+// written from the app's answer that are not the chart's stored row; it must be 0 whatever the model. The NashConv
+// is not comparable when the chart states none, or is calibrated and its calibration file was not given (the
+// rebuilt game is then not the chart's).
+function control(model,nashConv,rowsOff=0){
+ if(!model)return null;const comparable=model.claimedNashConv!==null&&!model.approximate,limit=model.claimedNashConv===null?null:+(CONTROL_FACTOR*model.claimedNashConv+CONTROL_SLACK).toFixed(4);
+ return{comparable,rowsOff,limit,ok:!rowsOff&&(!comparable||nashConv<=limit)};
+}
 function depthProbe(lib,packs,raw,seats,depth,format,calibration=null){
- const own=L.selectPacks(lib,{games:'nlh',modes:format,seats:String(seats),depths:String(depth)}).find(m=>!m.rake),spec={seats,stack:depth,format,game:'nlh',limp:1,calibration},opts=own?L.modelOptions(L.loadPack(lib,own).raw,{calibration}).options:L.E.game(spec),cfg=G.normalize({variant:'NLH',seats,stacks:Array(seats).fill(depth),sb:.5,bb:1,button:0,mode:format==='mtt'?'icm':'cash',...format==='mtt'?{ante:1,anteMode:'bigblind',payouts:[1]}:{}});
- const S=new L.Solver(opts),K=S.K,answered=new Map(),stand=new Map();let mapped=0,total=0,errors=0,rawMissing=0;
+ const own=L.selectPacks(lib,{games:'nlh',modes:format,seats:String(seats),depths:String(depth)}).find(m=>!m.rake),spec={seats,stack:depth,format,game:'nlh',limp:1,calibration},model=own?L.modelOptions(L.loadPack(lib,own).raw,{calibration}):null,opts=model?model.options:L.E.game(spec),cfg=G.normalize({variant:'NLH',seats,stacks:Array(seats).fill(depth),sb:.5,bb:1,button:0,mode:format==='mtt'?'icm':'cash',...format==='mtt'?{ante:1,anteMode:'bigblind',payouts:[1]}:{}});
+ const S=new L.Solver(opts),K=S.K,answered=new Map(),stand=new Map(),served=new Map();let mapped=0,total=0,errors=0,rawMissing=0,moved=0,lost=0,rowsOff=0;const chartRows=own?new Map(L.loadPack(lib,own).raw.nodes.map(n=>[L.hkey(n.history),n])):null;
  for(const node of S.tree.nodes){
   const h=new G.Hand(cfg,{rng:G.rng(4)});let ok=true;
   try{for(const e of node.history)h.act(e.kind==='raise'?{kind:'raise',target:G.units(e.to)}:{kind:e.kind});}catch{ok=false;}
@@ -122,21 +138,37 @@ function depthProbe(lib,packs,raw,seats,depth,format,calibration=null){
    let r=null,u=null;if(ok&&h.actor===node.actor){const x=h.clone();x.holes[node.actor]=L.cardsFor(P.classes[i],[]);r=reference(packs,x);u=reference(raw,x);}
    total++;if(r&&!r.error)got[i]=1;if(r?.error||u?.error)errors++;
    if(!u||u.error){rawMissing++;hole[i]=1;continue;}
-   if(!u.exact)mapped++;
+   if(!u.exact)mapped++;if(!served.has(node.id))served.set(node.id,u.q.actions.map(a=>a.kind==='raise'?'raise '+G.bb(a.target):a.kind).join(', ')+(u.q.sizeMatch?' (sizes '+u.q.sizeMatch.map(m=>m.actual+'→'+m.chart).join(', ')+')':''));
    u.q.actions.forEach((a,j)=>{const p=u.q.reference[j]||0;if(!p)return;let k=-1;
     if(a.kind==='raise'){const raises=node.actions.map((x,y)=>[x,y]).filter(([x])=>x.kind==='raise'),jam=a.target>=h.legal().allInTo;k=(jam?raises.find(([x])=>x.to>=depth-(opts.ante||0)-1e-6):null)?.[1]??raises.sort((v,w)=>Math.abs(Math.log(v[0].to/G.bb(a.target)))-Math.abs(Math.log(w[0].to/G.bb(a.target))))[0]?.[1]??-1;}
     else k=node.actions.findIndex(x=>x.kind===a.kind||(a.kind==='check'&&x.kind==='call')||(a.kind==='call'&&x.kind==='check'));
-    if(k>=0)node.sum[k*K+i]+=p;});
+    // An action this game's tree lacks goes back where it came from, never dropped: dropping it and
+    // rescaling the row turned the app's borrowed overcall (a call taken out of the chart's folds at a
+    // fold-or-squeeze node) into squeezes, which alone put the own-chart control at 0.22 instead of 0.0004.
+    // The call returns to fold; a raise where the tree only lets the seat call all-in is that call.
+    if(k<0){k=a.kind==='raise'?pass:fold;moved+=p;}
+    if(k>=0)node.sum[k*K+i]+=p;else lost+=p;});
   }
+  // Control: every row written must be the chart's own stored row (to its per-mille rounding).
+  if(chartRows){const cn=chartRows.get(L.hkey(node.history)),same=cn&&cn.actions.length===A&&cn.actions.every((a,k)=>a.kind===node.actions[k].kind&&(a.kind!=='raise'||Math.abs(a.to-node.actions[k].to)<1e-6));
+   for(let i=0;i<K;i++){const row=same?(Array.isArray(cn.strategy)?cn.strategy[i]:cn.strategy[S.m.classes[i]]):null,t=Array.isArray(row)?row.reduce((x,y)=>x+y,0)||1:1;let off=!same||row===undefined||row===null||!!hole[i];
+    for(let k=0;k<A&&!off;k++)off=Math.abs(node.sum[k*K+i]-(Number.isInteger(row)?+(row===k):row[k]/t))>1e-6;if(off)rowsOff++;}}
   answered.set(node.id,got);stand.set(node.id,{hole,sum:node.sum.slice(),fold,pass,check:node.actions.findIndex(a=>a.kind==='check')});
  }
  // Rows with no stored answer at all are filled two ways, passive (check or call) and folding
  // (check or fold); the two NashConv numbers bracket what those holes cost.
  const run=passive=>{for(const node of S.tree.nodes){const x=stand.get(node.id);node.sum.set(x.sum);const d=passive?(x.pass>=0?x.pass:Math.max(0,x.fold)):(x.check>=0?x.check:x.fold>=0?x.fold:Math.max(0,x.pass));for(let i=0;i<K;i++)if(x.hole[i])node.sum[d*K+i]=1;}return S.exploitability();};
  const exF=run(false),ex=run(true);
+ // Where the served strategy loses: each decision's one-spot gain (every hand class switching to its best
+ // action there, everyone else kept on the served strategy), in bb/hand, with the range-wide served mix.
+ const av=L.actionValues(S),worst=[];
+ for(const node of S.tree.nodes){const rec=av.q.get(node.id),o=av.own.get(node.id);if(!rec||!o)continue;let g=0,m=0;const mix=node.actions.map(()=>0),bestMix=node.actions.map(()=>0);
+  for(let i=0;i<K;i++){let b=0;rec.values.forEach((v,k)=>{if(v[i]>rec.values[b][i])b=k;});const w=S.m.weight[i]*o[i];g+=w*(rec.values[b][i]-rec.mix[i]);m+=w;bestMix[b]+=w;node.actions.forEach((_,k)=>mix[k]+=w*rec.sigma[k*K+i]);}
+  if(g>1e-4)worst.push({spot:L.spotName(seats,node),key:L.hkey(node.history),gain:+g.toFixed(4),tree:node.actions.map(L.actionText).join(', '),app:served.get(node.id)||'no answer',served:mix.map(x=>+(x/(m||1)).toFixed(3)),best:bestMix.map(x=>+(x/(m||1)).toFixed(3))});}
+ worst.sort((a,b)=>b.gain-a.gain);
  let unanswered=0,holes=0;const missing=new Map(),holeSpots=new Map();
  L.E.lineReach(S,(node,reach,line)=>{const got=answered.get(node.id),hole=stand.get(node.id).hole,own=reach[node.actor],w=S.m.weight;let m=0,u=0,hh=0;for(let i=0;i<K;i++){m+=w[i]*own[i];if(!got[i])u+=w[i]*own[i];if(hole[i])hh+=w[i]*own[i];}if(!(m>0))return;const k=L.spotName(seats,node);if(u){const x=line*u/m;unanswered+=x;missing.set(k,(missing.get(k)||0)+x);}if(hh){const x=line*hh/m;holes+=x;holeSpots.set(k,(holeSpots.get(k)||0)+x);}});
- return{seats,depth,format,nodes:S.tree.nodes.length,nashConv:ex.nashConv,nashConvFold:exF.nashConv,gains:ex.gains,holesPer100:100*holes,holeSpots:[...holeSpots].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>[k,+(100*v).toFixed(2)]),unansweredPer100:100*unanswered,noRowShare:rawMissing/total,mappedShare:mapped/total,errors,missing:[...missing].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>[k,+(100*v).toFixed(2)]),hasChart:packs.some(p=>p.config.seats===seats&&Math.max(...p.config.stacks)===depth&&p.config.mode===(format==='mtt'?'icm':'cash'))};
+ return{seats,depth,format,nodes:S.tree.nodes.length,claimed:model?model.claimedNashConv:null,control:control(model,ex.nashConv,rowsOff),moved,lost,worst:worst.slice(0,12),nashConv:ex.nashConv,nashConvFold:exF.nashConv,gains:ex.gains,holesPer100:100*holes,holeSpots:[...holeSpots].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>[k,+(100*v).toFixed(2)]),unansweredPer100:100*unanswered,noRowShare:rawMissing/total,mappedShare:mapped/total,errors,missing:[...missing].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>[k,+(100*v).toFixed(2)]),hasChart:packs.some(p=>p.config.seats===seats&&Math.max(...p.config.stacks)===depth&&p.config.mode===(format==='mtt'?'icm':'cash'))};
 }
 
 function work(lib,item,o){
@@ -158,8 +190,11 @@ function items(lib,o){
  out.push({kind:'3bet',seats:2,depth:100,opener:0,threeBettor:1,sizes:threes,label:'HU 100bb BB 3-bets the button 2.5bb open'});
  for(const f of lib.flops.filter(f=>!/plo/.test(f.id)&&(!q||['btn-bb','hu-srp','btn-bb-3bet'].includes(f.id))))out.push({kind:'flop',id:f.id,library:f.library});
  for(const [n,d,fmt] of q?[[6,100,'cash'],[6,30,'cash'],[6,130,'cash']]:[[6,100,'cash'],[6,20,'cash'],[6,30,'cash'],[6,40,'cash'],[6,70,'cash'],[6,130,'cash'],[6,300,'cash'],[2,30,'cash'],[2,70,'cash'],[9,130,'cash'],[6,30,'mtt']])out.push({kind:'depth',seats:n,depth:d,format:fmt});
- return out;
+ const kinds=L.list(o.kinds),seats=L.range(o.seats),depths=L.list(o.depths)?.map(Number),modes=L.list(o.modes);
+ return out.filter(x=>(!kinds||kinds.includes(x.kind))&&(x.kind==='flop'||(!seats||seats.has(x.seats))&&(!depths||depths.includes(x.depth))&&(!modes||modes.includes(x.format||'cash'))));
 }
+// Own-chart controls that scored above their limit: each fails the run.
+const failedControls=res=>res.filter(r=>r.kind==='depth'&&r.control&&!r.control.ok);
 
 function report(lib,res){
  const flags=res.flatMap(r=>r.flags||[]),by=k=>flags.filter(f=>f.kind===k);
@@ -178,8 +213,11 @@ function report(lib,res){
   md+=`### ${r.label}\n\nSolved sizes: flop bet ${r.tree?.flop?.bet?.join('/')}% , raise ${r.tree?.flop?.raise?.join('/')}%; ${r.flops.length} solved flops sampled.\n\n`;
   md+=L.mdTable(['line','bet % pot','answered','mapped to','fold','call','raise','bluff needs'],r.rows.map(x=>[x.line,x.fraction==='jam'?'all-in':Math.round(100*x.fraction),L.pct(x.answered,0),x.mappedTo.join(' '),x.answered?L.pct(x.fold,0):'–',x.answered?L.pct(x.call,0):'–',x.answered?L.pct(x.raise,0):'–',L.pct(x.alpha,0)]))+'\n';
  }
- md+=`## Depths without a chart\n\nThe whole preflop strategy the app serves at that depth (the nearest chart, raise sizes mapped and kept within the table's legal range) written into that depth's own game and measured in the chart model. Rows come from an unfiltered copy of the charts (rows the app withholds as off-path are served too), so NashConv measures the depth and size mapping; the row with a chart of its own is the control (its own NashConv is about 0.0004). Decisions where even the unfiltered charts have no row (lines the stand-in chart's tree lacks) are filled passively (check or call) or by folding (check or fold); the two NashConv numbers bracket what those holes cost. "Unanswered" counts decisions per 100 hands, played along the served strategy, where the app itself gives no chart answer.\n\n`;
- md+=L.mdTable(['table','depth','own chart','NashConv (passive / fold fill)','largest seat gain','no stored answer /100 hands','app unanswered /100 hands','rows from another depth or size','where the holes are (/100 hands)'],res.filter(r=>r.kind==='depth').map(r=>[`${r.seats}-max ${r.format}`,r.depth,r.hasChart?'yes':'no',`${L.f(r.nashConv,4)} / ${L.f(r.nashConvFold,4)}`,L.f(Math.max(...r.gains),3),L.f(r.holesPer100,2),L.f(r.unansweredPer100,2),L.pct(r.mappedShare,0),(r.holeSpots.length?r.holeSpots:r.missing).map(([k,v])=>`${k} (${v})`).slice(0,3).join('; ')]))+'\n';
+ md+=`## Depths without a chart\n\nThe whole preflop strategy the app serves at that depth (the nearest chart, raise sizes mapped and kept within the table's legal range) written into that depth's own game and measured in the chart model. Rows come from an unfiltered copy of the charts (rows the app withholds as off-path are served too), so NashConv measures the depth and size mapping; a row with a chart of its own is the control: the app must serve that chart, so every row must be the chart's stored row and it must score the chart's claimed NashConv (at most ${CONTROL_FACTOR} x the claim + ${CONTROL_SLACK}); the run fails otherwise. An action the app offers that this depth's tree lacks is not dropped: the borrowed overcall goes back to the fold it was taken from, and a raise where the tree only lets the seat call all-in is that call. Decisions where even the unfiltered charts have no row (lines the stand-in chart's tree lacks) are filled passively (check or call) or by folding (check or fold); the two NashConv numbers bracket what those holes cost. "Unanswered" counts decisions per 100 hands, played along the served strategy, where the app itself gives no chart answer.\n\n`;
+ md+=L.mdTable(['table','depth','own chart','NashConv (passive / fold fill)','chart claims','control','largest seat gain','no stored answer /100 hands','app unanswered /100 hands','rows from another depth or size','where the holes are (/100 hands)'],res.filter(r=>r.kind==='depth').map(r=>[`${r.seats}-max ${r.format}`,r.depth,r.hasChart?'yes':'no',`${L.f(r.nashConv,4)} / ${L.f(r.nashConvFold,4)}`,r.claimed===null?'–':L.f(r.claimed,4),!r.control?'–':!r.control.ok?`FAILED (${r.control.rowsOff} rows differ from the chart${r.control.comparable?', NashConv limit '+r.control.limit:''})`:r.control.comparable?'ok':'rows ok; NashConv not comparable (no calibration file)',L.f(Math.max(...r.gains),3),L.f(r.holesPer100,2),L.f(r.unansweredPer100,2),L.pct(r.mappedShare,0),(r.holeSpots.length?r.holeSpots:r.missing).map(([k,v])=>`${k} (${v})`).slice(0,3).join('; ')]))+'\n';
+ const bad=failedControls(res);if(bad.length)md+=`**Own-chart control failed** for ${bad.map(r=>`${r.seats}-max ${r.format} ${r.depth}bb (served ${L.f(r.nashConv,4)}, chart claims ${L.f(r.claimed,4)}, ${r.control.rowsOff} rows differ)`).join('; ')}: the app does not serve that chart as solved, or this probe misreads the app's answer. The other rows cannot be trusted until it passes.\n\n`;
+ md+=`Where each served strategy loses most: a decision's one-spot gain is what its seat wins there, in bb/hand, by moving every hand class to its best action while everyone else keeps the served strategy. "Served" and "best" are range-wide shares of the tree's actions, in the tree's order.\n\n`;
+ for(const r of res.filter(r=>r.kind==='depth'&&r.worst?.length))md+=`### ${r.seats}-max ${r.format} ${r.depth}bb\n\n`+L.mdTable(['decision','one-spot gain','this depth\'s actions','the app offers','served','best'],r.worst.slice(0,6).map(w=>[w.spot,L.f(w.gain,4),w.tree,w.app,w.served.map(x=>L.pct(x,0)).join(' / '),w.best.map(x=>L.pct(x,0)).join(' / ')]))+'\n';
  md+=`## All flags\n\n`+flags.map(f=>`- [${f.kind}] ${f.text}`).join('\n')+'\n';
  return md;
 }
@@ -195,7 +233,10 @@ async function main(){
  const out=o.out||L.defaultOut(lib);
  L.writeOut(out,'offtree',{json:{version:lib.version,library:lib.spec,seconds:(Date.now()-t)/1000,results:res},md:report(lib,res)});
  const flags=res.flatMap(r=>r.flags||[]);
- console.log(`offtree: ${res.length} probes, ${flags.length} flags, ${((Date.now()-t)/1000).toFixed(0)}s -> ${path.join(out,'offtree.md')}`);
+ const controls=res.filter(r=>r.kind==='depth'&&r.control),bad=failedControls(res);
+ console.log(`offtree: ${res.length} probes, ${flags.length} flags, own-chart control ${controls.length-bad.length} of ${controls.length} ok, ${((Date.now()-t)/1000).toFixed(0)}s -> ${path.join(out,'offtree.md')}`);
+ for(const r of bad)console.error(`offtree: own-chart control FAILED: ${r.seats}-max ${r.format} ${r.depth}bb served through the app scores NashConv ${L.f(r.nashConv,4)}, the chart claims ${L.f(r.claimed,4)} (limit ${r.control.limit}); ${r.control.rowsOff} served rows differ from the chart's.`);
+ if(bad.length)process.exitCode=1;
 }
-module.exports={depthProbe,unfiltered,sweep,flopSweep,rangeAnswer};
+module.exports={depthProbe,unfiltered,sweep,flopSweep,rangeAnswer,control,CONTROL_FACTOR,CONTROL_SLACK};
 if(require.main===module)main().catch(e=>{console.error(e.stack||e.message);process.exit(1);});

@@ -20,7 +20,8 @@ function playPack(lib,meta,{hands,seed,calibration}){
    // Seats the trimmed tree leaves out (players left to fold to a 3-bet) fold.
    while(!hand.done&&hand.street===0&&hand.actor!==node.actor){hand.act({kind:'fold'});stats.autoFolds++;}
    const A=node.actions.length,q=P.query(pack,hand);let probs=new Array(A).fill(0);stats.decisions++;
-   if(q){q.actions.forEach((a,j)=>{const k=node.actions.findIndex(x=>x.kind===a.kind&&(a.kind!=='raise'||G.units(x.to)===a.target));if(k<0)stats.mismatch++;else probs[k]+=q.reference[j]||0;});}
+   // The app's borrowed overcall (a Call taken out of the chart's folds where the tree has only fold or squeeze) is the chart's fold here.
+   if(q){q.actions.forEach((a,j)=>{const k=node.actions.findIndex(x=>a.id==='pf-overcall'?x.kind==='fold':x.kind===a.kind&&(a.kind!=='raise'||G.units(x.to)===a.target));if(k<0)stats.mismatch++;else probs[k]+=q.reference[j]||0;});}
    if(!q||!(probs.reduce((a,b)=>a+b,0)>.999)){
     // No chart answer for this hand here (an off-path node or a class that almost never
     // gets here): the user would get no chart advice. The pack's raw row keeps the hand going.
