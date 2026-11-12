@@ -16,16 +16,16 @@
 //   - a page error.
 //
 //   node tools/solve-flow/run.cjs [--hands 12] [--tables hu,3way,6max,9max] [--stacks 100] [--mode cash] [--style follow]
-//                                 [--seed 7] [--headed] [--keep]
+//                                 [--seed 7] [--headed] [--keep] [--opens]
 // --stacks is a list each hand picks from (e.g. 10,20,40,100,200; "mixed" gives every seat its own), --mode cash, icm or
 // mix, --solver fake (default) or the path of a real TexasSolver console_solver (tools/local-solver/install-*.sh builds one
 // at tools/local-solver/TexasSolver/install/console_solver; real solves are slower and their answers are checked against
-// the libraries), and --style how the hero plays: follow (mostly what the answer says), aggro, passive, random, or mix (a style a hand).
+// the libraries), --opens makes another seat open with a raise in half of the 3-way table's hands (see below), and --style how the hero plays: follow (mostly what the answer says), aggro, passive, random, or mix (a style a hand).
 // Writes every trace and a summary to solve-flow-report/ (git-ignored). Needs Playwright with Chromium, a C++
 // compiler for the 3-way solver, and the repo's npm install.
 const fs=require('fs'),os=require('os'),path=require('path'),http=require('http'),{spawn,execFileSync}=require('child_process');
 const FunkySpots=require('../../studio/funky-spots.js'),repo=path.resolve(__dirname,'../..'),args=process.argv.slice(2),opt=(k,d)=>{const i=args.indexOf('--'+k);return i<0?d:args[i+1]&&!args[i+1].startsWith('--')?args[i+1]:true;};
-const HANDS=Number(opt('hands',12)),TABLES=String(opt('tables','hu,3way')).split(','),STACKS=String(opt('stacks','100')).split(','),MODE=String(opt('mode','cash')),STYLE=String(opt('style','follow')),SEED=Number(opt('seed',7)),out=path.resolve(repo,String(opt('out','solve-flow-report'))),work=fs.mkdtempSync(path.join(os.tmpdir(),'solve-flow-'));
+const HANDS=Number(opt('hands',12)),TABLES=String(opt('tables','hu,3way')).split(','),STACKS=String(opt('stacks','100')).split(','),MODE=String(opt('mode','cash')),STYLE=String(opt('style','follow')),SEED=Number(opt('seed',7)),OPENS=!!opt('opens',false),out=path.resolve(repo,String(opt('out','solve-flow-report'))),work=fs.mkdtempSync(path.join(os.tmpdir(),'solve-flow-'));
 const SOLVER=opt('solver','fake')==='fake'?path.join(__dirname,'fake-texassolver.cjs'):path.resolve(String(opt('solver'))),REAL=!SOLVER.endsWith('fake-texassolver.cjs'),SOLVE_TIMEOUT=REAL?'240':'120';
 const CLOUD_URL='https://maxam-lemmon--guava-solver-web.us-east.modal.run';
 fs.mkdirSync(out,{recursive:true});
@@ -109,22 +109,24 @@ async function main(){
 // One hand at the given table, the hero choosing at random (seeded) whether to solve each decision, where, and whether
 // to wait for the answer before acting.
 async function playHand(page,table,n){
- const setup=await page.evaluate(([table,STACKS,MODE,STYLE])=>{
+ const setup=await page.evaluate(([table,STACKS,MODE,STYLE,OPENS])=>{
   const r=flowRand,seats={hu:2,'3way':3,'6max':6,'9max':9}[table]||2,choice=a=>a[Math.floor(r()*a.length)];
   const depths=STACKS.filter(x=>x!=='mixed').map(Number),mixed=STACKS.includes('mixed')&&r()<.5,depth=choice(depths.length?depths:[100]);
   const stacks=Array.from({length:seats},()=>mixed?choice(depths.length>1?depths:[20,40,100,200]):depth),mode=MODE==='mix'?choice(['cash','icm']):MODE;
   const style=STYLE==='mix'?choice(['follow','follow','aggro','passive','random']):STYLE;
   state.config=G.normalize({...state.config,variant:'NLH',seats,stacks,mode,payouts:seats>2?[.5,.3,.2]:[.65,.35],otherStacks:[],button:Math.floor(r()*seats),ante:0,startStreet:0,board:'',bounties:Array(seats).fill(0)});state.dirty=false;
   // A 3-way table: everyone calls preflop (the test plays the other seats there), so the flop is 3-way and goes to the
-  // 3-way solver; from the flop on the app's bots play. At 6- and 9-max the bots play every other seat from the deal.
-  $('controlAll').checked=table==='3way';
+  // 3-way solver; from the flop on the app's bots play. With --opens, in half of those hands the first other seat to
+  // act opens with a raise instead (flowOpen), so the hero also sees flops as a caller: leading into the raiser, or
+  // facing a lead. At 6- and 9-max the bots play every other seat from the deal.
+  $('controlAll').checked=table==='3way';window.flowOpen=OPENS&&table==='3way'&&r()<.5;
   window.flowStyle=style;state.hero=Math.floor(r()*seats);if(!deal(false))throw Error('Could not deal.');return{id:state.hand.dealId,stacks,mode,style};
- },[table,STACKS,MODE,STYLE]),id=setup.id;
+ },[table,STACKS,MODE,STYLE,OPENS]),id=setup.id;
  const started=Date.now();let decisions=0,solves=0;
  while(Date.now()-started<(REAL?900000:240000)){
   await page.evaluate(()=>{const h=state.hand;if(!$('controlAll').checked||!h||h.done||tableView.playing||state.busy||playBusy())return;
    if(h.street>0){$('controlAll').checked=false;renderPlay();if(typeof advanceBots==='function')advanceBots();return;}
-   if(h.actor!==state.hero){const l=h.legal();chooseAction(l.check?{kind:'check',label:'Check'}:{kind:'call',label:'Call'});}});
+   if(h.actor!==state.hero){const l=h.legal(),open=window.flowOpen&&!h.actionLog.some(a=>a.kind==='raise')?G.modelActions(h,{...state.abstraction,...state.spotSizing}).find(a=>a.kind==='raise'):null;chooseAction(open||(l.check?{kind:'check',label:'Check'}:{kind:'call',label:'Call'}));}});
   const s=await page.evaluate(()=>{const h=state.hand;return{done:!h||h.done,mine:!!h&&!h.done&&h.actor===state.hero&&!tableView.playing&&!state.busy&&!playBusy()};});
   if(s.done)break;if(!s.mine){await page.waitForTimeout(150);continue;}
   await page.waitForTimeout(500);decisions++;

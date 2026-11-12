@@ -68,10 +68,12 @@ function flops(count,seed){
  return[...out];
 }
 // One three-way flop through the 3-way solver: each slot's mean EV share of the pot by hand class.
+// exact_removal 0 keeps the solver's earlier card removal (the two opponents' ranges taken as independent) and there
+// are no leads: the preflop fits were made on that model, and the exact one takes about 1.7 times as long per flop.
 function solveFlop(bin,t,board,threads,dir,timeLimit=1200){
  const chips=x=>Math.max(1,Math.round(x*100)),lines=['game NLH3','board '+board,'pot '+chips(t.pot),'stack '+chips(t.behind),'min_bet 100',...t.ranges.map((r,s)=>'range'+s+' '+r),
   'bet flop all 0.33,0.66,1.5','bet turn all 0.66','bet river all 0.66','raise flop all 0.66','raise turn all 0.66','raise river all 0.66','cap flop 1','cap turn 1','cap river 1','allin flop 1','allin turn 1','allin river 1','allin_threshold 0.67',
-  ...t.agg>=0?[0,1,2].filter(s=>s!==t.agg).map(s=>'lead flop '+s+' 0'):[],'runouts '+RUNOUTS,'threads '+threads,'accuracy 1','max_iterations 200','time_limit '+Math.max(10,Math.round(Math.min(1200,timeLimit))),'output result.json'];
+  ...t.agg>=0?[0,1,2].filter(s=>s!==t.agg).map(s=>'lead flop '+s+' 0'):[],'exact_removal 0','runouts '+RUNOUTS,'threads '+threads,'accuracy 1','max_iterations 200','time_limit '+Math.max(10,Math.round(Math.min(1200,timeLimit))),'output result.json'];
  fs.writeFileSync(path.join(dir,'input.txt'),lines.join('\n')+'\n');
  return new Promise((resolve,reject)=>{const child=spawn(bin,['input.txt'],{cwd:dir,stdio:['ignore','ignore','pipe']});let err='';child.stderr.on('data',d=>{err=(err+d).slice(-500);});
   child.on('error',reject);child.on('close',code=>{try{if(code!==0)throw Error('The 3-way solver failed: '+(err.trim()||'exit '+code));const r=JSON.parse(fs.readFileSync(path.join(dir,'result.json'),'utf8'));

@@ -133,11 +133,25 @@
  // raises as fractions of the pot after the call, and the exact amounts already played on this
  // street (the solver adds them to its tree). Flop solves keep the turn and river slim and deal an
  // even spread of turn and river cards when every card would not fit; turn and river solves use
- // every size and every card.
- const MW_TREE={flop:{flop:{bet:[1/3,2/3,1.5],raise:[2/3]},turn:{bet:[2/3],raise:[]},river:{bet:[2/3],raise:[]}},turn:{turn:{bet:[1/3,2/3,1.5],raise:[2/3]},river:{bet:[1/3,2/3,1.5],raise:[]}},river:{river:{bet:[1/3,2/3,1.5],raise:[2/3]}},cap:1,allinThreshold:.67,runouts:96},MW_MAX_COMBOS=1326;
+ // every size and every card. On the flop the preflop raiser has every size; the other two may bet
+ // first with `lead` (one size, plus all-in): a lead into the raiser, or a bet after the raiser checks.
+ const MW_TREE={lead:[1/3],flop:{flop:{bet:[1/3,2/3,1.5],raise:[2/3]},turn:{bet:[2/3],raise:[]},river:{bet:[2/3],raise:[]}},turn:{turn:{bet:[1/3,2/3,1.5],raise:[2/3]},river:{bet:[1/3,2/3,1.5],raise:[]}},river:{river:{bet:[1/3,2/3,1.5],raise:[2/3]}},cap:1,allinThreshold:.67,runouts:96},MW_MAX_COMBOS=1326;
  // A flop's runout budget: 96 turn x river cards for wide ranges (about 1,600 combos in all), more in proportion
  // for narrower ones, which solve faster (a squeeze pot's 230 combos get about 670), so a solve takes about as long.
  function mwRunouts(ranges){const total=ranges.reduce((s,r)=>s+Object.keys(r).length,0);return Math.min(2352,Math.max(MW_TREE.runouts,Math.round(MW_TREE.runouts*1600/Math.max(1,total))));}
+ // Whether a 3-way flop solve gets the tree where the two callers may bet first (leads). That tree takes about 1.7
+ // times the memory and time, so by default it is used only when leads matter for the decision being solved: the
+ // hero is not the preflop raiser (the hero can lead, or acts behind a possible lead), or the real line already has
+ // a flop bet by a caller. A raiser hero whom nobody has led into gets the tree without leads. mwLeads:true or false
+ // in the solve options overrides this either way. To make leads always on, change MW_LEADS_ALWAYS to true.
+ // actions: the hand's actions ({street, 0 preflop and 1 the flop; kind; seat}); seats: the three players; hero: the seat solved for.
+ const MW_LEADS_ALWAYS=false;
+ function mwRaiser(actions){return[...actions].reverse().find(a=>a.street===0&&(a.kind==='raise'||a.kind==='bet'))?.seat;}
+ function mwFlopLeads(actions,seats,hero,opt={}){
+  const raiser=mwRaiser(actions);if(!seats.includes(raiser))return false;
+  if(typeof opt.mwLeads==='boolean')return opt.mwLeads;
+  return MW_LEADS_ALWAYS||hero!==raiser||actions.some(a=>a.street===1&&a.kind==='bet'&&a.seat!==raiser);
+ }
  function mwSpec(data,ranges,opt,config,h,start){
   const current=data.board.length-2,street=current-1,live=h.living();assert(live.length===3,'The 3-way solver needs exactly three players.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,seats=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
@@ -149,14 +163,15 @@
    if(!seats.includes(a.seat)){assert(a.kind==='fold'||a.kind==='check','A player who left this street put chips in.');continue;}
    assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});
   }
-  // On the flop only the last preflop raiser may lead (no donk bets), when that player is still in.
-  const raiser=[...data.actions].reverse().find(a=>a.street===0&&(a.kind==='raise'||a.kind==='bet'))?.seat,tree=MW_TREE[STREETS[street]],sizes={},caps={};
+  // On the flop the last preflop raiser (when still in) bets every size; the other two bet first with the lead
+  // size only (leadSizes), when mwFlopLeads says this solve needs leads; otherwise they have no bet of their own.
+  const raiser=mwRaiser(data.actions),tree=MW_TREE[STREETS[street]],sizes={},caps={};
   for(const [k,v] of Object.entries(tree)){sizes[k]={bet:v.bet.map(round4),raise:v.raise.map(round4)};caps[k]=MW_TREE.cap;}
-  const lead=street===0&&seats.includes(raiser)?{flop:seats.map(i=>i===raiser)}:{};
+  const lead=street===0&&seats.includes(raiser)?{flop:seats.map(i=>i===raiser)}:{},leadSizes=lead.flop&&mwFlopLeads(data.actions,seats,data.actor,opt)?{flop:MW_TREE.lead.map(round4)}:{};
   const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
   const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
   const list=seats.map(combos),heroIndex=seats.indexOf(data.actor);if(!list[heroIndex][hero])list[heroIndex][hero]=.005;
-  return{version:1,game:'NLH3',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,lead,allin:true,allinThreshold:MW_TREE.allinThreshold,ranges:list,seats,path,hero,heroIndex,runouts:street===0?mwRunouts(list):0,
+  return{version:1,game:'NLH3',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,lead,leadSizes,allin:true,allinThreshold:MW_TREE.allinThreshold,ranges:list,seats,path,hero,heroIndex,runouts:street===0?mwRunouts(list):0,
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||.5)),maxIterations:Math.min([300,400,1000][street],Math.max(10,Number(opt.localIterations)||1000))};
  }
  function validateMW(s){
@@ -170,6 +185,9 @@
   for(const [street,book] of Object.entries(s.sizes)){assert(allowed.includes(street),'Invalid street '+street+'.');for(const k of ['bet','raise'])assert(Array.isArray(book[k])&&book[k].length<=4&&book[k].every(x=>num(x,.05,3)),'Invalid '+k+' sizes.');}
   for(const [street,c] of Object.entries(s.caps))assert(allowed.includes(street)&&Number.isInteger(c)&&c>=0&&c<=3,'Invalid raise cap.');
   for(const [street,l] of Object.entries(s.lead))assert(allowed.includes(street)&&Array.isArray(l)&&l.length===3&&l.every(x=>typeof x==='boolean'),'Invalid lead flags.');
+  // leadSizes (optional): bet sizes for the players whose lead flag is off, who then may bet first with these only.
+  if(s.leadSizes!==undefined){assert(s.leadSizes&&typeof s.leadSizes==='object'&&!Array.isArray(s.leadSizes),'Invalid lead sizes.');for(const [street,l] of Object.entries(s.leadSizes))assert(allowed.includes(street)&&Array.isArray(l)&&l.length<=4&&l.every(x=>num(x,.05,3)),'Invalid lead sizes.');}
+  assert(s.exactRemoval===undefined||typeof s.exactRemoval==='boolean','Invalid card removal setting.');
   assert(typeof s.allin==='boolean'&&num(s.allinThreshold,.1,1),'Invalid all-in settings.');
   assert(s.runouts===undefined||Number.isInteger(s.runouts)&&num(s.runouts,0,2352),'Invalid runout budget.');
   assert(num(s.accuracy,.05,5)&&Number.isInteger(s.maxIterations)&&num(s.maxIterations,10,2000),'Invalid accuracy settings.');
@@ -181,9 +199,10 @@
   validateMW(s);assert(typeof output==='string'&&!/[\r\n]/.test(output),'Invalid output path.');
   const range=r=>Object.entries(r).map(([k,w])=>w>=1?k:k+':'+w).join(','),n=x=>String(Math.round(x*1e6)/1e6);
   const lines=['game NLH3','board '+s.board.join(''),'pot '+n(s.pot),'stack '+n(s.stack),'min_bet '+n(s.minBet),'allin_threshold '+n(s.allinThreshold),...s.ranges.map((r,i)=>'range'+i+' '+range(r))];
-  for(const street of STREETS.slice(s.board.length-3)){const book=s.sizes[street]||{bet:[],raise:[]};for(const k of ['bet','raise'])lines.push(k+' '+street+' all '+(book[k].length?book[k].map(n).join(','):'none'));lines.push('cap '+street+' '+(s.caps[street]??1),'allin '+street+' '+(s.allin?1:0));if(s.lead[street])s.lead[street].forEach((x,i)=>lines.push('lead '+street+' '+i+' '+(x?1:0)));}
+  for(const street of STREETS.slice(s.board.length-3)){const book=s.sizes[street]||{bet:[],raise:[]};for(const k of ['bet','raise'])lines.push(k+' '+street+' all '+(book[k].length?book[k].map(n).join(','):'none'));lines.push('cap '+street+' '+(s.caps[street]??1),'allin '+street+' '+(s.allin?1:0));if(s.lead[street])s.lead[street].forEach((x,i)=>{const own=!x&&s.leadSizes?.[street]?.length>0;if(own)lines.push('bet '+street+' '+i+' '+s.leadSizes[street].map(n).join(','));lines.push('lead '+street+' '+i+' '+(x||own?1:0));});}
   if(s.path.length)lines.push('path '+s.path.map(p=>p.to===undefined?p.kind:'to:'+n(p.to)).join(','));
   if(s.runouts)lines.push('runouts '+s.runouts);
+  if(s.exactRemoval===false)lines.push('exact_removal 0');
   lines.push('threads '+Math.max(1,Math.min(256,threads|0)),'accuracy '+n(s.accuracy),'max_iterations '+s.maxIterations,'print_interval '+(s.board.length===3?20:10),'memory_limit_mb '+Math.max(256,Math.round(memoryMB)),'time_limit '+Math.max(10,Math.round(timeLimit)),'output '+output);
   return lines.join('\n')+'\n';
  }
@@ -387,18 +406,22 @@
 
  // The 3-way solver's output holds its street's whole tree too (actions with street totals, each combo's mix), so a
  // three-way flop or turn solve keeps it the same way: each player's combos and starting weights, then the action
- // nodes breadth first, keyed by the action indexes from the street's start. A later decision on that street reads
+ // nodes most likely first (a flop with leads has more decisions than fit, so the lines played most often are the
+ // ones kept; a parent always comes before its children), keyed by the action indexes from the street's start. A later decision on that street reads
  // it (treeAnswerMW). No EVs are kept, so those answers grade by frequency.
  function mwStreetTree(raw,s,budget=TREE_BYTES){
-  const combos=raw.combos.map(l=>l.join(',')),weights=raw.weights.map(w=>b64(Uint8Array.from(w,x=>Math.max(0,Math.min(255,Math.round(x*255)))))),nodes=[],queue=[[raw.tree,'']];
+  const combos=raw.combos.map(l=>l.join(',')),weights=raw.weights.map(w=>b64(Uint8Array.from(w,x=>Math.max(0,Math.min(255,Math.round(x*255)))))),nodes=[],queue=[[raw.tree,'',1]];
   let size=combos.reduce((n,c)=>n+c.length,0)+weights.reduce((n,c)=>n+c.length,0);
-  for(let q=0;q<queue.length;q++){
-   const [node,line]=queue[q];if(!node||!Array.isArray(node.actions)||!Array.isArray(node.strategy))continue;
+  while(queue.length){
+   // The open line with the largest share of hands reaching it (each action's share of the acting player's range).
+   let q=0;for(let i=1;i<queue.length;i++)if(queue[i][2]>queue[q][2])q=i;
+   const [node,line,share]=queue.splice(q,1)[0];if(!node||!Array.isArray(node.actions)||!Array.isArray(node.strategy))continue;
    const A=node.actions.length,H=node.strategy.length,out=new Uint8Array(H*A);
    node.strategy.forEach((row,i)=>{if(!Array.isArray(row)||row.length!==A)return;const t=row.reduce((x,y)=>x+(y>0?y:0),0);if(!(t>0))return;let left=255,best=0;row.forEach((p,a)=>{if(p>row[best])best=a;});row.forEach((p,a)=>{if(a===best)return;const v=Math.min(left,Math.max(0,Math.round(p/t*255)));out[i*A+a]=v;left-=v;});out[i*A+best]=left;});
    const table=b64(out);size+=table.length+line.length+40*A;if(size>budget)break;
    nodes.push({line,player:node.player,actions:node.actions.map(a=>({kind:a.kind,to:a.to,allin:!!a.allin})),table});
-   (node.children||[]).forEach((child,i)=>queue.push([child,line?line+'/'+i:String(i)]));
+   const w0=raw.weights[node.player]||[],freq=node.actions.map(()=>0);let z=0;node.strategy.forEach((row,i)=>{if(!Array.isArray(row)||row.length!==A)return;const x=(w0[i]??1)*(node.reach?.[i]??1);z+=x;row.forEach((p,a)=>{freq[a]+=x*(p>0?p:0);});});
+   (node.children||[]).forEach((child,i)=>queue.push([child,line?line+'/'+i:String(i),z>0?share*freq[i]/z:0]));
   }
   if(!nodes.length)return null;
   return{v:1,game:'NLH3',board:s.board.slice(),pot:s.pot,stack:s.stack,seats:s.seats.slice(),combos,weights,nodes};
@@ -501,11 +524,13 @@
   const cash=engine.hand.config.mode==='cash',{actions,probs,mean,index:map}=mapMW(engine.hand,node,node.strategy[index],node.evs[index]),hasEV=cash&&mean.every(Number.isFinite),values=hasEV?mean:actions.map(()=>0),best=hasEV?values.indexOf(Math.max(...values)):probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0),converged=Number.isFinite(tree.exploitability)&&tree.exploitability<=s.accuracy,adjusted=(node.adjusted||[]).includes(index);
   let handMix=null;try{const table={};tree.combos[player].forEach((c,i)=>{table[c]=node.strategy[i];});handMix={seat:engine.hand.actor,classes:classMix(table,map,actions.length),combos:comboMix(table,map,actions.length)};}catch{}
   let mwTree=null;try{mwTree=mwStreetTree(tree,s);}catch{}
-  const street=STREETS[s.board.length-3],book=s.sizes[street],shortest=Math.min(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]))<Math.max(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]));
+  // On a flop with leads, a player who is not the preflop raiser bets first with the lead size only. A solver from
+  // before leads ignores leadSizes; it does not report exactRemoval either, which is how it is told apart.
+  const street=STREETS[s.board.length-3],leads=tree.exactRemoval!==undefined&&s.lead[street]&&s.leadSizes?.[street]?.length?s.leadSizes[street]:null,pct=l=>l.map(x=>Math.round(100*x)+'%').join(', '),book=leads&&!s.lead[street][s.heroIndex]?{...s.sizes[street],bet:leads}:s.sizes[street],shortest=Math.min(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]))<Math.max(...s.seats.map(i=>engine.hand.stacks[i]+engine.hand.streetPaid[i]));
   return{supported:true,actions,reference:probs,mean:values,se:zeros,loss:hasEV?values.map(v=>values[best]-v):zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:cash?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),reliable:hasEV&&converged,...handMix?{handMix}:{},
    solve:{version:1,method:'local-multiway',...street!=='river'&&mwTree?{tree:mwTree}:{},exact:false,approximate:false,iterations:tree.iterations,exploitability:tree.exploitability,seconds:tree.seconds,memoryMB:tree.memoryEstimateMB,converged,evAvailable:hasEV,heroReach:node.reach[index],bestEVRow:adjusted,sampledRunouts:tree.sampledRunouts,turnCards:tree.turnCards,riverCards:tree.riverCards,suitSymmetries:tree.suitSymmetries,rangeAssumptions:engine.ranges.descriptions,rangeCombos:s.ranges.map(r=>Object.keys(r).length),
     actionTree:{betSizes:book.bet,raiseSizes:book.raise,maxRaises:s.caps[street],jam:true},
-    warning:'Solved by the 3-way solver on this computer for the ranges shown, with bets of '+book.bet.map(x=>Math.round(100*x)+'%').join(', ')+' of the pot and all-in on this street'+(s.board.length===3?', and one size (2/3 of the pot) on the turn and river':'')+'. Exploitability is the average gain of a best response for each player, in percent of the pot. Card removal between your two opponents is treated as independent.'+(tree.sampledRunouts?' To fit memory, '+tree.chance+' were dealt instead of every card.':'')+(shortest?' All three play the smallest stack.':'')+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(converged?'':' The solve stopped before reaching its accuracy target.')+(adjusted?' This line is rare in the solved strategy for your hand and its mix had not settled, so the best-EV action is shown.':'')}};
+    warning:'Solved by the 3-way solver on this computer for the ranges shown, with bets of '+pct(s.sizes[street].bet)+' of the pot and all-in on this street'+(leads?' for the preflop raiser, and '+pct(leads)+' and all-in for the other two when they bet first (a lead into the raiser, or after the raiser checks)':'')+(s.board.length===3?', and one size (2/3 of the pot) on the turn and river':'')+'. Exploitability is the average gain of a best response for each player, in percent of the pot.'+(tree.exactRemoval?'':' Card removal between your two opponents is treated as independent.')+(tree.sampledRunouts?' To fit memory, '+tree.chance+' were dealt instead of every card.':'')+(shortest?' All three play the smallest stack.':'')+(hasEV?' EVs are in bb from this decision, before rake.':' EVs are chip values, not prize units, so they are not shown.')+(converged?'':' The solve stopped before reaching its accuracy target.')+(adjusted?' This line is rare in the solved strategy for your hand and its mix had not settled, so the best-EV action is shown.':'')}};
  }
 
  // Worker engine: one HTTP request, then complete. step() never blocks.
@@ -599,6 +624,6 @@
    solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,actionEVs,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,actionEVs,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,mwFlopLeads,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

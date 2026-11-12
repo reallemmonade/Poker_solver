@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // Checks for the three-player NLH solver, its JS spec and the bridge. Node 18+, no dependencies.
-//   node tools/multiway-solver/test.cjs           about 2-3 minutes on 4 cores
+//   node tools/multiway-solver/test.cjs           about 3 minutes on 4 cores
 const fs = require('fs'), os = require('os'), path = require('path'), { spawnSync, spawn, execFileSync } = require('child_process');
 const G = require('../../studio/game.js'), L = require('../../studio/local-solver.js'), S = require('../../studio/spot-solver.js');
 const here = __dirname, bin = path.join(here, 'mw_solver'), threads = Math.min(4, os.cpus().length);
@@ -54,24 +54,39 @@ const rules = G.normalize({ variant: 'NLH', seats: 3, stacks: [100, 100, 100] })
 
 // 2. River with every strategy uniform (no iterations): each player's EV against a brute-force
 // enumeration of every three-hand deal through the solver's own tree.
-{
-  const board = 'Ks9h4d2c7s', b = cards(board), lines = ['board ' + board, 'pot 900', 'stack 2400', 'min_bet 100', ...disjoint(board, 14, 3), 'bet river all 0.5,1', 'raise river all 1', 'cap river 1', 'max_iterations 0'];
+// The enumeration skips deals where two hands share a card, and also gives every combo's own EV (rootEV).
+const board2 = 'Ks9h4d2c7s';
+function uniform(ranges, extra = []) {
+  const board = board2, b = cards(board), lines = ['board ' + board, 'pot 900', 'stack 2400', 'min_bet 100', ...ranges, 'bet river all 0.5,1', 'raise river all 1', 'cap river 1', 'max_iterations 0', ...extra];
   const x = solve(lines), r = x.r, combos = r.combos.map(l => l.map(cards)), W = r.weights, rank = combos.map(l => l.map(h => G.evaluate(h, b, rules).high));
   // Payoff of every leaf for the given hands, weighted by the uniform path probability.
   const leaves = []; (function visit(n, c, folded, prob) {
     if (n.actions) { n.actions.forEach((a, k) => { const cc = c.slice(), f = folded.slice(); if (a.kind === 'fold') f[n.player] = true; else if (a.kind !== 'check') cc[n.player] = a.to; visit(n.children[k], cc, f, prob / n.actions.length); }); return; }
     leaves.push({ c, folded, prob, show: n.end === 'showdown' });
   })(r.tree, [0, 0, 0], [false, false, false], 1);
-  const ev = [0, 0, 0]; let total = 0;
+  const ev = [0, 0, 0], own = combos.map(l => l.map(() => [0, 0])), mask = combos.map(l => l.map(h => 2n ** BigInt(h[0]) | 2n ** BigInt(h[1]))); let total = 0, deals = 0;
   for (let i = 0; i < combos[0].length; i++) for (let j = 0; j < combos[1].length; j++) for (let k = 0; k < combos[2].length; k++) {
-    const w = W[0][i] * W[1][j] * W[2][k], rk = [rank[0][i], rank[1][j], rank[2][k]]; total += w;
+    if (mask[0][i] & mask[1][j] || mask[0][i] & mask[2][k] || mask[1][j] & mask[2][k]) continue;
+    const w = W[0][i] * W[1][j] * W[2][k], rk = [rank[0][i], rank[1][j], rank[2][k]], at = [i, j, k]; total += w; deals++;
+    for (let p = 0; p < 3; p++) own[p][at[p]][1] += w / W[p][at[p]];
     for (const l of leaves) {
       const pot = r.pot + sum(l.c), live = [0, 1, 2].filter(p => !l.folded[p]), top = Math.max(...live.map(p => rk[p])), win = live.filter(p => !l.show || rk[p] === top);
-      for (let p = 0; p < 3; p++) ev[p] += w * l.prob * ((win.includes(p) ? pot / win.length : 0) - l.c[p]);
+      for (let p = 0; p < 3; p++) { const v = w * l.prob * ((win.includes(p) ? pot / win.length : 0) - l.c[p]); ev[p] += v; own[p][at[p]][0] += v / W[p][at[p]]; }
     }
   }
-  const diff = Math.max(...ev.map((v, p) => Math.abs(v / total - r.ev[p])));
-  check(diff < 1e-3 && Math.abs(sum(r.ev) - r.pot) < 1e-3, `uniform river: solver EVs ${r.ev.map(v => v.toFixed(3)).join(', ')} match brute force over ${combos.map(c => c.length).join('x')} deals and ${leaves.length} leaves (largest difference ${diff.toExponential(1)})`);
+  const diff = Math.max(...ev.map((v, p) => Math.abs(v / total - r.ev[p]))); let comboDiff = 0;
+  own.forEach((l, p) => l.forEach(([v, z], h) => { if (z > 0) comboDiff = Math.max(comboDiff, Math.abs(v / z - r.rootEV[p][h])); }));
+  return { r, diff, comboDiff, text: `solver EVs ${r.ev.map(v => v.toFixed(3)).join(', ')} against brute force over ${deals} deals (${combos.map(c => c.length).join('x')} combos) and ${leaves.length} leaves: largest difference ${diff.toExponential(1)}, largest for one combo ${comboDiff.toExponential(1)}` };
+}
+{
+  const d = uniform(disjoint(board2, 14, 3)), old = uniform(disjoint(board2, 14, 3), ['exact_removal 0']);
+  check(d.diff < 1e-3 && d.comboDiff < .011 && Math.abs(sum(d.r.ev) - d.r.pot) < 1e-3, 'uniform river, disjoint ranges: ' + d.text);
+  check(old.diff < 1e-3 && Math.abs(sum(old.r.ev) - old.r.pot) < 1e-3 && !old.r.exactRemoval, 'the same with exact_removal 0 (independent opponents is exact when no cards are shared): ' + old.text);
+  // Overlapping ranges: the opponents hold each other's cards and even the same combos, with two- and three-way ties (AK).
+  const over = ['range0 AA,AKs,AKo:0.5,QJs,T9s:0.7,88', 'range1 AKo,AQs:0.6,KQo,JJ,T9s,87s:0.4', 'range2 AA:0.5,KK,AKs,AKo,QJs:0.8,65s,T8s'];
+  const e = uniform(over), o = uniform(over, ['exact_removal 0']);
+  check(e.r.exactRemoval && e.diff < 1e-3 && e.comboDiff < .011 && Math.abs(sum(e.r.ev) - e.r.pot) < 1e-3, 'uniform river, overlapping ranges, exact removal: ' + e.text + `; EVs sum to ${sum(e.r.ev).toFixed(3)}`);
+  check(o.diff > .1 && o.comboDiff > 1, 'the old independence model is off on the same spot, as expected: ' + o.text + `; EVs sum to ${sum(o.r.ev).toFixed(3)}`);
 }
 
 // 3. River, 3-way: converges, zero-sum, nobody folds the nuts, EVs bounded.
@@ -83,17 +98,24 @@ const rules = G.normalize({ variant: 'NLH', seats: 3, stacks: [100, 100, 100] })
   check(Math.abs(sum(r.ev) - r.pot) < 1e-3 && foldedNuts === 0 && bad === 0, `river zero-sum ${r.ev.map(v => v.toFixed(2)).join(' + ')} = pot ${r.pot}; nut combos never fold (${foldedNuts}); EVs bounded (${bad} outside)`);
 }
 
-// 4. Turn: every river card dealt, zero-sum, below 1% of the pot; suit isomorphism changes nothing.
+// 4. Turn: every river card dealt, zero-sum, below 1% of the pot; suit isomorphism changes nothing
+// (compared after 2 iterations, which is enough to catch a wrong card or hand mapping: the two runs add the
+// same numbers up in a different order, and regret matching grows that float rounding with every iteration
+// until the runs part, sooner with exact removal, whose sums are longer; rows shown as the best-EV action
+// instead of the mix are left out, because a tie between two actions breaks on that rounding).
 {
   const board = 'Ah7h2h9c', base = ['board ' + board, 'pot 1500', 'stack 6000', 'min_bet 100', ...disjoint(board, 40, 21), 'bet turn all 0.66', 'bet river all 0.66', 'raise turn all none', 'raise river all none', 'accuracy 0.5', 'max_iterations 400', 'print_interval 20'];
   const x = solve(base), r = x.r;
   check(r.exploitability < 1 && Math.abs(sum(r.ev) - r.pot) < 1e-3 * r.pot && !r.sampledRunouts, report('turn 3-way, 40 combos each', x) + `, zero-sum ${sum(r.ev).toFixed(2)}`);
   // Symmetric ranges (closed under the hearts-free suit swaps) for the isomorphism check.
-  const sym = ['range0 AA,KQs,T8s,65o', 'range1 KK,QJs,T9o,87s', 'range2 QQ,JTs,98s,54s'], iso = [...base.filter(l => !/^range|^accuracy|^max_it/.test(l)), ...sym, 'accuracy 0', 'max_iterations 10'];
+  const sym = ['range0 AA,KQs,T8s,65o', 'range1 KK,QJs,T9o,87s', 'range2 QQ,JTs,98s,54s'], iso = [...base.filter(l => !/^range|^accuracy|^max_it/.test(l)), ...sym, 'accuracy 0', 'max_iterations 2'];
   const a = solve(iso), c = solve([...iso, 'isomorphism 0']); let d = 0;
-  const cmp = (u, v) => { if (Array.isArray(u)) u.forEach((y, i) => cmp(y, v[i])); else if (typeof u === 'number') d = Math.max(d, Math.abs(u - v) / Math.max(Math.abs(u), 10)); else if (u && typeof u === 'object') for (const k of ['strategy', 'evs', 'children']) if (u[k]) cmp(u[k], v[k]); };
+  const cmp = (u, v) => { if (Array.isArray(u)) u.forEach((y, i) => cmp(y, v[i])); else if (typeof u === 'number') d = Math.max(d, Math.abs(u - v) / Math.max(Math.abs(u), 10)); else if (u && typeof u === 'object') { const shown = new Set([...u.adjusted || [], ...v.adjusted || []]), rows = x => x.filter((_, i) => !shown.has(i)); for (const k of ['strategy', 'evs', 'children']) if (u[k]) cmp(k === 'strategy' ? rows(u[k]) : u[k], k === 'strategy' ? rows(v[k]) : v[k]); } };
   cmp(a.r.tree, c.r.tree);
   check(a.r.suitSymmetries > 1 && c.r.suitSymmetries === 1 && d < 1e-3, `isomorphism (${a.r.suitSymmetries} symmetries): ${a.r.riverBoards} vs ${c.r.riverBoards} river boards, largest relative difference ${d.toExponential(1)}`);
+  // Those ranges share cards, so only exact removal keeps the three EVs summing to the pot.
+  const old = solve([...iso, 'exact_removal 0']);
+  check(Math.abs(sum(a.r.ev) - a.r.pot) < 1e-3 * a.r.pot && Math.abs(sum(old.r.ev) - old.r.pot) > 1e-3 * old.r.pot, `turn with overlapping ranges: EVs sum to ${sum(a.r.ev).toFixed(2)} of ${a.r.pot} with exact removal, ${sum(old.r.ev).toFixed(2)} without`);
 }
 
 // 5. The real line (a lead, a raise and a call to come) is in the tree, every bet within the
@@ -106,13 +128,32 @@ const rules = G.normalize({ variant: 'NLH', seats: 3, stacks: [100, 100, 100] })
   check(bad === 0 && node.player === 2 && node.actions[0].kind === 'fold' && r.tree.actions.length === 2 && r.sampledRunouts && r.turnCards === 6, `tree: player 0's lead to 300 (leads otherwise off) and player 1's raise to 1200 found; ${bad} bets over the stack or under the minimum; ${report('sampled flop', x)}`);
 }
 
+// 5b. Flop leads as the app sends them: the two players who are not the preflop raiser (player 2 here) bet
+// first with one size or all-in, the raiser has every size, a lead can be raised, and a lead of another size
+// in the real line is added next to the tree's own. Without leadSizes they can only check.
+{
+  const ranges = disjoint('Td9d4s', 20, 43).map(l => Object.fromEntries(l.split(' ')[1].split(',').map(x => [x.split(':')[0], +x.split(':')[1]])));
+  const spec = { version: 1, game: 'NLH3', board: ['Td', '9d', '4s'], pot: 750, stack: 9750, minBet: 100, sizes: { flop: { bet: [.3333, .6667, 1.5], raise: [.6667] }, turn: { bet: [.6667], raise: [] }, river: { bet: [.6667], raise: [] } }, caps: { flop: 1, turn: 1, river: 1 }, lead: { flop: [false, false, true] }, leadSizes: { flop: [.3333] }, allin: true, allinThreshold: .67, ranges, seats: [1, 2, 0], path: [], hero: Object.keys(ranges[0])[0], heroIndex: 0, accuracy: 1, maxIterations: 40 };
+  const run = s => solve([...L.input(s, { output: 'x' }).split('\n').filter(l => l && !/^(game|threads|output|memory_limit_mb|time_limit) /.test(l)), 'auto_sample 0', 'turn_cards 6', 'river_cards 4']);
+  const x = run(spec), t = x.r.tree, show = n => n.actions.map(a => a.kind + (a.to ? ' ' + a.to : '') + (a.allin ? ' all-in' : '')).join(', '), kinds = n => n.actions.map(a => a.kind + (a.allin ? '!' : '')).join();
+  const second = L.followMW(t, [{ kind: 'check' }]), raiser = L.followMW(t, [{ kind: 'check' }, { kind: 'check' }]), facing = L.followMW(t, [{ kind: 'bet', to: 250 }]), last = L.followMW(t, [{ kind: 'bet', to: 250 }, { kind: 'call' }]), afterRaise = L.followMW(t, [{ kind: 'bet', to: 250 }, { kind: 'raise', to: facing.actions[2].to }]);
+  let rows = 0, evs = 0; nodes(t, n => { n.strategy.forEach(r => { if (Math.abs(sum(r) - 1) > 1e-3) rows++; }); n.evs.forEach(e => { if (!e || e.some(v => !Number.isFinite(v))) evs++; }); });
+  const led = sum(t.strategy.map((r, i) => t.reach[i] * x.r.weights[0][i] * (1 - r[0]))) / sum(x.r.weights[0]);
+  check(t.player === 0 && kinds(t) === 'check,bet,bet!' && t.actions[1].to === 250 && second.player === 1 && kinds(second) === 'check,bet,bet!' && raiser.player === 2 && kinds(raiser) === 'check,bet,bet,bet,bet!', `flop leads: first to act ${show(t)}; the raiser after two checks ${show(raiser)}`);
+  check(facing.player === 1 && kinds(facing) === 'fold,call,raise,raise!' && last.player === 2 && kinds(last) === 'fold,call,raise,raise!' && afterRaise.player === 2 && rows === 0 && evs === 0, `facing a lead: ${show(facing)}; the raiser behind a lead and a call: ${show(last)}; every row sums to 1 and has EVs (${rows}, ${evs} bad); player 0 leads ${(100 * led).toFixed(1)}% of its range; ${report('flop with leads', x)}`);
+  const real = run({ ...spec, path: [{ kind: 'bet', to: 400 }], heroIndex: 1, hero: Object.keys(ranges[1])[0] }), none = run({ ...spec, leadSizes: undefined });
+  check(real.r.tree.actions.map(a => a.to).join() === '0,250,400,9750' && L.followMW(real.r.tree, [{ kind: 'bet', to: 400 }]).player === 1 && kinds(none.r.tree) === 'check' && kinds(L.followMW(none.r.tree, [{ kind: 'check' }])) === 'check', `a real lead to 400 joins the tree's 250 and all-in (${show(real.r.tree)}); without leadSizes the first two can only check`);
+}
+
 // 6. Strict spec checks: nothing but validated values reaches the solver input.
 {
   const good = { version: 1, game: 'NLH3', board: ['Ks', '9h', '4d'], pot: 750, stack: 9750, minBet: 100, sizes: { flop: { bet: [.33, .66], raise: [.66] }, turn: { bet: [.66], raise: [] }, river: { bet: [.66], raise: [] } }, caps: { flop: 1, turn: 1, river: 1 }, lead: { flop: [false, false, true] }, allin: true, allinThreshold: .67, ranges: [{ AsAh: 1 }, { '8c8d': .5 }, { QcJc: 1 }], path: [{ kind: 'check' }], hero: 'AsAh', heroIndex: 0, seats: [1, 2, 0], accuracy: .5, maxIterations: 300 };
-  const bad = [s => s.ranges[1] = { '8c8d\nthreads 999': 1 }, s => s.ranges[0].KsAh = 1, s => s.path = [{ kind: 'bet', to: '5\noutput /etc/x' }], s => s.board = ['Ks', 'Ks', '4d'], s => s.sizes.flop.bet = [20], s => s.caps.flop = 9, s => s.hero = '8c8d', s => s.ranges[2].AdAc = 1.5, s => s.ranges = [s.ranges[0], s.ranges[1]], s => s.lead.flop = [1, 0]];
+  const bad = [s => s.ranges[1] = { '8c8d\nthreads 999': 1 }, s => s.ranges[0].KsAh = 1, s => s.path = [{ kind: 'bet', to: '5\noutput /etc/x' }], s => s.board = ['Ks', 'Ks', '4d'], s => s.sizes.flop.bet = [20], s => s.caps.flop = 9, s => s.hero = '8c8d', s => s.ranges[2].AdAc = 1.5, s => s.ranges = [s.ranges[0], s.ranges[1]], s => s.lead.flop = [1, 0], s => s.leadSizes = { flop: [9] }, s => s.leadSizes = { preflop: [.33] }, s => s.leadSizes = [.33], s => s.exactRemoval = 'no'];
   let rejected = 0; for (const f of bad) { const s = JSON.parse(JSON.stringify(good)); f(s); try { L.input(s, { output: 'x.json' }); } catch { rejected++; } }
   const text = L.input(good, { threads: 4, output: 'r.json', memoryMB: 4000, timeLimit: 600 });
-  check(rejected === bad.length && /^path check$/m.test(text) && /^range1 8c8d:0.5$/m.test(text) && /^lead flop 0 0$/m.test(text), `spec validation rejects ${rejected}/${bad.length} malformed specs and writes the input`);
+  const leads = L.input({ ...good, leadSizes: { flop: [.33] }, exactRemoval: false }, { output: 'r.json' });
+  check(rejected === bad.length && /^path check$/m.test(text) && /^range1 8c8d:0.5$/m.test(text) && /^lead flop 0 0$/m.test(text) && !/exact_removal|^bet flop [012]/m.test(text), `spec validation rejects ${rejected}/${bad.length} malformed specs and writes the input`);
+  check(/^bet flop all 0.33,0.66\n[^]*^bet flop 0 0.33\nlead flop 0 1\nbet flop 1 0.33\nlead flop 1 1\nlead flop 2 1$/m.test(leads) && /^exact_removal 0$/m.test(leads), 'lead sizes become the two callers\' own flop bets, after the sizes for all; exactRemoval false is passed on');
 }
 
 // 7. End to end: a 6-max NLH pot three-way on the turn goes from the spot solver through the
@@ -134,6 +175,26 @@ const rules = G.normalize({ variant: 'NLH', seats: 3, stacks: [100, 100, 100] })
       const fine = r.supported && r.solve.method === 'local-multiway' && Math.abs(sum(r.reference) - 1) < 1e-6 && r.actions.every(a => a.kind === 'fold' ? legal.toCall > 0 : a.kind === 'check' ? legal.check : a.kind === 'call' ? legal.toCall > 0 : a.target <= legal.maxRaiseTo && (a.target >= legal.minRaiseTo || a.target === legal.allInTo)) && r.mean.every(v => Number.isFinite(v) && Math.abs(v) <= 200) && r.handMix && Object.keys(r.handMix.classes).length > 5;
       check(fine, `6-max NLH 3-way turn via the bridge (${facing ? 'facing a bet' : 'checked to'}): ${r.supported ? r.actions.map((a, i) => a.label + ' ' + (100 * r.reference[i]).toFixed(0) + '% EV ' + r.mean[i].toFixed(2)).join(', ') + `; ${r.solve.iterations} iterations, ${r.solve.exploitability}% pot, ${((Date.now() - t) / 1000).toFixed(1)}s` : r.message}`);
     }
+    // 8. Flop leads end to end, as the app asks: the button raises and both blinds call. The small blind (first
+    // to act) gets a check / lead / all-in answer, the big blind facing that lead and the button behind a lead and
+    // a call are answered from the kept tree, and a lead of another size is solved as its own line. The bridge
+    // runs the solve-flow player's wrapper (a few iterations and runouts), since only the route is checked here.
+    const port2 = port + 1, quick = spawn(process.execPath, [path.join(here, '..', 'local-solver', 'server.cjs'), '--port', String(port2), '--mw-solver', path.join(here, '..', 'solve-flow', 'fast-mw-solver.cjs'), '--threads', String(threads), '--timeout', '600'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      await new Promise((ok, fail) => { quick.stdout.on('data', d => /listening/.test(d) && ok()); quick.on('exit', () => fail(Error('bridge exited'))); });
+      const config = { variant: 'NLH', seats: 3, stacks: [100, 100, 100], button: 0 }, play = (...line) => { const h = new G.Hand(config, { rng: G.rng(21) }); for (const a of [{ kind: 'raise', target: 250 }, { kind: 'call' }, { kind: 'call' }, ...line]) h.act(a); return h; };
+      const data = h => ({ config, actor: h.actor, heroCards: h.holes[h.actor], board: h.board, actions: h.actionLog.map(a => ({ seat: a.seat, street: a.street, kind: a.kind, target: a.target })) });
+      const ask = async h => { const ranges = [0, 1, 2].map(seat => 'TT+,AJs+,KQs,QJs,JTs,T9s,98s,AQo+,KQo,A5s-A2s,' + h.holes[seat].slice().sort((x, y) => y - x).map(name).join('') + ':1'), solver = new S.Solver(null, data(h), { ranges, localSolver: 'http://127.0.0.1:' + port2, forceLocal: true, localAccuracy: 1 }); while (!solver.complete) { solver.step(); await new Promise(ok => setTimeout(ok, 100)); } return solver.result(); };
+      const kinds = r => r && r.supported ? r.actions.map(a => a.kind + (a.allIn ? '!' : '')).join() : 'none: ' + (r && r.message), mix = r => r.actions.map((a, i) => a.label + ' ' + (100 * r.reference[i]).toFixed(0) + '%').join(', '), whole = r => r && r.supported && Math.abs(sum(r.reference) - 1) < 1e-6;
+      let h = play(); const lead = await ask(h);
+      check(h.actor === 1 && whole(lead) && lead.solve.method === 'local-multiway' && kinds(lead) === 'check,bet,bet!' && lead.actions[1].target === 250 && lead.actions[2].target === h.legal().allInTo && lead.solve.actionTree.betSizes.length === 1 && !!lead.solve.tree, `flop lead via the bridge, the small blind first to act: ${lead.supported ? mix(lead) : lead.message}`);
+      h = play({ kind: 'bet', target: 250 }); const facing = L.treeAnswer(lead, data(h), h);
+      check(h.actor === 2 && whole(facing) && kinds(facing) === 'fold,call,raise,raise!' && facing.solve.fromTree.line === '1', `the big blind facing the lead, from the kept tree: ${facing ? mix(facing) : 'no answer'}`);
+      h = play({ kind: 'bet', target: 250 }, { kind: 'call' }); const behind = L.treeAnswer(lead, data(h), h);
+      check(h.actor === 0 && whole(behind) && kinds(behind) === 'fold,call,raise,raise!', `the button behind the lead and a call, from the kept tree: ${behind ? mix(behind) : 'no answer'}`);
+      h = play({ kind: 'bet', target: 400 }); const other = L.treeAnswer(lead, data(h), h) ? null : await ask(h);
+      check(h.actor === 2 && whole(other) && other.solve.method === 'local-multiway' && !other.solve.fromTree && /^fold,call,raise/.test(kinds(other)), `a lead of 4 bb is not in the kept tree and is solved as its own line: ${other && other.supported ? mix(other) : other && other.message}`);
+    } finally { quick.kill(); }
   } finally { server.kill(); fs.rmSync(tmp, { recursive: true, force: true }); }
   console.log(failures ? failures + ' check(s) failed.' : 'All checks passed.');
   process.exitCode = failures ? 1 : 0;
