@@ -95,7 +95,9 @@ function spotSettings(hand,pending={}){
 //   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer, except
 //   three-way NLH pots, which go to the 3-way solver (tools/multiway-solver): MW3_SECONDS are Mac estimates from
 //   its 4-core Linux measurements (README there), flop, turn and river: the earlier 150, 120 and 10 s times what
-//   flop leads and exact card removal cost on Linux (flop 3.0, turn 1.9, river 2.1), not yet timed on a Mac.
+//   exact card removal costs on Linux (flop 1.7, turn 1.9, river 2.1), not yet timed on a Mac. A flop solved with
+//   leads (PokerLocalSolver.mwFlopLeads: the hero is not the preflop raiser, or someone has led) takes
+//   MW3_LEADS_SECONDS, the 150 s times 3.0.
 // - Preflop answers come from charts. A no-limit hold'em line no chart covers goes to the preflop spot solver on the
 //   Mac (tools/preflop/spot.cjs): the chart solver again with this line in its tree, about 0.075 s per iteration per
 //   seat on the Mac (1,100 iterations, 0.01 s heads-up), plus, when the spot can reach the flop three-way, 40 sample
@@ -103,7 +105,7 @@ function spotSettings(hand,pending={}){
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
-const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[450,225,20],MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
+const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[255,225,20],MW3_LEADS_SECONDS=450,MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
 // Cloud solves (tools/cloud): when your Mac is offline or busy, a queued solve can go to a container on Modal that is
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge
@@ -174,7 +176,7 @@ function spotPlan(hand,where=spotUI.where){
  else{
   const three=pre&&preflopFlopPlayers(hand)===3?1:0,dest=bridge?{target:'mac',threads:localBridge.threads,load:localBridge.load,rate:0}:solveTarget(three>0,where),mac=dest,load=Math.min(1,Math.max(0,Number(mac?.load)||0)),scale=Math.min(4,Math.max(1,Math.pow(11/Math.max(1,mac?.threads||10),.8)))*(1+load);
   const start=hand.pot-hand.streetPaid.reduce((s,x)=>s+x,0),spr=Math.min(...live.map(i=>hand.stacks[i]+hand.streetPaid[i]))/Math.max(1,start),flop=1.3*(spr<7?32:spr<30&&c.seats>2?220:600);
-  const base=pre?preflopSeconds(hand,three,dest.big?CLOUD_SOLVER.big:null):kind==='mw3'?MW3_SECONDS[hand.street-1]:kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
+  const base=pre?preflopSeconds(hand,three,dest.big?CLOUD_SOLVER.big:null):kind==='mw3'?(hand.street===1&&PokerLocalSolver.mwFlopLeads(hand.actionLog,live,hand.actor)?MW3_LEADS_SECONDS:MW3_SECONDS[hand.street-1]):kind==='multiway'?MULTIWAY_SECONDS:kind==='plo'?(hand.street===1?PLO_FLOP_SECONDS:hand.street===2?PLO_TURN_SECONDS:RIVER_SECONDS):hand.street===1?flop:hand.street===2?TURN_SECONDS:RIVER_SECONDS;
   const learned=kind==='nlh'&&hand.street===1&&!bridge&&dest.target==='mac'&&learnedFlopReady(hand);
   plan={route:bridge?'texas':'mac',choices:!bridge&&cloudReady()&&macOnline(),target:dest.target,rate:dest.rate,boot:dest.boot||0,cloud:!!dest.cloud,big:!!dest.big,server:!!dest.server,learned,seed:learned?5:kind==='multiway'?base:base*scale,efforts:kind==='nlh'&&hand.street===1&&!learned||pre&&three>0,mayStop:kind==='multiway',wait:bridge?0:QUEUE_SECONDS+(dest.target==='mac'?queuedSeconds():dest.boot||0)};
   // Preflop solves need the bridge from PR #128: an older one is told how to update, here and in Solver settings.

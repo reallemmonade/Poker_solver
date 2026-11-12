@@ -139,6 +139,19 @@
  // A flop's runout budget: 96 turn x river cards for wide ranges (about 1,600 combos in all), more in proportion
  // for narrower ones, which solve faster (a squeeze pot's 230 combos get about 670), so a solve takes about as long.
  function mwRunouts(ranges){const total=ranges.reduce((s,r)=>s+Object.keys(r).length,0);return Math.min(2352,Math.max(MW_TREE.runouts,Math.round(MW_TREE.runouts*1600/Math.max(1,total))));}
+ // Whether a 3-way flop solve gets the tree where the two callers may bet first (leads). That tree takes about 1.7
+ // times the memory and time, so by default it is used only when leads matter for the decision being solved: the
+ // hero is not the preflop raiser (the hero can lead, or acts behind a possible lead), or the real line already has
+ // a flop bet by a caller. A raiser hero whom nobody has led into gets the tree without leads. mwLeads:true or false
+ // in the solve options overrides this either way. To make leads always on, change MW_LEADS_ALWAYS to true.
+ // actions: the hand's actions ({street, 0 preflop and 1 the flop; kind; seat}); seats: the three players; hero: the seat solved for.
+ const MW_LEADS_ALWAYS=false;
+ function mwRaiser(actions){return[...actions].reverse().find(a=>a.street===0&&(a.kind==='raise'||a.kind==='bet'))?.seat;}
+ function mwFlopLeads(actions,seats,hero,opt={}){
+  const raiser=mwRaiser(actions);if(!seats.includes(raiser))return false;
+  if(typeof opt.mwLeads==='boolean')return opt.mwLeads;
+  return MW_LEADS_ALWAYS||hero!==raiser||actions.some(a=>a.street===1&&a.kind==='bet'&&a.seat!==raiser);
+ }
  function mwSpec(data,ranges,opt,config,h,start){
   const current=data.board.length-2,street=current-1,live=h.living();assert(live.length===3,'The 3-way solver needs exactly three players.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,seats=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
@@ -151,10 +164,10 @@
    assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});
   }
   // On the flop the last preflop raiser (when still in) bets every size; the other two bet first with the lead
-  // size only (leadSizes; mwLeads:false leaves them no bet of their own, the tree before leads were added).
-  const raiser=[...data.actions].reverse().find(a=>a.street===0&&(a.kind==='raise'||a.kind==='bet'))?.seat,tree=MW_TREE[STREETS[street]],sizes={},caps={};
+  // size only (leadSizes), when mwFlopLeads says this solve needs leads; otherwise they have no bet of their own.
+  const raiser=mwRaiser(data.actions),tree=MW_TREE[STREETS[street]],sizes={},caps={};
   for(const [k,v] of Object.entries(tree)){sizes[k]={bet:v.bet.map(round4),raise:v.raise.map(round4)};caps[k]=MW_TREE.cap;}
-  const lead=street===0&&seats.includes(raiser)?{flop:seats.map(i=>i===raiser)}:{},leadSizes=lead.flop&&opt.mwLeads!==false?{flop:MW_TREE.lead.map(round4)}:{};
+  const lead=street===0&&seats.includes(raiser)?{flop:seats.map(i=>i===raiser)}:{},leadSizes=lead.flop&&mwFlopLeads(data.actions,seats,data.actor,opt)?{flop:MW_TREE.lead.map(round4)}:{};
   const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
   const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
   const list=seats.map(combos),heroIndex=seats.indexOf(data.actor);if(!list[heroIndex][hero])list[heroIndex][hero]=.005;
@@ -611,6 +624,6 @@
    solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,actionEVs,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,actionEVs,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,mwFlopLeads,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

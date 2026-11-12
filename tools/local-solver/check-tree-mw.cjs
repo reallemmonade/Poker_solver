@@ -54,6 +54,13 @@ h=hand({kind:'bet',target:300});s=L.spec(data(h),ranges,{});text=L.input(s,{outp
 ok(s.heroIndex===1&&s.path.length===1&&s.path[0].to===300&&/^path to:300$/m.test(text)&&/^bet flop 0 0.3333$/m.test(text),'a real lead of another size (3 bb) goes in as the line, next to the tree\'s lead size');
 h=hand();s=L.spec(data(h),ranges,{mwLeads:false});text=L.input(s,{output:'r.json'});
 ok(!s.leadSizes.flop&&/^lead flop 0 0\nlead flop 1 0\nlead flop 2 1$/m.test(text)&&!/^bet flop [012]/m.test(text),'mwLeads:false keeps the old tree (only the raiser bets first)');
+// Leads are on by default only where they matter (L.mwFlopLeads): a caller hero, or a real lead in the line.
+h=hand({kind:'check'},{kind:'check'});s=L.spec(data(h),ranges,{});text=L.input(s,{output:'r.json'});
+ok(h.actor===0&&s.heroIndex===2&&!s.leadSizes.flop&&/^lead flop 0 0\nlead flop 1 0\nlead flop 2 1$/m.test(text)&&!/^bet flop [012]/m.test(text)&&!L.mwFlopLeads(h.actionLog,s.seats,h.actor),'a raiser hero whom nobody led into builds the tree without leads');
+s=L.spec(data(h),ranges,{mwLeads:true});ok(s.leadSizes.flop?.length===1&&/^bet flop 0 0.3333\nlead flop 0 1$/m.test(L.input(s,{output:'r.json'})),'mwLeads:true gives a raiser hero the leads tree');
+h=hand({kind:'bet',target:250},{kind:'call'});s=L.spec(data(h),ranges,{});
+ok(h.actor===0&&s.leadSizes.flop?.length===1&&L.mwFlopLeads(h.actionLog,s.seats,h.actor),'a raiser hero facing a real lead builds the leads tree');
+h=hand({kind:'check'});s=L.spec(data(h),ranges,{});ok(h.actor===2&&s.heroIndex===1&&s.leadSizes.flop?.length===1&&L.mwFlopLeads(h.actionLog,s.seats,h.actor)&&!L.mwFlopLeads(h.actionLog,s.seats,h.actor,{mwLeads:false}),'a caller hero builds the leads tree');
 h=hand({kind:'check'},{kind:'check'},{kind:'check'});s=L.spec(data(h),ranges,{});
 ok(s.board.length===4&&!s.lead.turn&&!s.leadSizes.turn&&!/^lead /m.test(L.input(s,{output:'r.json'})),'turn solves are unchanged: anyone may bet every size');
 h=hand({kind:'check'},{kind:'bet',target:400});ok(!L.treeAnswer(result,data(h),h),'an off-tree size is not answered');

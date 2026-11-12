@@ -34,7 +34,7 @@ node tools/multiway-solver/test.cjs        # checks, a few minutes on 4 cores
 
 - **All-in:** always available as an extra bet or raise, and any bet that would commit over 2/3 of the stack becomes all-in.
 - **Raise cap:** one raise per street after the bet. After that, players can only call or fold.
-- **Leads:** on the flop the preflop raiser bets any of the three sizes. The other two may bet first too, with one size (1/3 of the pot) or all-in: a donk bet into the raiser, or a bet after the raiser checks. A lead can be raised like any bet. This costs about 1.7 times the memory and time of the tree without leads (measured below); the spec's `leadSizes` turns it on, and a spec without it (`mwLeads: false` in the app's solve options) gives the old tree, where only the raiser bets first. With no preflop raiser among the three, and on later streets, anyone may bet every size.
+- **Leads:** on the flop the preflop raiser bets any of the three sizes. The other two may bet first too, with one size (1/3 of the pot) or all-in: a donk bet into the raiser, or a bet after the raiser checks. A lead can be raised like any bet. This costs about 1.7 times the memory and time of the tree without leads (measured below); the spec's `leadSizes` turns it on, and a spec without it gives the tree where only the raiser bets first. The app sends leads only when they matter for the decision being solved: the hero is not the preflop raiser (the hero can lead, or acts behind a possible lead), or the real line already has a flop bet by a caller. A raiser hero whom nobody has led into gets the tree without leads, so that solve is not slowed down. `mwLeads: true` or `false` in the app's solve options overrides this either way. The choice is one function, `mwFlopLeads` in `studio/local-solver.js`; setting `MW_LEADS_ALWAYS` there to `true` makes leads the default for every flop. With no preflop raiser among the three, and on later streets, anyone may bet every size.
 - **The real line:** amounts already bet on the current street are added at their nodes, next to the tree's own sizes (a lead of half the pot joins the 1/3 lead).
 - **Later decisions on the street** are answered from the first solve's tree, which the app keeps up to 160 KB a record. A wide flop with leads has more decisions than fit (79 of 97 kept on the flop measured below; all 57 without leads), so the app keeps the lines most likely to be played and solves again on the rest.
 
@@ -51,9 +51,9 @@ The same solves before and after, on this repository's 4-core Linux container wi
 | Flop Ks9h4d, BTN/SB/BB (416, 700, 525), 8 × 6 runouts, 100 iterations | Memory (peak RSS) | Time, 1 thread | Exploitability |
 | --- | --- | --- | --- |
 | Before: only the raiser bets first, independent removal (`exact_removal 0`) | 743 MB | 262 s | 2.04% |
-| Exact removal, no leads | 743 MB | 445 s (1.70×) | 2.12% |
+| Exact removal, no leads (what the app sends for a raiser hero nobody led into) | 743 MB | 445 s (1.70×) | 2.12% |
 | Leads, independent removal | 1,273 MB (1.71×) | 449 s (1.72×) | 2.60% |
-| Leads and exact removal (what the app sends) | 1,273 MB (1.71×) | 780 s (2.98×) | 2.26% (2.40% on the repeat) |
+| Leads and exact removal (what the app sends for a caller hero, or after a lead) | 1,273 MB (1.71×) | 780 s (2.98×) | 2.26% (2.40% on the repeat) |
 
 | Exact removal on later streets | Memory | Before | After |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ The same solves before and after, on this repository's 4-core Linux container wi
 
 ### Earlier measurements
 
-Measured before leads and exact removal (the first row of the table above), with all 4 cores free (about twice one core's throughput). An M3 Pro with 11 cores should be about 4–5 times faster, as for the PLO solver. For what the app sends now, multiply flop times by about 3 and flop memory by 1.7, turn times by about 1.9 and river times by about 2.
+Measured before leads and exact removal (the first row of the table above), with all 4 cores free (about twice one core's throughput). An M3 Pro with 11 cores should be about 4–5 times faster, as for the PLO solver. For what the app sends now, multiply flop times by about 1.7 without leads (a raiser hero nobody led into) or by about 3 and flop memory by 1.7 with them, turn times by about 1.9 and river times by about 2.
 
 | Spot (combos: first, second, third to act) | Runouts | Memory (peak RSS) | 100 iterations | 200 iterations | 300 iterations |
 | --- | --- | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ Measured before leads and exact removal (the first row of the table above), with
 
 Exploitability is in percent of the pot. Times include the best-response check every 20 iterations.
 
-- **Mac:** at the app's flop target (1% of the pot, about 170 iterations for the widest pots) a BTN/SB/BB flop was estimated at 1.5 to 2 minutes, a turn at about 2 minutes, a river at seconds. Scaled by the ratios above that is 4.5 to 6 minutes for a flop and about 4 for a turn, not yet timed on a Mac. The app's estimates (`MW3_SECONDS` in `studio/spot-ui.js`: 450, 225 and 20 s) start there and correct themselves after each solve.
+- **Mac:** at the app's flop target (1% of the pot, about 170 iterations for the widest pots) a BTN/SB/BB flop was estimated at 1.5 to 2 minutes, a turn at about 2 minutes, a river at seconds. Scaled by the ratios above that is 2.5 to 3.5 minutes for a flop without leads, 4.5 to 6 with them, and about 4 for a turn, not yet timed on a Mac. The app's estimates in `studio/spot-ui.js` follow the tree being solved: `MW3_SECONDS` (255, 225 and 20 s for a flop without leads, a turn and a river) and `MW3_LEADS_SECONDS` (450 s for a flop with leads). They start there and correct themselves after each solve.
 - **How many runouts** (measured before leads)**:** on the BTN/SB/BB flop the button's strategy after two checks, summed over its range, was 64/21/12/2% (check, 1/3, 2/3, 1.5x) with 48 runouts, 68/19/12/1% with 96, and 72/16/11/2% with 160. Frequencies move a few points between budgets. Single hands' mixes differ more (about 22% between 96 and 160 runouts), mostly among hands close to indifferent. So 96 is a fair working budget for live answers, and a library run should use more where time allows (`--runouts`).
 - **Narrow ranges get more runouts.** The app scales the budget with the ranges: 96 runouts for about 1,600 combos in all, proportionally more for narrower ranges, up to every card. A squeeze pot's 230 combos get about 670 runouts and still solve in a few minutes here.
 - **Every card on a wide flop** needed about 59 GB before leads (88 GB with three sizes on every street), and about 1.7 times that with them, so it is out of reach of an 18 GB Mac.
