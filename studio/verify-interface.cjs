@@ -121,7 +121,17 @@ assert.equal(labels({kind:'bet',min:1,max:75.3,allIn:75.3,effective:61,pot:66,cu
  assert.ok(c.every((x,i)=>!i||x<c[i-1]),'Bigger flop bets do not fold more: '+c);assert.ok([150,200,300,600].every((b,i)=>Math.abs(c[i]-base*mdf(b))<1e-6),'Flop continue share misses MDF: '+c);
  const fold=a=>{const w=at(a),r=PL.aggregate(spot,flop,w.path,w.k,w.wide);return r.freq[0];},small=[33,30,20,10,5,1],fs=small.map(fold),alpha=b=>b/(b+100);
  assert.ok(fs.every((x,i)=>x>=0&&(!i||x<fs[i-1]))&&small.every((b,i)=>Math.abs(fs[i]-fs[0]*alpha(b)/alpha(33))<1e-6),'Smaller flop bets fold less, by the bluff break-even ratio: '+fs);
- pass('Off-tree flop sizes map pseudo-harmonically between solved sizes, clamp at the ends, jams take the all-in, bigger prices tighten toward MDF and smaller ones widen as an approximate answer');}
+ // As the app serves it (walk's result priced by the solved sizes around the real one): a library that folds 30%, 45%, 65% and
+ // 80% to 1/3, 2/3, 1.5x pot and the all-in.
+ const F={'BET 33':.3,'BET 66':.45,'BET 150':.65,'BET 1000':.8},flop2={nodes:[flop.nodes[0],flop.nodes[1],...bets.map(b=>({path:'CHECK/'+b,player:'oop',actions:['FOLD','CALL'],table:table(()=>[F[b],1-F[b]],2)}))]},spot2={...spot,flops:{[key]:flop2}};
+ const w2=a=>PL.walk(flop2,Object.assign([{kind:'check'},{kind:'bet',amount:a}],{pot:100,stack:1000}),1),served=a=>PL.aggregate(spot2,flop2,w2(a).path,w2(a)).freq[0],line=(a,lo,hi)=>F['BET '+lo]+(F['BET '+hi]-F['BET '+lo])*(alpha(a)-alpha(lo))/(alpha(hi)-alpha(lo)),near=(x,y)=>Math.abs(x-y)<.004;
+ assert.ok([33,66,150].every(a=>near(served(a),F['BET '+a])),'Solved flop sizes are served as solved');
+ assert.ok([40,45,50,60].every(a=>near(served(a),line(a,33,66)))&&[80,100,120].every(a=>near(served(a),line(a,66,150))),'Between two solved flop sizes the fold share lies on the line between theirs: '+[40,45,50,60,80,100,120].map(served));
+ assert.ok(Math.abs(served(47)-served(48))<.01&&Math.abs(served(99)-served(100))<.01,'No step where the mapping switches from one solved size to the next');
+ assert.ok(near(served(300),1-.35*mdf(300))&&near(served(600),.8)&&near(served(900),.8),'Above the largest solved size the defence tightens toward MDF, up to the all-in\'s fold share: '+[300,600,900].map(served));
+ assert.ok(near(served(10),.3*alpha(10)/alpha(33)),'Below the smallest solved size the fold share scales by the break-even ratio');
+ assert.deepEqual([45,50,300,10,66].map(a=>{const w=w2(a),nodes=new Map(flop2.nodes.map(n=>[n.path,n]));return PL.price(w,nodes,PL.COMBOS.map(()=>1)).fit||null;}),['between','between','capped','nearest',null]);assert.ok([45,50,300,10].every(a=>w2(a).offTree&&w2(a).substituted)&&!w2(66).offTree,'Priced answers stay approximate');
+ pass('Off-tree flop sizes map pseudo-harmonically between solved sizes, clamp at the ends, jams take the all-in; between two solved sizes the defence is read off the line between them, above the largest it tightens toward MDF up to the all-in, below the smallest it widens, always as an approximate answer');}
 // A flop library answer carries both players' ranges at the node as range text, so the analysis draws their grids:
 // the bettor keeps only the hands that bet (pairs here) and the caller keeps the chart's weights.
 {const PL=require('./postflop-library.js'),PF=require('./preflop.js'),S=require('./spot-solver.js'),key='Kd8s3c',board=G.Core.cards(key),live=PL.COMBOS.map((cs,i)=>[i,cs]).filter(([,cs])=>!cs.some(c=>board.includes(c)));

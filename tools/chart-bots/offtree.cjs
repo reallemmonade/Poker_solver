@@ -8,8 +8,9 @@
 //  2. Preflop 3-bet sizes, answered by the opener.
 //  3. Flop bet sizes (5% of the pot to all-in) through PokerPostflopLibrary's walk(), which maps
 //     a bet between solved sizes pseudo-harmonically (clamped at the ends), and aggregate() for the
-//     answering range, tightened toward MDF when the real price is bigger than the node's and
-//     widened (fold share scaled by the bluff break-even ratio) when it is smaller.
+//     answering range as the app serves it (PokerPostflopLibrary.price): between two solved sizes its
+//     fold share lies on the line between theirs, above the largest it tightens toward MDF up to the
+//     all-in's fold share, below the smallest it widens by the bluff break-even ratio.
 //  4. Depths with no chart (30bb, 70bb, 130bb ...): the whole preflop strategy the app serves
 //     there (via nearest) is written into that depth's own game, and its NashConv measured in
 //     the chart model. Exact charts score about 0.0004 bb/hand. The same probe at a depth that has a
@@ -18,6 +19,13 @@
 //     stored row, or the run fails (exit 1).
 // "Auto-profit" compares how often everyone folds with the share a pure bluff needs to break
 // even (risk / (risk + pot)); above it, raising any two cards at that size wins outright.
+// On the flop that share is not a bound: the bettor's weakest hands are worth something checked
+// (they see a turn), so a solved defence may fold more, and the libraries do, by up to 15 points at
+// their own solved sizes. So a flop size the library was not solved for is flagged only when it folds
+// more over the break-even share than the solved sizes on either side of it do (as the preflop sweeps
+// compare with the chart's own size). A solved size 10 or more points over is listed as "solved
+// over-fold": the library's own answer, which tools/postflop/balance-check.cjs warns about at 10 and
+// stops grading at 25.
 //   node tools/chart-bots/offtree.cjs [--library ...] [--quick] [--calibration file] [--jobs 4] [--out dir]
 //        [--kinds open,3bet,flop,depth] [--seats 6] [--depths 20,100] [--modes cash]   (the last three filter the preflop probes)
 const path=require('path'),L=require('./lib.cjs'),C=require('./coverage.cjs');
@@ -84,28 +92,36 @@ function sweep(packs,cfg,{opener,threeBettor=null,sizes,label}){
  return{label,rows,flags};
 }
 
-// 3: flop bet sizes for one spot.
+// 3: flop bet sizes for one spot. Sizes under the 1bb minimum bet cannot be made and sizes of the whole stack or
+// more are the all-in, so both are skipped; 4x to 13x pot fill the gap up to the all-in in deep pots, so neighbouring
+// rows are neighbouring prices.
+const FLOP_MIN_BET=100,FLOP_OVER=.05,FLOP_BEYOND=.02,FLOP_SOLVED_OVER=.10;
 function flopSweep(spot,o){
  const keys=Object.keys(spot.flops),pick=keys.filter((_,i)=>i%Math.max(1,Math.floor(keys.length/(o.quick?4:12)))===0).slice(0,o.quick?4:12);
- const fracs=[.05,.1,.15,.2,.25,.3,.33,.4,.5,.6,.66,.75,.85,1,1.25,1.5,2,2.5,3,'jam'],rows=[],flags=[];
+ const fracs=[.05,.1,.15,.2,.25,.3,.33,.4,.5,.6,.66,.75,.85,1,1.25,1.5,2,2.5,3,4,6,9,13,'jam'].filter(fr=>fr==='jam'||Math.round(fr*spot.pot)>=FLOP_MIN_BET&&Math.round(fr*spot.pot)<spot.stack),rows=[],flags=[];
+ const size=r=>r.fraction==='jam'?'all-in':Math.round(100*r.fraction)+'%';
  for(const line of [{name:'IP bets after a check',pre:[{kind:'check'}]},{name:'OOP leads',pre:[]}]){
   for(const fr of fracs){
    const agg={fold:0,call:0,raise:0,n:0,none:0,substituted:0,mapped:new Set()};
    for(const k of pick){const flop=spot.flops[k],amount=fr==='jam'?spot.stack:Math.round(fr*spot.pot);
-    let w;try{w=PL.walk(flop,Object.assign([...line.pre,{kind:'bet',amount,allIn:fr==='jam'||amount>=spot.stack}],{pot:spot.pot,stack:spot.stack}),1,100);}catch(e){w=null;agg.error=e.message;}
+    let w;try{w=PL.walk(flop,Object.assign([...line.pre,{kind:'bet',amount,allIn:fr==='jam'}],{pot:spot.pot,stack:spot.stack}),1,FLOP_MIN_BET);}catch(e){w=null;agg.error=e.message;}
     if(!w||!w.node){agg.none++;continue;}
-    // The answering range as the app serves it: a bigger price than the node's tightens it (walk's k), a smaller one widens it (wide).
-    const a=PL.aggregate(spot,flop,w.path,w.k,w.wide);if(!a){agg.none++;continue;}
+    // The answering range as the app serves it: walk's result prices the node from the solved sizes around the real one.
+    const a=PL.aggregate(spot,flop,w.path,w);if(!a){agg.none++;continue;}
     agg.n++;if(w.substituted)agg.substituted++;agg.mapped.add(w.path.split('/').pop());
     a.actions.forEach((x,i)=>{const kind=x==='FOLD'?'fold':x==='CALL'?'call':'raise';agg[kind]+=a.freq[i];});
    }
-   const n=agg.n||1;rows.push({line:line.name,fraction:fr,answered:agg.n/pick.length,fold:agg.fold/n,call:agg.call/n,raise:agg.raise/n,mappedTo:[...agg.mapped].map(b=>{const c=+b.split(' ')[1];return b.split(' ')[0]+' '+(Math.round(100*c/spot.pot))+'%';}),alpha:fr==='jam'?spot.stack/(spot.stack+spot.pot):fr/(1+fr)});
+   const n=agg.n||1,alpha=fr==='jam'?spot.stack/(spot.stack+spot.pot):fr/(1+fr);rows.push({line:line.name,fraction:fr,answered:agg.n/pick.length,solved:agg.n>0&&!agg.substituted,fold:agg.fold/n,call:agg.call/n,raise:agg.raise/n,mappedTo:[...agg.mapped].map(b=>{const c=+b.split(' ')[1];return b.split(' ')[0]+' '+(Math.round(100*c/spot.pot))+'%';}),alpha,over:agg.fold/n-alpha});
   }
   const lr=rows.filter(r=>r.line===line.name);
   for(let i=0;i<lr.length;i++){const r=lr[i];
-   if(r.answered<.5)flags.push({kind:'no answer',text:`${spot.label}, ${line.name} ${r.fraction==='jam'?'all-in':Math.round(100*r.fraction)+'% pot'}: no library answer (${L.pct(1-r.answered,0)} of sampled flops)`});
-   else if(r.fold>r.alpha+.05)flags.push({kind:'auto-profit',text:`${spot.label}, ${line.name} ${r.fraction==='jam'?'all-in':Math.round(100*r.fraction)+'% pot'}: answered as ${r.mappedTo.join('/')}, folds ${L.pct(r.fold)} but a bluff needs only ${L.pct(r.alpha)} folds`,margin:r.fold-r.alpha});
-   const p=lr[i-1];if(p&&p.answered>=.5&&r.answered>=.5&&Math.abs(r.fold-p.fold)>.1)flags.push({kind:'jump',text:`${spot.label}, ${line.name}: fold share jumps ${L.pct(p.fold,0)}→${L.pct(r.fold,0)} between ${Math.round(100*p.fraction)}% and ${r.fraction==='jam'?'all-in':Math.round(100*r.fraction)+'%'} pot`});
+   if(r.answered<.5)flags.push({kind:'no answer',text:`${spot.label}, ${line.name} ${size(r)==='all-in'?'all-in':size(r)+' pot'}: no library answer (${L.pct(1-r.answered,0)} of sampled flops)`});
+   else if(r.solved){if(r.over>FLOP_SOLVED_OVER)flags.push({kind:'solved over-fold',text:`${spot.label}, ${line.name} ${size(r)==='all-in'?'all-in':size(r)+' pot'} (a solved size): folds ${L.pct(r.fold)} where a bluff needs ${L.pct(r.alpha)} folds`,margin:r.over});}
+   else{
+    // The solved sizes on either side (answered ones); r.near is the larger of their margins over the break-even share.
+    const ok=x=>x.solved&&x.answered>=.5,lo=lr.slice(0,i).reverse().find(ok),hi=lr.slice(i+1).find(ok);r.near=Math.max(lo?lo.over:-1,hi?hi.over:-1);
+    if(r.over>FLOP_OVER&&r.over>r.near+FLOP_BEYOND)flags.push({kind:'auto-profit',text:`${spot.label}, ${line.name} ${size(r)} pot: answered as ${r.mappedTo.join('/')}, folds ${L.pct(r.fold)} but a bluff needs only ${L.pct(r.alpha)} folds (margin ${L.pct(r.over)}; the solved sizes around it are at most ${L.pct(r.near)} over)`,margin:r.over});}
+   const p=lr[i-1];if(p&&p.answered>=.5&&r.answered>=.5&&Math.abs(r.fold-p.fold)>.1)flags.push({kind:'jump',text:`${spot.label}, ${line.name}: fold share jumps ${L.pct(p.fold,0)}→${L.pct(r.fold,0)} between ${size(p)} and ${size(r)}${size(r)==='all-in'?'':' pot'}`});
   }
  }
  return{spot:spot.id,label:spot.label,tree:spot.tree,flops:pick,rows,flags};
@@ -198,8 +214,8 @@ const failedControls=res=>res.filter(r=>r.kind==='depth'&&r.control&&!r.control.
 
 function report(lib,res){
  const flags=res.flatMap(r=>r.flags||[]),by=k=>flags.filter(f=>f.kind===k);
- let md=`# Off-tree probe (${lib.version})\n\nSizes the charts were not solved for, fed through the app's own mapping (PokerPreflop.nearest for preflop raises, PokerPostflopLibrary walk/aggregate for flop bets). Auto-profit: everyone folds more often than a pure bluff of that size needs (risk / (risk + pot)), so raising any two cards at that size wins before any equity.\n\n`;
- md+=`Flags: ${['no answer','jump','auto-profit','crash'].map(k=>by(k).length+' '+k).join(', ')}.\n\n`;
+ let md=`# Off-tree probe (${lib.version})\n\nSizes the charts were not solved for, fed through the app's own mapping (PokerPreflop.nearest for preflop raises, PokerPostflopLibrary walk/aggregate for flop bets). Auto-profit: everyone folds more often than a pure bluff of that size needs (risk / (risk + pot)), so raising any two cards at that size wins before any equity. On the flop a solved defence may fold more than that share (the bettor's weakest hands are worth something checked), so an unsolved flop size is flagged only when it is ${100*FLOP_OVER} points over and more than ${100*FLOP_BEYOND} points further over than the solved sizes on either side of it; a solved size ${100*FLOP_SOLVED_OVER} or more points over is a "solved over-fold", the library's own answer (tools/postflop/balance-check.cjs warns at 10 and stops grading at 25).\n\n`;
+ md+=`Flags: ${['no answer','jump','auto-profit','solved over-fold','crash'].map(k=>by(k).length+' '+k).join(', ')}.\n\n`;
  const pre=res.filter(r=>r.kind==='open'||r.kind==='3bet');
  md+=`## Preflop raise sizes\n\n`;
  for(const r of pre){
@@ -211,7 +227,7 @@ function report(lib,res){
  md+=`## Flop bet sizes\n\n`;
  for(const r of res.filter(r=>r.kind==='flop')){
   md+=`### ${r.label}\n\nSolved sizes: flop bet ${r.tree?.flop?.bet?.join('/')}% , raise ${r.tree?.flop?.raise?.join('/')}%; ${r.flops.length} solved flops sampled.\n\n`;
-  md+=L.mdTable(['line','bet % pot','answered','mapped to','fold','call','raise','bluff needs'],r.rows.map(x=>[x.line,x.fraction==='jam'?'all-in':Math.round(100*x.fraction),L.pct(x.answered,0),x.mappedTo.join(' '),x.answered?L.pct(x.fold,0):'–',x.answered?L.pct(x.call,0):'–',x.answered?L.pct(x.raise,0):'–',L.pct(x.alpha,0)]))+'\n';
+  md+=L.mdTable(['line','bet % pot','answered','mapped to','fold','call','raise','bluff needs'],r.rows.map(x=>[x.line,x.fraction==='jam'?'all-in':Math.round(100*x.fraction),L.pct(x.answered,0),x.mappedTo.join(' ')+(x.solved?' (solved)':''),x.answered?L.pct(x.fold,0):'–',x.answered?L.pct(x.call,0):'–',x.answered?L.pct(x.raise,0):'–',L.pct(x.alpha,0)]))+'\n';
  }
  md+=`## Depths without a chart\n\nThe whole preflop strategy the app serves at that depth (the nearest chart, raise sizes mapped and kept within the table's legal range) written into that depth's own game and measured in the chart model. Rows come from an unfiltered copy of the charts (rows the app withholds as off-path are served too), so NashConv measures the depth and size mapping; a row with a chart of its own is the control: the app must serve that chart, so every row must be the chart's stored row and it must score the chart's claimed NashConv (at most ${CONTROL_FACTOR} x the claim + ${CONTROL_SLACK}); the run fails otherwise. An action the app offers that this depth's tree lacks is not dropped: the borrowed overcall goes back to the fold it was taken from, and a raise where the tree only lets the seat call all-in is that call. Decisions where even the unfiltered charts have no row (lines the stand-in chart's tree lacks) are filled passively (check or call) or by folding (check or fold); the two NashConv numbers bracket what those holes cost. "Unanswered" counts decisions per 100 hands, played along the served strategy, where the app itself gives no chart answer.\n\n`;
  md+=L.mdTable(['table','depth','own chart','NashConv (passive / fold fill)','chart claims','control','largest seat gain','no stored answer /100 hands','app unanswered /100 hands','rows from another depth or size','where the holes are (/100 hands)'],res.filter(r=>r.kind==='depth').map(r=>[`${r.seats}-max ${r.format}`,r.depth,r.hasChart?'yes':'no',`${L.f(r.nashConv,4)} / ${L.f(r.nashConvFold,4)}`,r.claimed===null?'–':L.f(r.claimed,4),!r.control?'–':!r.control.ok?`FAILED (${r.control.rowsOff} rows differ from the chart${r.control.comparable?', NashConv limit '+r.control.limit:''})`:r.control.comparable?'ok':'rows ok; NashConv not comparable (no calibration file)',L.f(Math.max(...r.gains),3),L.f(r.holesPer100,2),L.f(r.unansweredPer100,2),L.pct(r.mappedShare,0),(r.holeSpots.length?r.holeSpots:r.missing).map(([k,v])=>`${k} (${v})`).slice(0,3).join('; ')]))+'\n';
