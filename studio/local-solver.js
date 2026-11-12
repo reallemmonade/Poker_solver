@@ -73,7 +73,9 @@
    const out={};for(const [k,w]of Object.entries(avg))if(w/peak>.005)out[k]=round(w/peak);return out;};
   const hero=data.heroCards.slice().sort((a,b)=>a-b).map(C.cardName).join(''),heroClass=C.handClass(data.heroCards),rangeIp=classes(ip),rangeOop=classes(oop),heroRange=data.actor===ip?rangeIp:rangeOop;
   if(!heroRange[heroClass])heroRange[heroClass]=.01;
-  return{version:1,board:data.board.map(C.cardName),pot,stack,sizes,allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,
+  // actionEVs: the app asking can grade on action EVs (options.actionEVs, set by studio/spot-ui.js). Only then does
+  // the bridge let the solver report them; a request without it gets exactly what a bridge from before them returned.
+  return{version:1,board:data.board.map(C.cardName),pot,stack,sizes,allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,...opt.actionEVs===true?{actionEVs:true}:{},
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||1)),maxIterations:Math.min(1000,Math.max(10,Number(opt.localIterations)||200))};
  }
 
@@ -200,6 +202,7 @@
   assert(num(s.accuracy,.1,5)&&Number.isInteger(s.maxIterations)&&num(s.maxIterations,10,1000),'Invalid accuracy settings.');
   assert(Array.isArray(s.path)&&s.path.length<=12&&s.path.every(p=>['check','call','bet','raise'].includes(p.kind)&&(p.amount===undefined||num(p.amount,0,1e8))),'Invalid action path.');
   assert(typeof s.hero==='string'&&COMBO.test(s.hero),'Invalid hero hand.');
+  assert(s.actionEVs===undefined||s.actionEVs===true,'Invalid action EV flag.');
   return s;
  }
 

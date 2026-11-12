@@ -62,6 +62,8 @@ Options:
 
 Only decisions before the next card carry them (the street the app reads). They cost one more pass over the tree after the solve, and make the dump about half as large again. The root's `evs` (each hand's best-response EV at the root, used to calibrate the preflop model) is unchanged.
 
+**Only for an app that asks.** The app sends `actionEVs: true` with the spot (and in a queued job's options) when it can grade on them. Without the flag the bridge runs the solver with `TEXASSOLVER_ACTION_EVS=off`, removes any EVs a solver wrote anyway, and replies exactly as a bridge from before them did. An app from before chip-EV grading (an installed copy that has not updated yet) reads a queue or cloud answer made by the bridge's copy of the app code; non-zero EVs there would look to it like an estimate it cannot grade, and the decision would go ungraded instead of being graded on frequency. `check-bridge.cjs` checks this.
+
 **Why the average strategy.** On real river and turn solves the two kinds agree to about 0.01 to 0.1 bb at every node the other player reaches more than 1% of the time, and an action the solver plays loses about 0.02 bb there. On a line the other player takes under 1% of the time, both are noise, like the frequencies at that node.
 
 **What the app does with them** (`studio/local-solver.js` `actionEVs`):
@@ -74,6 +76,7 @@ Only decisions before the next card carry them (the street the app reads). They 
 **When it still grades on frequency** (an action played 5% or more is correct, as before), and the trace says why (`evSkipped`):
 
 - the solver was built before this patch (the bridge says so once in its log; run the install script again);
+- the app that asked is from before chip-EV grading (it sent no `actionEVs` flag);
 - the table pays prizes (ICM): the EVs are chips;
 - the other player takes the line under 1% of the time in the solve;
 - the solve stopped before its accuracy target.

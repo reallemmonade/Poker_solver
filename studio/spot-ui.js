@@ -68,13 +68,15 @@ function renderSpotRangeEditors(){
  host.querySelectorAll('input').forEach(el=>el.onchange=()=>{spotUI.rangeValues[+el.id.split('-')[1]]=el.value.trim();spotUI.last=null;renderPlay();});
 }
 // Fixed solve budgets per route (see spotPlan), generous rather than user-tunable. A spot sent to the Mac carries
+// actionEVs: this app can grade on TexasSolver's action EVs, so the bridge or cloud may send them (an app from before
+// chip-EV grading does not ask, and gets the frequencies-only answer it knows how to grade).
 // the bridge settings; the Mac's bridge fills in its own address. Phones and tablets get the memory a phone tab can hold.
 function spotSettings(hand,pending={}){
  const isQuiz=pending.kind==='quiz'||pending.kind==='quizPrepare',same=hand===state.hand,small=typeof smallMemoryDevice==='function'&&smallMemoryDevice(),plan=pending.plan||(isQuiz?null:spotPlan(hand)),texas=plan?.route==='texas'||plan?.route==='mac';
  const pinned=isQuiz?pending.quizQuestion?.solveOptions:null;const rangedPinned=pinned&&pending.quizQuestion?.rangeAnchor!==undefined&&hand.actionLog.length>pending.quizQuestion.rangeAnchor?{...pinned,ranges:Array(hand.n).fill('')}:pinned;
  const effort=SOLVE_EFFORTS[pending.effort]?pending.effort:'standard',url=$('spotLocalSolver')?.value||'',preflopEffort=hand.street===0?{preflopEffort:effort}:{};
  return PokerSpot.options(rangedPinned||{rangeMode:$('spotRangeMode')?.value||'auto',ranges:same?spotUI.rangeValues.slice():Array(hand.n).fill(''),iterations:200000,milliseconds:180000,maxInfos:150000,maxJointDeals:small?100000:500000,exactMemoryMB:small?256:1024,preparationMilliseconds:60000,approximate:false,
-  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6,...preflopEffort}:{},
+  localSolver:plan?.route==='texas'?url:'',...texas?{forceLocal:true,actionEVs:true,localAccuracy:hand.street===1?SOLVE_EFFORTS[effort].accuracy:.5,localIterations:1000,bridgeMilliseconds:1.8e6,...preflopEffort}:{},
   samples:Math.max(2000,Number(pending.samples)||2000),tolerance:.001,rootSizes:same?String($('spotRootSizes')?.value||'').split(/[\s,;]+/).filter(Boolean).map(Number):[],abstraction:{...(pending.referenceModel?.abstraction||state.abstraction),...(state.spotSizing||{})}});
 }
 // Which solver answers this spot, where it runs and roughly how long it takes (measured 2026-10-28):

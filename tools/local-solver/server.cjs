@@ -72,8 +72,12 @@ function solve(spec,learning=false){
   // The PLO and 3-way solvers stop themselves a little before the bridge's timeout (or the price cap) and still
   // write their result. TexasSolver stops after its current iteration once the stop file exists, and dumps as usual.
   const time=budget(args.timeout),stopFile=path.join(dir,'stop');
+  // Action EVs are opt-in (spec.actionEVs, sent by an app that can grade on them). An app from before chip-EV grading
+  // does not ask: its solve runs with them off and anything a solver wrote anyway is removed, so it gets exactly what
+  // a bridge from before them returned and keeps grading on frequency.
+  const wantEvs=!own&&spec.actionEVs===true,dropEvs=node=>{if(!node||typeof node!=='object')return;delete node.action_evs;delete node.action_evs_reach;delete node.action_evs_kind;for(const k of ['childrens','dealcards'])if(node[k]&&typeof node[k]==='object')for(const child of Object.values(node[k]))dropEvs(child);};
   fs.writeFileSync(file,own?L.input(spec,{threads:args.threads,output:'result.json',memoryMB:args.memory,timeLimit:Math.min(args.timeout*.95,time.soft)}):L.input(spec,{threads:args.threads,output:'result.json'}));
-  const started=Date.now(),child=spawn(bin,own?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,TEXASSOLVER_STOP_FILE:stopFile}});
+  const started=Date.now(),child=spawn(bin,own?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,TEXASSOLVER_STOP_FILE:stopFile,...wantEvs?{}:{TEXASSOLVER_ACTION_EVS:'off'}}});
   const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null,learning};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
   const soft=setTimeout(()=>{try{fs.writeFileSync(stopFile,'');}catch{}},time.soft*1000);
   const timer=setTimeout(()=>child.kill('SIGKILL'),time.hard*1000);child.on('close',()=>clearTimeout(soft));
@@ -84,11 +88,11 @@ function solve(spec,learning=false){
    clearTimeout(timer);if(Date.now()>=stopAt-5000)capHit=true;const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
    try{
     if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(cancelled?'The solve was cancelled.':code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
-    // The dump goes to the app whole. A TexasSolver built with texassolver-evs.patch puts each hand's EV for each action
-    // on every node of the street ("action_evs"), which the app grades on (studio/local-solver.js actionEVs); a build
-    // from before that has none, and its answers grade on frequency as they always did.
-    const tree=JSON.parse(fs.readFileSync(out,'utf8'));if(!own&&!tree.action_evs&&!warnedNoEvs){warnedNoEvs=true;console.log('TexasSolver here reports no action EVs, so its answers are graded on frequency. Run tools/local-solver/install-mac.sh again to rebuild it.');}
-    resolve({tree,iterations,exploitability,seconds,threads:args.threads,...own?{}:{actionEvs:!!tree.action_evs}});
+    // The dump goes to the app whole. When the app asked for them, a TexasSolver built with texassolver-evs.patch puts
+    // each hand's EV for each action on every node of the street ("action_evs"), which the app grades on
+    // (studio/local-solver.js actionEVs); a build from before that has none, and its answers grade on frequency.
+    const tree=JSON.parse(fs.readFileSync(out,'utf8'));if(!own&&!wantEvs)dropEvs(tree);if(wantEvs&&!tree.action_evs&&!warnedNoEvs){warnedNoEvs=true;console.log('TexasSolver here reports no action EVs, so its answers are graded on frequency. Run tools/local-solver/install-mac.sh again to rebuild it.');}
+    resolve({tree,iterations,exploitability,seconds,threads:args.threads,...wantEvs?{actionEvs:!!tree.action_evs}:{}});
    }catch(error){reject(error);}finally{fs.rmSync(dir,{recursive:true,force:true});}
   });
  });
