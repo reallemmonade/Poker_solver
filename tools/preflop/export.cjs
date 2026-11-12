@@ -30,7 +30,7 @@ function game({seats,stack,format,game='nlh',rake=0,rakeCap=3,limp=0,calibration
 // the lines of this chart only.
 function spotsFor(spots,chart){
  const out={};let n=0;
- for(const [k,f]of Object.entries(spots)){const [c,line]=k.split('|');if(c===chart){out[line]={...f.sharpness!==undefined?{realization:f.realization,initiative:f.initiative,sharpness:f.sharpness,playTable:f.play}:{},...f.measured?{measured:f.measured}:{}};n++;}}
+ for(const [k,f]of Object.entries(spots)){const [c,line]=k.split('|');if(c===chart){out[line]={...f.sharpness!==undefined?{realization:f.realization,initiative:f.initiative,sharpness:f.sharpness,playTable:f.play}:{},...f.measured?{measured:f.measured,...f.step!==undefined?{step:f.step,prior:f.prior}:{}}:{}};n++;}}
  return n?out:null;
 }
 
