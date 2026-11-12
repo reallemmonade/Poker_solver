@@ -20,9 +20,21 @@
  function raisePercent(target,facing,base){return 100*(target-facing)/(2*(base+facing));}
  const round=x=>Math.round(x*1e6)/1e6;
 
- // This street's actions between the two players left. A third player who folded here (the pot went heads-up mid-street)
- // put nothing in on this street, so that fold is not part of their line; a fold by one of the two left ends the hand.
- function streetActions(data,street,live){const acts=data.actions.filter(a=>a.street===street);return acts.filter(a=>!(a.kind==='fold'&&!live.includes(a.seat)&&acts.filter(b=>b.seat===a.seat).length===1));}
+ // This street's actions as the players still in (live, in postflop order) played them among themselves, for a pot that
+ // lost a player on this street (three-way to heads-up after a fold), and the chips that player left behind (dead; the
+ // caller adds them to the pot). A player who only checked or called before folding is left out and the rest stands.
+ // After a bet or raise by a player who then folded, everyone left has acted again, so only those later actions are
+ // kept, each read against the others' chips alone: the first to put chips in bets (a call of the folded player's bet
+ // becomes a bet of that amount), and a player ahead of that bettor in the order checks first.
+ function liveStreet(data,street,live){
+  const acts=data.actions.filter(a=>a.street===street);if(acts.every(a=>live.includes(a.seat)))return{acts,dead:0};
+  const paid={};let last=-1,level=0;const total=acts.map(a=>{if(a.kind==='bet'||a.kind==='raise')level=a.target;return a.kind==='call'?(Number.isFinite(a.target)&&a.target>0?a.target:level):a.target;});
+  acts.forEach((a,i)=>{if(live.includes(a.seat)||a.kind==='check'||a.kind==='fold')return;paid[a.seat]=total[i];if(a.kind!=='call')last=i;});
+  const dead=Object.values(paid).reduce((x,y)=>x+y,0),kept=acts.map((a,i)=>({...a,target:total[i]})).filter((a,i)=>live.includes(a.seat)&&i>last);if(last<0)return{acts:kept,dead};
+  const out=[];let facing=0;if(kept.length)for(const seat of live){if(seat===kept[0].seat)break;out.push({seat,street,kind:'check'});}
+  for(const a of kept){if(a.kind==='fold'||a.kind==='check')out.push(a);else if(a.target>facing){out.push({...a,kind:facing?'raise':'bet'});facing=a.target;}else out.push({...a,kind:'call'});}
+  return{acts:out,dead};
+ }
  // Builds the solver spec for the current decision, or explains why it cannot.
  function spec(data,ranges,opt={}){
   const config=G.normalize(data.config);if(config.variant==='PLO4')return ploSpec(data,ranges,opt,config);
@@ -34,7 +46,7 @@
   assert(!h.done&&h.actor===data.actor,'The selected spot is no longer an open decision.');
   const live=h.living();if(live.length===3)return mwSpec(data,ranges,opt,config,h,start);assert(live.length===2,'The local solver handles heads-up and three-way pots only.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
-  const street=current-1,pot=start.pot,base=pot/2,stack=Math.min(start.stacks[ip],start.stacks[oop]);
+  const street=current-1,line=liveStreet(data,current,[oop,ip]),pot=start.pot+line.dead,base=pot/2,stack=Math.min(start.stacks[ip],start.stacks[oop]);
   assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
   // Default tree: a small bet, a big bet and an overbet (1/3, 2/3 and 1.5x the pot) and all-in on the turn and the
   // river; on the flop, where memory is the limit, the small and the big bet, with one size on each later street
@@ -50,7 +62,7 @@
   let allinThreshold=LOCAL_TREE.allinThreshold;
   // Add the sizes actually used on this street so the real line exists in the tree.
   const path=[],paid={[ip]:0,[oop]:0};let facing=0;
-  for(const a of streetActions(data,current,live)){
+  for(const a of line.acts){
    const who=a.seat===ip?'ip':'oop',book=sizes[who][STREETS[street]];
    if(a.kind==='check')path.push({kind:'check'});
    else if(a.kind==='call'){path.push({kind:'call'});paid[a.seat]=facing;}
@@ -91,14 +103,14 @@
   assert(!h.done&&h.actor===data.actor,'The selected spot is no longer an open decision.');
   const live=h.living();assert(live.length===2,'The local solver handles heads-up pots only.');
   const firstAfterButton=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>firstAfterButton(a)-firstAfterButton(b));
-  const street=current-1,stack=Math.min(start.stacks[ip],start.stacks[oop]);assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
+  const street=current-1,line=liveStreet(data,current,[oop,ip]),stack=Math.min(start.stacks[ip],start.stacks[oop]);assert(stack>0,'Nobody has chips behind, so there is nothing left to solve.');
   const sizes={},caps={};for(let s=street;s<3;s++){sizes[STREETS[s]]={};caps[STREETS[s]]=PLO_TREE.cap[s];for(const who of ['ip','oop'])sizes[STREETS[s]][who]={bet:[PLO_TREE.bet[s]],raise:[PLO_TREE.raise]};}
-  const path=[];for(const a of streetActions(data,current,live)){assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}
+  const path=[];for(const a of line.acts){assert(a.kind!=='fold','The hand has already ended.');path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}
   const name=cs=>cs.slice().sort((a,b)=>b-a).map(C.cardName).join(''),hero=name(data.heroCards);
   const combos=seat=>{const rows=ranges.rows(seat),peak=Math.max(0,...rows.map(r=>r.prob??r.weight??0));assert(peak>0,'A player has an empty range.');const out={};for(const r of rows){const w=round4((r.prob??r.weight??0)/peak);if(w>=1e-4)out[name(r.cards)]=w;}return out;};
   const rangeIp=combos(ip),rangeOop=combos(oop),heroRange=data.actor===ip?rangeIp:rangeOop;
   if(!heroRange[hero])heroRange[hero]=.005;
-  return{version:1,game:'PLO4',board:data.board.map(C.cardName),pot:start.pot,stack,minBet:G.units(config.bb),sizes,caps,allinThreshold:PLO_TREE.allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,
+  return{version:1,game:'PLO4',board:data.board.map(C.cardName),pot:start.pot+line.dead,stack,minBet:G.units(config.bb),sizes,caps,allinThreshold:PLO_TREE.allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||.5)),maxIterations:Math.min(2000,Math.max(10,Number(opt.localIterations)||300))};
  }
  function validatePLO(s){
@@ -344,21 +356,22 @@
   return{v:1,board:s.board.slice(),pot:s.pot,stack:s.stack,ranges:{ip:s.rangeIp,oop:s.rangeOop},combos:{ip:(combos.ip||[]).join(','),oop:(combos.oop||[]).join(',')},...nodes.some(n=>n.ev)?{evHero:hero,evKind:tree.action_evs_kind==='best'?'best':'average',accuracy:s.accuracy}:{},nodes};
  }
  // One street's line as tree steps, the way spec builds the solved line: each action's kind and the chips it
- // adds, with who is in and out of position and the effective stack at the street's start. null unless heads-up.
+ // adds, with who is in and out of position and the effective stack at the street's start. null unless the street
+ // is heads-up, from its start or after the others folded on it (liveStreet).
  function streetLine(data,street){
-  const config=G.normalize(data.config),h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[],paid={};let start=null,facing=0;
-  const open=()=>{if(start)return;const live=h.living();if(live.length!==2)return start=false;const after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));start={ip,oop,stack:Math.min(h.stacks[ip],h.stacks[oop])};};
-  for(const a of data.actions){
-   if(h.street===street)open();
-   if(a.street===street){if(!start)return null;
-    if(a.kind==='check')path.push({kind:'check'});
-    else if(a.kind==='call'){path.push({kind:'call'});paid[a.seat]=facing;}
-    else if(a.kind==='fold')return null;
-    else{const target=a.target;path.push({kind:facing?'raise':'bet',amount:target-(paid[a.seat]||0),allIn:target>=start.stack});paid[a.seat]=target;facing=target;}}
-   h.act(a);
+  const config=G.normalize(data.config),h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[],paid={};let begin=null,facing=0;
+  const open=()=>{if(!begin&&h.street===street)begin={live:h.living(),stacks:h.stacks.slice()};};
+  for(const a of data.actions){open();h.act(a);}
+  open();if(!begin)return null;
+  const gone=new Set(data.actions.filter(a=>a.street===street&&a.kind==='fold').map(a=>a.seat)),live=begin.live.filter(i=>!gone.has(i));if(live.length!==2)return null;
+  const after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b)),stack=Math.min(begin.stacks[ip],begin.stacks[oop]);
+  for(const a of liveStreet(data,street,[oop,ip]).acts){
+   if(a.kind==='check')path.push({kind:'check'});
+   else if(a.kind==='call'){path.push({kind:'call'});paid[a.seat]=facing;}
+   else if(a.kind==='fold')return null;
+   else{const target=a.target;path.push({kind:facing?'raise':'bet',amount:target-(paid[a.seat]||0),allIn:target>=stack});paid[a.seat]=target;facing=target;}
   }
-  if(h.street===street)open();
-  return start?{...start,path,hand:h}:null;
+  return{ip,oop,stack,path,hand:h};
  }
  const treeMaps=new WeakMap();
  function treeNodes(saved){let m=treeMaps.get(saved);if(!m){m=new Map(saved.nodes.map(n=>[n.line,n]));treeMaps.set(saved,m);}return m;}
@@ -427,17 +440,18 @@
   return{v:1,game:'NLH3',board:s.board.slice(),pot:s.pot,stack:s.stack,seats:s.seats.slice(),combos,weights,nodes};
  }
  // The street's line as the 3-way solver plays it (mwSpec): the three players in postflop order at the street's
- // start, and each live player's action (street totals). null unless three play the street from its start.
- function mwLine(data){
-  const config=G.normalize(data.config),street=data.board.length-2,h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[];let seats=null;
+ // start, and each one's action (street totals). A fold by one of the three is a step too: the solver's tree plays
+ // the street on between the two left, so the kept tree answers them. null unless three play the street from its start.
+ function mwLine(data,street=data.board.length-2){
+  const config=G.normalize(data.config),h=new G.Hand(config,{runout:data.board.slice(config.boardCards.length),rng:G.rng(1)}),path=[];let seats=null;
   const open=()=>{if(seats||h.street!==street)return;const live=h.living();if(live.length!==3){seats=false;return;}const after=i=>(i-h.button+h.n)%h.n||h.n;seats=live.slice().sort((a,b)=>after(a)-after(b));};
-  for(const a of data.actions){open();if(a.street===street){if(!seats)return null;if(!seats.includes(a.seat)){if(a.kind!=='fold'&&a.kind!=='check')return null;}else{if(a.kind==='fold')return null;path.push(a.kind==='check'||a.kind==='call'?{kind:a.kind}:{kind:a.kind,to:a.target});}}h.act(a);}
-  open();return seats?{seats,path}:null;
+  for(const a of data.actions){open();if(a.street===street){if(!seats)return null;if(!seats.includes(a.seat)){if(a.kind!=='fold'&&a.kind!=='check')return null;}else path.push(a.kind==='check'||a.kind==='call'||a.kind==='fold'?{kind:a.kind,seat:a.seat}:{kind:a.kind,to:a.target});}h.act(a);}
+  open();return seats?{seats,path,folded:path.filter(p=>p.kind==='fold').map(p=>p.seat)}:null;
  }
  function mwWalk(saved,path){
   let map=treeMaps.get(saved);if(!map){map=new Map(saved.nodes.map(n=>[n.line,n]));treeMaps.set(saved,map);}
   const steps=[];let at='';
-  for(const step of path){const node=map.get(at);if(!node)return null;let i=-1;if(step.kind==='check'||step.kind==='call')i=node.actions.findIndex(a=>a.kind===step.kind);
+  for(const step of path){const node=map.get(at);if(!node)return null;let i=-1;if(step.kind==='check'||step.kind==='call'||step.kind==='fold')i=node.actions.findIndex(a=>a.kind===step.kind);
    else{const o=node.actions.map((a,k)=>({a,k})).filter(x=>x.a.kind===step.kind).sort((x,y)=>Math.abs(x.a.to-step.to)-Math.abs(y.a.to-step.to))[0];if(o&&Math.abs(o.a.to-step.to)<=Math.max(2,.01*step.to))i=o.k;}
    if(i<0)return null;steps.push({node,i});at=at?at+'/'+i:String(i);}
   return{line:at,node:map.get(at)||null,steps};
@@ -450,7 +464,7 @@
   const table=mwTable(saved,w.node),name=data.heroCards.slice().sort((a,b)=>b-a).map(C.cardName).join(''),key=table[name]?name:table[name.slice(2)+name.slice(0,2)]?name.slice(2)+name.slice(0,2):null;if(!key)return null;
   const {actions,probs,index}=mapMW(hand,w.node,table[key],null),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
   const q=result.solve,sources=new Map((q.rangeAssumptions||[]).map(r=>[r.seat,r.source])),rangeAssumptions=[];
-  for(let p=0;p<3;p++){const seat=line.seats[p],r=reachText(mwReach(saved,p,w.steps),p===w.node.player?key:null);if(!r)return null;rangeAssumptions.push({seat,range:r.text,combinations:r.combinations,source:(sources.get(seat)||'Solved range')+', narrowed by this street\'s actions with the solved frequencies'});}
+  for(let p=0;p<3;p++){const seat=line.seats[p];if(line.folded.includes(seat))continue;const r=reachText(mwReach(saved,p,w.steps),p===w.node.player?key:null);if(!r)return null;rangeAssumptions.push({seat,range:r.text,combinations:r.combinations,source:(sources.get(seat)||'Solved range')+', narrowed by this street\'s actions with the solved frequencies'});}
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:result.units||(hand.config.mode==='cash'?'bb':'prize units'),ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
    solve:{version:1,method:'local-multiway',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,evAvailable:false,rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
     warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+String(q.warning||'')}};
@@ -458,10 +472,22 @@
  // Both players' ranges for the next street's solve, narrowed by the kept street's whole line with the solved
  // frequencies, as combo ranges by seat ('' for everyone else); null when the line left the tree.
  function treeCarry(result,data,hero=null){
+  if(result?.solve?.tree?.game==='NLH3')return mwCarry(result.solve.tree,data,hero);
   const saved=result?.solve?.tree;if(!saved||saved.v!==1||saved.game)return null;const street=saved.board.length-2;if(data.board.length-2!==street+1||saved.board.join()!==data.board.slice(0,saved.board.length).map(C.cardName).join())return null;
   const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w||w.node||!line.path.length)return null;
   const ranges=Array(G.normalize(data.config).seats).fill(''),own=hero?comboKey(hero.cards):null;
   for(const [seat,who]of [[line.ip,'ip'],[line.oop,'oop']]){const list=treeCombos(saved,who),mine=own&&seat===hero.seat?list.find(c=>c===own||c===own.slice(2)+own.slice(0,2))||null:null,r=reachText(treeReach(saved,who,w.steps),mine);if(!r)return null;ranges[seat]=r.text;}
+  return ranges;
+ }
+
+ // The same from a kept 3-way street that one of the three folded on: the ranges of the two who saw the next street,
+ // narrowed by the street's whole line, for the heads-up solve there; null when the line left the kept tree. A street
+ // all three finished carries nothing (the next 3-way solve starts from the chart ranges, as before).
+ function mwCarry(saved,data,hero){
+  const street=saved.board.length-2;if(saved.v!==1||data.board.length-2!==street+1||saved.board.join()!==data.board.slice(0,saved.board.length).map(C.cardName).join())return null;
+  const line=mwLine(data,street);if(!line||line.seats.join()!==saved.seats.join()||line.folded.length!==1)return null;const w=mwWalk(saved,line.path);if(!w||w.node)return null;
+  const ranges=Array(G.normalize(data.config).seats).fill(''),own=hero?hero.cards.slice().sort((a,b)=>b-a).map(C.cardName).join(''):null;
+  for(let p=0;p<3;p++){const seat=line.seats[p];if(line.folded.includes(seat))continue;const mine=own&&seat===hero.seat?saved.combos[p].split(',').find(c=>c===own||c===own.slice(2)+own.slice(0,2))||null:null,r=reachText(mwReach(saved,p,w.steps),mine);if(!r)return null;ranges[seat]=r.text;}
   return ranges;
  }
 

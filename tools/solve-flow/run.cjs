@@ -16,16 +16,16 @@
 //   - a page error.
 //
 //   node tools/solve-flow/run.cjs [--hands 12] [--tables hu,3way,6max,9max] [--stacks 100] [--mode cash] [--style follow]
-//                                 [--seed 7] [--headed] [--keep] [--opens]
+//                                 [--seed 7] [--headed] [--keep] [--no-opens]
 // --stacks is a list each hand picks from (e.g. 10,20,40,100,200; "mixed" gives every seat its own), --mode cash, icm or
 // mix, --solver fake (default) or the path of a real TexasSolver console_solver (tools/local-solver/install-*.sh builds one
 // at tools/local-solver/TexasSolver/install/console_solver; real solves are slower and their answers are checked against
-// the libraries), --opens makes another seat open with a raise in half of the 3-way table's hands (see below), and --style how the hero plays: follow (mostly what the answer says), aggro, passive, random, or mix (a style a hand).
+// the libraries), --no-opens keeps every 3-way hand a limped pot (by default another seat opens with a raise in half of the 3-way table's hands, see below; --opens is still accepted), and --style how the hero plays: follow (mostly what the answer says), aggro, passive, random, or mix (a style a hand).
 // Writes every trace and a summary to solve-flow-report/ (git-ignored). Needs Playwright with Chromium, a C++
 // compiler for the 3-way solver, and the repo's npm install.
 const fs=require('fs'),os=require('os'),path=require('path'),http=require('http'),{spawn,execFileSync}=require('child_process');
 const FunkySpots=require('../../studio/funky-spots.js'),repo=path.resolve(__dirname,'../..'),args=process.argv.slice(2),opt=(k,d)=>{const i=args.indexOf('--'+k);return i<0?d:args[i+1]&&!args[i+1].startsWith('--')?args[i+1]:true;};
-const HANDS=Number(opt('hands',12)),TABLES=String(opt('tables','hu,3way')).split(','),STACKS=String(opt('stacks','100')).split(','),MODE=String(opt('mode','cash')),STYLE=String(opt('style','follow')),SEED=Number(opt('seed',7)),OPENS=!!opt('opens',false),out=path.resolve(repo,String(opt('out','solve-flow-report'))),work=fs.mkdtempSync(path.join(os.tmpdir(),'solve-flow-'));
+const HANDS=Number(opt('hands',12)),TABLES=String(opt('tables','hu,3way')).split(','),STACKS=String(opt('stacks','100')).split(','),MODE=String(opt('mode','cash')),STYLE=String(opt('style','follow')),SEED=Number(opt('seed',7)),OPENS=!args.includes('--no-opens'),out=path.resolve(repo,String(opt('out','solve-flow-report'))),work=fs.mkdtempSync(path.join(os.tmpdir(),'solve-flow-'));
 const SOLVER=opt('solver','fake')==='fake'?path.join(__dirname,'fake-texassolver.cjs'):path.resolve(String(opt('solver'))),REAL=!SOLVER.endsWith('fake-texassolver.cjs'),SOLVE_TIMEOUT=REAL?'240':'120';
 const CLOUD_URL='https://maxam-lemmon--guava-solver-web.us-east.modal.run';
 fs.mkdirSync(out,{recursive:true});
@@ -116,9 +116,10 @@ async function playHand(page,table,n){
   const style=STYLE==='mix'?choice(['follow','follow','aggro','passive','random']):STYLE;
   state.config=G.normalize({...state.config,variant:'NLH',seats,stacks,mode,payouts:seats>2?[.5,.3,.2]:[.65,.35],otherStacks:[],button:Math.floor(r()*seats),ante:0,startStreet:0,board:'',bounties:Array(seats).fill(0)});state.dirty=false;
   // A 3-way table: everyone calls preflop (the test plays the other seats there), so the flop is 3-way and goes to the
-  // 3-way solver; from the flop on the app's bots play. With --opens, in half of those hands the first other seat to
-  // act opens with a raise instead (flowOpen), so the hero also sees flops as a caller: leading into the raiser, or
-  // facing a lead. At 6- and 9-max the bots play every other seat from the deal.
+  // 3-way solver; from the flop on the app's bots play. In half of those hands (none with --no-opens) the first other
+  // seat to act opens with a raise instead (flowOpen), so the hero also sees flops as a caller: leading into the
+  // raiser, or facing a lead, and pots that go heads-up when one of the three folds to a bet.
+  // At 6- and 9-max the bots play every other seat from the deal.
   $('controlAll').checked=table==='3way';window.flowOpen=OPENS&&table==='3way'&&r()<.5;
   window.flowStyle=style;state.hero=Math.floor(r()*seats);if(!deal(false))throw Error('Could not deal.');return{id:state.hand.dealId,stacks,mode,style};
  },[table,STACKS,MODE,STYLE,OPENS]),id=setup.id;
@@ -154,7 +155,9 @@ async function playHand(page,table,n){
    chooseAction(list[Math.floor(r()*list.length)]);
   });
  }
- // Let solves still out for this hand land (they grade decisions already made), then read the trace.
+ // Let solves still out for this hand land (they grade decisions already made), and the grades still being worked out
+ // (the first hand can end while the charts load, and its last decision's grade waits for them), then read the trace.
+ await page.waitForFunction(()=>!state.pending&&!state.gradeQueue.length&&!chartsLoading(),null,{timeout:60000,polling:250}).catch(()=>{});
  await page.waitForFunction(id=>![...spotUI.jobs.values()].some(j=>j.hand===id&&jobPending(j)),id,{timeout:REAL?400000:120000,polling:500}).catch(()=>{});
  await page.waitForTimeout(3000);
  const trace=await page.evaluate(id=>{HandTrace.flush();const t=HandTrace.get(id);const jobs=[...spotUI.jobs.values()].filter(j=>j.hand===id).map(j=>({job:j.rowId.slice(5),status:j.status}));const h=state.hand?.dealId===id?state.hand:null;return t&&{...JSON.parse(JSON.stringify(t)),jobsNow:jobs,config:h&&JSON.parse(JSON.stringify(h.config)),actionLog:h&&JSON.parse(JSON.stringify(h.actionLog)),board:h&&h.board?.map(c=>G.Core.cardName(c))};},id);

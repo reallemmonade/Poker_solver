@@ -13,13 +13,14 @@
   'solve-not-shown':'A solve finished but was never shown or used to grade',
   'solve-stuck':'A solve was still queued or running long after the hand',
   'solve-error':'A solve or the solve flow failed',
+  'solve-misrouted':'A solve sent to the Mac, a server or the cloud ended in the app\'s own exact engine, which cannot hold wide ranges',
   'grade-missing':'A decision waited for a solve to grade it and never got a grade',
   'sources-disagree':'Two answers for the same decision disagree a lot',
   'premium-fold':'The answer folds a premium hand preflop',
   'impossible-mix':'An answer\'s frequencies do not add up',
   'ungraded-silently':'A decision you played got no grade, and the trace does not say why',
  };
- const STUCK_MS=15*60*1000;
+ const STUCK_MS=15*60*1000,MISROUTED=/joint-deal budget|compatibility-search budget|This exact (heads-up|multiplayer) (tree|calculation)|Exact (heads-up|multiplayer) tree preparation|One iteration of this exact/;
  const used=e=>e.type==='show job'||e.type==='grade from job'||e.type==='answer'&&e.from==='finished job';
  // fold / passive (check, call) / aggressive (bet, raise, all-in), from an action label.
  function bucket(label){const s=String(label||'').toLowerCase();if(/^fold/.test(s))return 0;if(/^(check|call|limp|complete)/.test(s))return 1;return 2;}
@@ -39,6 +40,9 @@
    if(e.status==='done'&&!shown.has(job))add('solve-not-shown','solve '+job+' ('+(e.target||'?')+') finished but was never shown or used to grade',{job,spot:e.spot});
    if((e.status==='queued'||e.status==='running')&&t.startedAt&&now-(t.startedAt+(lastAt.get(job)||0))>STUCK_MS)add('solve-stuck','solve '+job+' ('+(e.target||'?')+') still '+e.status+' '+Math.round((now-t.startedAt-(lastAt.get(job)||0))/60000)+' min after its last change',{job,spot:e.spot});
    if(e.status==='failed')add('solve-error','solve '+job+' ('+(e.target||'?')+') failed: '+(e.message||'no message'),{job,spot:e.spot});
+   // The Mac and the cloud answer with TexasSolver or the 3-way solver. A failure worded by the app's own exact engines
+   // (their node, memory or joint-deal budgets) means the spot fell through to them: the route is wrong, not the spot.
+   if(e.status==='failed'&&MISROUTED.test(e.message||''))add('solve-misrouted','solve '+job+' ('+(e.target||'?')+') fell through to the exact engine: '+String(e.message).slice(0,120),{job,spot:e.spot});
   }
   for(const e of ev){
    if(e.type==='error'||e.type==='solve error')add('solve-error',e.type+': '+(e.message||'no message'),{spot:e.spot});
