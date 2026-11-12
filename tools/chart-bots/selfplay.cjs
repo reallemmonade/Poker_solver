@@ -7,12 +7,12 @@
 // flop pots by the equity-realization share, for the two dealt hand classes. That is the
 // game the chart was solved in, so no real postflop play is simulated.
 //   node tools/chart-bots/selfplay.cjs [--library manifest|dir] [--hands 20000] [--seed 1]
-//        [--games nlh] [--modes cash,mtt] [--seats 2-9] [--depths 100] [--jobs 4] [--out dir]
+//        [--games nlh] [--modes cash,mtt] [--seats 2-9] [--depths 100] [--calibration file] [--jobs 4] [--out dir]
 const path=require('path'),L=require('./lib.cjs');
 const {G,P}=L;
 
-function playPack(lib,meta,{hands,seed}){
- const {raw,pack,id}=L.loadPack(lib,meta),M=L.buildModel(raw),S=M.solver,n=S.n,K=S.K,cfg=pack.config;
+function playPack(lib,meta,{hands,seed,calibration}){
+ const {raw,pack,id}=L.loadPack(lib,meta),M=L.buildModel(raw,{calibration:calibration||null}),S=M.solver,n=S.n,K=S.K,cfg=pack.config;
  const sums=new Float64Array(n),sq=new Float64Array(n),r=L.rng(seed),stats={noAdvice:0,noAdviceHands:0,decisions:0,mismatch:0,autoFolds:0,flops:0,allins:0,folds:0,rake:0,noAdviceSpots:{}};
  for(let h=0;h<hands;h++){
   const hand=L.newHand(cfg,Math.floor(r()*4294967296)||1),cls=hand.holes.map(cs=>L.classOf(pack,cs));let node=S.tree.root,missed=false;
@@ -49,9 +49,9 @@ function playPack(lib,meta,{hands,seed}){
  for(const x of seats)if(Math.abs(x.mc-x.exact)>4*x.se+0.5)add(false,`${x.name}: self-play ${x.mc.toFixed(1)}±${x.se.toFixed(1)} disagrees with the exact model value ${x.exact.toFixed(1)} bb/100 (lookup or tree mismatch)`);
  add(stats.mismatch===0,`app actions match the tree's (${stats.mismatch} mismatches)`);
  add(M.unmatched.length===0&&M.extra.length===0,`chart nodes match the rebuilt tree (${M.unmatched.length} missing, ${M.extra.length} extra)`);
- add(M.claimedNashConv===null||Math.abs(ex.nashConv-M.claimedNashConv)<=Math.max(.002,.5*M.claimedNashConv),`NashConv of the shipped rows in the rebuilt model ${ex.nashConv.toFixed(4)} vs ${M.claimedNashConv} claimed by the pack (per-mille rounding and model rebuild)`);
+ add(M.claimedNashConv===null||Math.abs(ex.nashConv-M.claimedNashConv)<=Math.max(.002,.5*M.claimedNashConv),`NashConv of the shipped rows in the rebuilt model ${ex.nashConv.toFixed(4)} vs ${M.claimedNashConv} claimed by the pack${M.approximate?' (not comparable: the chart is calibrated and its calibration file was not given, see --calibration)':''}`,!M.approximate);
  add(stats.noAdviceHands/hands<0.01,`${L.pct(stats.noAdviceHands/hands,2)} of chart-following hands meet a decision where the app gives no chart answer`);
- return{id,name:meta.name,seats:n,stack:meta.stack,mode:meta.mode,variant:meta.variant,hands,seed,perSeat:seats,stats:{...stats,noAdviceRate:stats.noAdviceHands/hands,rakePer100:rakeMC},nashConv:ex.nashConv,claimedNashConv:M.claimedNashConv,gains:ex.gains,zeroSum:ex.zeroSum,notes:M.notes,checks};
+ return{id,name:meta.name,seats:n,stack:meta.stack,mode:meta.mode,variant:meta.variant,hands,seed,perSeat:seats,stats:{...stats,noAdviceRate:stats.noAdviceHands/hands,rakePer100:rakeMC},nashConv:ex.nashConv,claimedNashConv:M.claimedNashConv,approximate:M.approximate,gains:ex.gains,zeroSum:ex.zeroSum,notes:M.notes,checks};
 }
 
 // Chips a seat loses by folding every hand: its blind plus any big-blind ante.
