@@ -2,7 +2,10 @@
 'use strict';
 // Checks the kept 3-way street tree (studio/local-solver.js mwStreetTree / treeAnswer) with a stand-in mw_solver
 // output: a later decision on the solved flop reads the tree, an off-tree size or another board does not, the other
-// players' ranges are narrowed by their actions, and a small budget keeps the first nodes only. Flop leads: the
+// players' ranges are narrowed by their actions, and a small budget keeps the first nodes only. A pot that goes
+// heads-up on the solved street (one of the three folds) is still answered from the kept tree, its two ranges carry
+// to the next street, and without a kept tree the two players left get a TexasSolver spec with the folded player's
+// chips as dead money. Flop leads: the
 // spec gives the two players who are not the preflop raiser their own bet size, and the tree answers the leader,
 // the player facing a lead and the raiser behind one (the all-in marked allIn, as CLAUDE.md asks).
 //   node tools/local-solver/check-tree-mw.cjs
@@ -65,9 +68,33 @@ h=hand({kind:'check'},{kind:'check'},{kind:'check'});s=L.spec(data(h),ranges,{})
 ok(s.board.length===4&&!s.lead.turn&&!s.leadSizes.turn&&!/^lead /m.test(L.input(s,{output:'r.json'})),'turn solves are unchanged: anyone may bet every size');
 h=hand({kind:'check'},{kind:'bet',target:400});ok(!L.treeAnswer(result,data(h),h),'an off-tree size is not answered');
 const other={...result,solve:{...result.solve,tree:{...tree,board:['Qs','Jh','3h']}}};h=hand({kind:'check'},{kind:'check'});ok(!L.treeAnswer(other,data(h),h),'another flop is not answered');
-ok(!L.treeCarry(result,data(hand({kind:'check'},{kind:'check'},{kind:'check'})),null),'3-way trees don\'t carry ranges to the next street');
+ok(!L.treeCarry(result,data(hand({kind:'check'},{kind:'check'},{kind:'check'})),null),'a street all three finished doesn\'t carry ranges to the next street');
 const small=L.mwStreetTree(raw,spec,JSON.stringify(tree.combos).length+JSON.stringify(tree.weights).length+140);ok(small&&small.nodes.length===1,'a small budget keeps the first node only');
 // When everything does not fit, the lines played most often are the ones kept: with a rare lead, the checked-through line comes before it.
 const rare=JSON.parse(JSON.stringify(raw));rare.tree.strategy=[[.9,.05,.05],[.9,.1,0]];const order=L.mwStreetTree(rare,spec).nodes.map(n=>n.line||'root').join(' ');
 ok(order==='root 0 0/0 1 1/1','nodes are kept most likely first: '+order);
+// Three-way to heads-up on the solved street. The solver's tree plays on between the two left after a fold, so the
+// kept tree answers them: the small blind leads, the big blind folds, the button raises, the small blind decides.
+const raw2=JSON.parse(JSON.stringify(raw));raw2.tree.children[1].children[0]={player:2,alive:[1,0,1],actions:[{kind:'fold',to:0},{kind:'call',to:250},{kind:'raise',to:1000}],strategy:[[.25,.5,.25],[1,0,0]],children:[end,end,{player:0,alive:[1,0,1],actions:[{kind:'fold',to:0},{kind:'call',to:1000}],strategy:[[.4,.6],[.1,.9]],children:[end,end]}]};
+const tree2=L.mwStreetTree(raw2,spec),result2={...result,solve:{...result.solve,tree:tree2}};
+h=hand({kind:'bet',target:250},{kind:'fold'});a=L.treeAnswer(result2,data(h),h);
+ok(h.actor===0&&h.living().length===2&&a&&a.solve.method==='local-multiway'&&a.solve.fromTree.line==='1/0'&&a.actions.map(x=>x.kind).join()==='fold,call,raise'&&near(a.reference[0],.25)&&near(a.reference[1],.5)&&near(a.reference[2],.25)&&a.actions[2].target===1000,'heads-up after the big blind folds to the lead: the kept 3-way tree answers the button, fold/call/raise '+(a?a.reference.map(x=>x.toFixed(2)).join('/'):'none'));
+ok(a&&a.solve.rangeAssumptions.length===2&&!a.solve.rangeAssumptions.some(r=>r.seat===2)&&Math.abs(parseFloat((a.solve.rangeAssumptions.find(r=>r.seat===1)||{range:''}).range.split('AsKd:')[1])-.75)<.02,'only the two players left have a range there, the leader\'s narrowed by the lead');
+h=hand({kind:'bet',target:250},{kind:'fold'},{kind:'raise',target:1000});a=L.treeAnswer(result2,data(h),h);
+ok(h.actor===1&&a&&a.solve.fromTree.line==='1/0/2'&&a.actions.map(x=>x.kind).join()==='fold,call'&&near(a.reference[0],.4)&&near(a.reference[1],.6),'and the leader facing the raise heads-up: fold/call '+(a?a.reference.map(x=>x.toFixed(2)).join('/'):'none'));
+ok(!L.treeAnswer(result,data(hand({kind:'bet',target:250},{kind:'fold'})),hand({kind:'bet',target:250},{kind:'fold'})),'a heads-up line the tree did not keep is not answered');
+// The two ranges that reach the turn are narrowed by the flop line, the folded player has none.
+h=hand({kind:'bet',target:250},{kind:'fold'},{kind:'call'});let carried=L.treeCarry(result2,data(h),{seat:h.actor,cards:h.holes[h.actor]});
+ok(h.street===2&&h.actor===1&&carried&&carried[2]===''&&carried[0]==='AhAd'&&Math.abs(parseFloat(carried[1].split('AsKd:')[1])-.75)<.02,'the flop tree carries the two players\' ranges to a heads-up turn: '+JSON.stringify(carried));
+// Without a kept tree the two players left go to TexasSolver: the street as they played it between themselves, and
+// the chips the third player put in on it added to the pot.
+const tex=(...line)=>{const x=hand(...line),sp=L.spec(data(x),ranges,{}),sl=L.streetLine(data(x),x.street);L.input(sp,{output:'r.json'});return{h:x,s:sp,same:!!sl&&JSON.stringify(sl.path)===JSON.stringify(sp.path),line:sp.path.map(p=>p.kind+(p.amount?' '+p.amount:'')).join(', ')};};
+let t=tex({kind:'check'},{kind:'check'},{kind:'bet',target:250},{kind:'fold'});
+ok(!t.s.game&&t.s.pot===750&&t.line==='check, bet 250'&&!t.s.heroIsIp&&t.same,'check, check, bet, the first player folds: a heads-up spec for the big blind, pot 7.5 bb ('+t.line+')');
+t=tex({kind:'bet',target:250},{kind:'call'},{kind:'raise',target:1000},{kind:'fold'});
+ok(!t.s.game&&t.s.pot===1000&&t.line==='bet 250, raise 1000'&&!t.s.heroIsIp&&t.same,'the bettor folds to a raise: their 2.5 bb is dead money (pot 10 bb) and the caller is the one who bet ('+t.line+')');
+t=tex({kind:'check'},{kind:'bet',target:250},{kind:'call'},{kind:'raise',target:1000},{kind:'fold'});
+ok(!t.s.game&&t.s.pot===1000&&t.line==='check, bet 250, raise 1000'&&t.s.heroIsIp&&t.h.actor===0&&t.same,'check, bet, call, check-raise, the bettor folds: the caller faces the raise heads-up ('+t.line+')');
+t=tex({kind:'check'},{kind:'check'},{kind:'bet',target:250},{kind:'call'},{kind:'raise',target:1000},{kind:'fold'});
+ok(!t.s.game&&t.s.pot===1000&&t.line==='bet 250, raise 1000'&&t.h.actor===1&&t.same,'two checks before the folded player\'s bet are left out, so the heads-up line stays a legal one ('+t.line+')');
 if(fail){console.log(fail+' failed');process.exit(1);}console.log('3-way tree checks passed');
