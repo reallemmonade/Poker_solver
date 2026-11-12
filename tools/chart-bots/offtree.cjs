@@ -15,7 +15,7 @@
 //     the chart model. Exact charts score about 0.0004 bb/hand.
 // "Auto-profit" compares how often everyone folds with the share a pure bluff needs to break
 // even (risk / (risk + pot)); above it, raising any two cards at that size wins outright.
-//   node tools/chart-bots/offtree.cjs [--library ...] [--quick] [--jobs 4] [--out dir]
+//   node tools/chart-bots/offtree.cjs [--library ...] [--quick] [--calibration file] [--jobs 4] [--out dir]
 const path=require('path'),L=require('./lib.cjs'),C=require('./coverage.cjs');
 const {G,P,PL}=L;
 
@@ -107,10 +107,12 @@ function flopSweep(spot,o){
 // of the charts are asked: the app's own (which withholds off-path nodes and hands that almost
 // never reach a node) for the unanswered rate, and an unfiltered copy (every stored row served)
 // for the strategy, so the NashConv measures the depth and size mapping itself rather than the
-// withheld rows. The same probe at a depth that has its own chart is the control.
+// withheld rows. The same probe at a depth that has its own chart is the control. The game is
+// that chart's own (read from its text, as the other bots do) when the depth has a chart, and
+// otherwise the one library.cjs would solve there with the --calibration file, if one is given.
 function unfiltered(lib,metas){return metas.map(m=>{const pack=L.P.validate(L.loadPack(lib,m).raw);for(const n of pack.nodes){n.offPath=false;n.path=null;}return pack;});}
-function depthProbe(lib,packs,raw,seats,depth,format){
- const spec={seats,stack:depth,format,game:'nlh',limp:1},opts=L.E.game(spec),cfg=G.normalize({variant:'NLH',seats,stacks:Array(seats).fill(depth),sb:.5,bb:1,button:0,mode:format==='mtt'?'icm':'cash',...format==='mtt'?{ante:1,anteMode:'bigblind',payouts:[1]}:{}});
+function depthProbe(lib,packs,raw,seats,depth,format,calibration=null){
+ const own=L.selectPacks(lib,{games:'nlh',modes:format,seats:String(seats),depths:String(depth)}).find(m=>!m.rake),spec={seats,stack:depth,format,game:'nlh',limp:1,calibration},opts=own?L.modelOptions(L.loadPack(lib,own).raw,{calibration}).options:L.E.game(spec),cfg=G.normalize({variant:'NLH',seats,stacks:Array(seats).fill(depth),sb:.5,bb:1,button:0,mode:format==='mtt'?'icm':'cash',...format==='mtt'?{ante:1,anteMode:'bigblind',payouts:[1]}:{}});
  const S=new L.Solver(opts),K=S.K,answered=new Map(),stand=new Map();let mapped=0,total=0,errors=0,rawMissing=0;
  for(const node of S.tree.nodes){
   const h=new G.Hand(cfg,{rng:G.rng(4)});let ok=true;
@@ -141,7 +143,7 @@ function work(lib,item,o){
  const pre=L.selectPacks(lib,{games:'nlh'}),packs=pre.map(m=>L.loadPack(lib,m).pack);
  if(item.kind==='open'||item.kind==='3bet'){const cfg=C.config('NLH',item.seats,item.depth,'cash');return{...item,...sweep(packs,cfg,item)};}
  if(item.kind==='flop'){const libs=L.loadFlops(lib,f=>f.id===item.id&&f.library===item.library);const spot=libs.flatMap(l=>l.spots).find(s=>s.id===item.id);return{...item,...flopSweep(spot,o)};}
- if(item.kind==='depth')return{...item,...depthProbe(lib,packs,unfiltered(lib,pre),item.seats,item.depth,item.format)};
+ if(item.kind==='depth')return{...item,...depthProbe(lib,packs,unfiltered(lib,pre),item.seats,item.depth,item.format,o.calibration||null)};
 }
 
 function items(lib,o){
