@@ -54,23 +54,27 @@
  // away, facing a bigger price than the node's (k = MDF(real)/MDF(node) < 1, see tighten) or a smaller
  // one (wide = alpha(real)/alpha(node) < 1, alpha = bet/(bet+pot), see widen) are offTree. With end, a line that ends where the street does (a call, check-check) returns its path
  // with node null; pot and stack are the library line's at its end, for the next street.
+ // For the last bet, walk also names the solved answers on the real size's other side, for price(): between two solved sizes,
+ // between = {path, t}, the other size's node and how far the real alpha lies from the mapped size's (0) to the other's (1);
+ // above the largest solved size, cap = the all-in's node.
  function walk(flop,steps,scale,minBet=0,end=false,at=null){
-  const nodes=new Map(flop.nodes.map(n=>[n.path,n]));let path='',node=nodes.get(''),substituted=false,far=false,k=1,wide=1;
+  const nodes=new Map(flop.nodes.map(n=>[n.path,n]));let path='',node=nodes.get(''),substituted=false,far=false,k=1,wide=1,between=null,cap=null;
   const real={pot:steps.pot,stack:steps.stack,paid:[0,0],bet:0},lib={pot:(at||steps).pot,stack:(at||steps).stack,paid:[0,0],bet:0};
   const frac=(h,p,x)=>(h.paid[p]+x-h.bet)/(h.pot+h.bet-h.paid[p]),add=(h,p,x)=>{h.pot+=x;h.paid[p]+=x;h.bet=Math.max(h.bet,h.paid[p]);};
   for(let i=0;i<steps.length;i++){
-   const s=steps[i],p=i%2;if(!node)return null;let label=null;k=1;wide=1;
+   const s=steps[i],p=i%2;if(!node)return null;let label=null;k=1;wide=1;between=null;cap=null;
    if(s.kind==='check'||s.kind==='call'){label=node.actions.find(a=>a===s.kind.toUpperCase());if(s.kind==='call'){add(real,p,real.bet-real.paid[p]);add(lib,p,lib.bet-lib.paid[p]);}}
    else if(['bet','raise'].includes(s.kind)){
     const options=node.actions.filter(a=>/^(BET|RAISE) /.test(a)).map(a=>({a,amount:a.startsWith('BET ')?Math.max(minBet,parseFloat(a.split(' ')[1])*scale):parseFloat(a.split(' ')[1])*scale}));if(!options.length)return null;
-    const allIn=o=>lib.paid[p]+o.amount>=lib.stack*.999,top=options.reduce((m,o)=>o.amount>m.amount?o:m),sizes=options.filter(o=>!allIn(o)).sort((x,y)=>x.amount-y.amount),jam=s.allIn||real.paid[p]+s.amount>=real.stack*.999;let best;
+    const allIn=o=>lib.paid[p]+o.amount>=lib.stack*.999,top=options.reduce((m,o)=>o.amount>m.amount?o:m),sizes=options.filter(o=>!allIn(o)).sort((x,y)=>x.amount-y.amount),jam=s.allIn||real.paid[p]+s.amount>=real.stack*.999,alpha=(h,x)=>x/(h.pot+x);let best,other=null,over=null;
     if(jam||!sizes.length)best=options.find(allIn)||top;
-    else{const x=frac(real,p,s.amount),hi=sizes.findIndex(o=>frac(lib,p,o.amount)>x);if(hi<0)best=sizes[sizes.length-1];else if(!hi)best=sizes[0];else{const A=frac(lib,p,sizes[hi-1].amount),B=frac(lib,p,sizes[hi].amount);best=(B-x)*(1+A)/((B-A)*(1+x))>=.5?sizes[hi-1]:sizes[hi];}}
-    if(Math.abs(best.amount-s.amount)>Math.max(2,.03*s.amount)){substituted=true;if(!(jam&&allIn(best))){if(Math.abs(Math.log(best.amount/s.amount))>Math.log(1.6)+1e-9)far=true;k=(real.pot/(real.pot+s.amount))/(lib.pot/(lib.pot+best.amount));wide=Math.min(1,(s.amount/(real.pot+s.amount))/(best.amount/(lib.pot+best.amount)));}}
+    else{const x=frac(real,p,s.amount),hi=sizes.findIndex(o=>frac(lib,p,o.amount)>x);if(hi<0){best=sizes[sizes.length-1];over=options.find(allIn)||null;}else if(!hi)best=sizes[0];else{const A=frac(lib,p,sizes[hi-1].amount),B=frac(lib,p,sizes[hi].amount);best=(B-x)*(1+A)/((B-A)*(1+x))>=.5?sizes[hi-1]:sizes[hi];other=best===sizes[hi]?sizes[hi-1]:sizes[hi];}}
+    if(Math.abs(best.amount-s.amount)>Math.max(2,.03*s.amount)){substituted=true;if(!(jam&&allIn(best))){if(Math.abs(Math.log(best.amount/s.amount))>Math.log(1.6)+1e-9)far=true;k=(real.pot/(real.pot+s.amount))/(lib.pot/(lib.pot+best.amount));wide=Math.min(1,(s.amount/(real.pot+s.amount))/(best.amount/(lib.pot+best.amount)));
+      const pre=path?path+'/':'',d=other?alpha(lib,other.amount)-alpha(lib,best.amount):0;if(other&&d)between={path:pre+other.a,t:Math.min(1,Math.max(0,(alpha(real,s.amount)-alpha(lib,best.amount))/d))};else if(over)cap=pre+over.a;}}
     label=best.a;add(real,p,s.amount);add(lib,p,best.amount);}
    if(!label)return null;path+=(path?'/':'')+label;node=nodes.get(path);
   }
-  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9||wide<1-1e-9,k:k<1-1e-9?k:1,wide:wide<1-1e-9?wide:1,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid),jamAt:lib.stack-lib.paid[steps.length%2]}:null;
+  return node||end?{node:node||null,path,substituted,offTree:far||k<1-1e-9||wide<1-1e-9,k:k<1-1e-9?k:1,wide:wide<1-1e-9?wide:1,between,cap,pot:lib.pot,stack:lib.stack-Math.max(...lib.paid),jamAt:lib.stack-lib.paid[steps.length%2]}:null;
  }
 
  // Answers the current flop decision from the library, or returns null. range is
@@ -101,13 +105,14 @@
    let q=null,near=null,i=-1;if(spot.game==='PLO4'){const p=ploIndex(f,w.node.player,cards,board,hand.rules);if(p){i=p.index;near=p.similar;}}else i=comboIndex(cards);if(i>=0)q=row(w.node,i);
    if(q){flop=f;key=cand.key;found=w;r=q;similar=near;at=i;mv=cand.move;break;}}
   if(!r)return null;const standIn=key!==c.key;
-  // A bigger price than the node's tightens this combo's defence (and the range grid's) toward MDF, a smaller one widens it.
-  let cut=null;if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),spot.game==='PLO4'?null:C.cards(key));r=cut(at,r);}
+  // A bigger price than the node's tightens this combo's defence (and the range grid's), a smaller one widens it, by as much as
+  // the solved sizes around the real one say (price).
+  let cut=null;if(found.k<1||found.wide<1){const nodes=new Map(flop.nodes.map(n=>[n.path,n])),reach=reachOf(spot,flop,found.node.player,[[nodes,found.path]]);found=price(found,nodes,reach);if(found.k<1||found.wide<1){cut=fitter(found.node,found,reach,spot.game==='PLO4'?null:C.cards(key));r=cut(at,r);}}
   const {actions,probs,index}=libraryActions(hand,found.node,r,scale,found),handMix=spot.game==='PLO4'?null:{seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,mv,reachOf(spot,flop,found.node.player,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),hand.board)};
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[[ip,'ip'],[oop,'oop']].map(([seat,p])=>({seat,range:spot.game==='PLO4'?'Chart range':reachText(reachOf(spot,flop,p,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),C.cards(key)),source})),
-    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,scale,...gateOf(spot,key,found.path)?{ungraded:gateOf(spot,key,found.path)}:{},...spot.game!=='PLO4'&&!fullFlopSizes(spot)?{fewerSizes:true}:{},...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
+    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,...found.fit?{sizeFit:found.fit}:{},scale,...gateOf(spot,key,found.path)?{ungraded:gateOf(spot,key,found.path)}:{},...spot.game!=='PLO4'&&!fullFlopSizes(spot)?{fewerSizes:true}:{},...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
     warning:(standIn?'Stand-in flop strategy for '+spot.label+': '+board+' is not in the library, so the nearest solved flop of the same texture, '+spaced(key)+', answers, with your cards moved to match. Treat it as a rough guide. It was':'Precomputed flop strategy for '+spot.label+' on '+spaced(key)+' (the same flop up to suits),')+' solved by '+(spot.game==='PLO4'?'the PLO solver':'TexasSolver')+' for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(similar?' Your hand is not among the '+flop.combos[found.node.player].length+' combos solved for this flop, so the most similar one, '+similar+', answers for it (similar made hand and draws).':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+(spot.game==='PLO4'?' Exploitability is measured exactly, in percent of the pot. The library keeps frequencies only, so no decision cost is graded.':' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.')+(gateOf(spot,key,found.path)?' This flop failed the library balance check ('+gateOf(spot,key,found.path)+'), so it is shown but not graded.':'')}};
  }
 
@@ -192,12 +197,32 @@
  const opened=(node,r,keep)=>{const f=node.actions.indexOf('FOLD'),c=node.actions.indexOf('CALL');return keep>=1||f<0||c<0?r:r.map((p,a)=>a===f?p*keep:a===c?p+r[f]*(1-keep):p);};
  // Combo i's row r as walk's w ({k,wide}) answers it, or null when neither applies.
  const fitter=(node,w,reach,board)=>w.k<1?(i,r)=>scaled(node,r,tighten(node,i,w.k,reach,board)):w.wide<1?(i,r)=>opened(node,r,widen(node,i,w.wide,reach,board)):null;
+ // How much a mapped size's defence tightens or widens, from the solved answers around the real size instead of the mapped
+ // size alone. Between two solved sizes the range's fold share is read off the line between their two fold shares (in alpha
+ // = bet/(bet+pot), where a defence is close to linear): exact at either solved size and with no step where the mapping
+ // switches from one to the other. Predicting each bundled library's 2/3 node from its 1/3 and 1.5x nodes this way misses
+ // its fold share by 1.8 points on average; from one neighbour alone, MDF from the size below misses a solved size by 1.8
+ // and the alpha ratio from the size above by 3.6, and the two disagree where the mapping switches (10+ points in places).
+ // Above the largest solved size the MDF tightening stays, but never folds more than the library does to the all-in (or at
+ // the largest size, if that is more): it used to fold up to 20 points more to a bet just short of the stack than to the
+ // all-in. A line to the all-in itself would fold 7 points too little. Below the smallest size the alpha ratio stays. Returns walk's
+ // result with k and wide set for tighten/widen (hand order unchanged) and fit: 'between', 'capped' or 'nearest'.
+ function foldShare(node,reach){
+  const f=node?node.actions.indexOf('FOLD'):-1;if(f<0)return null;if(node.folds===undefined){let m=0,s=0;for(let i=0;i<reach.length;i++)if(reach[i]){const r=row(node,i);if(r){m+=reach[i];s+=reach[i]*r[f];}}node.folds=m?s/m:null;}return node.folds;
+ }
+ function price(w,nodes,reach){
+  if(!w||!w.node||!(w.k<1||w.wide<1))return w;const own=foldShare(w.node,reach),side=w.between||w.cap?foldShare(nodes.get(w.between?w.between.path:w.cap),reach):null;if(own===null||side===null)return{...w,fit:'nearest'};
+  const target=w.between?own+(side-own)*w.between.t:Math.min(1-(1-own)*w.k,Math.max(own,side));
+  return{...w,k:target>own+1e-9?(1-target)/(1-own):1,wide:target<own-1e-9?target/own:1,fit:w.between?'between':'capped'};
+ }
  // Range-weighted action frequencies at one node of a solved flop: each combo
  // counts with its chart weight times the frequency of the acting player's own
- // earlier actions on this line. For flop reports; k<1 tightens and wide<1 widens the node as walk's do.
+ // earlier actions on this line. For flop reports; k<1 tightens and wide<1 widens the node as walk's do, and walk's
+ // own result in k's place answers the node as the app serves it (see price).
  function aggregate(spot,flop,path,k=1,wide=1){
   const nodes=new Map(flop.nodes.map(n=>[n.path,n])),node=nodes.get(path);if(!node)return null;
-  const reach=reachOf(spot,flop,node.player,[[nodes,path]]),key=spot.game==='PLO4'?null:Object.keys(spot.flops).find(x=>spot.flops[x]===flop),board=key?C.cards(key):null;
+  const reach=reachOf(spot,flop,node.player,[[nodes,path]]);if(k&&typeof k==='object'){const w=price(k,nodes,reach);k=w.k;wide=w.wide;}
+  const key=spot.game==='PLO4'?null:Object.keys(spot.flops).find(x=>spot.flops[x]===flop),board=key?C.cards(key):null;
   const total=node.actions.map(()=>0),fit=fitter(node,{k,wide},reach,board);let mass=0;
   for(let i=0;i<reach.length;i++)if(reach[i]){let r=row(node,i);if(!r)continue;if(fit)r=fit(i,r);mass+=reach[i];r.forEach((p,a)=>total[a]+=reach[i]*p);}
   return mass?{actions:node.actions,player:node.player,freq:total.map(x=>x/mass)}:null;
@@ -301,13 +326,13 @@
  // Answers a turn decision from a turn spot (turnSpot) and its flop chunk, or returns null.
  function queryTurn(t,chunk,range,hand){
   if(!t||hand.done||hand.street!==2)return null;const line=turnLine(chunk,hand,t);if(!line)return null;
-  const found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb),false,line.at);if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
+  let found=walk(line.turn,streetSteps(hand,2),t.scale,G.units(hand.config.bb),false,line.at);if(!found||found.node.player!==(hand.actor===t.ip?'ip':'oop'))return null;
   const cards=hand.holes[hand.actor].map(line.move);let r=row(found.node,comboIndex(cards)),cut=null;if(!r)return null;
-  if(found.k<1||found.wide<1){cut=fitter(found.node,found,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]);r=cut(comboIndex(cards),r);}
+  if(found.k<1||found.wide<1){const nodes=new Map(line.turn.nodes.map(n=>[n.path,n])),reach=reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[nodes,found.path]]);found=price(found,nodes,reach);if(found.k<1||found.wide<1){cut=fitter(found.node,found,reach,[...C.cards(t.key),line.move(hand.board[3])]);r=cut(comboIndex(cards),r);}}
   const {actions,probs,index}=libraryActions(hand,found.node,r,t.scale,found),handMix={seat:hand.actor,classes:classMix(found.node,index,actions.length,cut),...comboMix(found.node,index,actions.length,cut,line.move,reachOf(t.spot,null,found.node.player,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),hand.board)},zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),source='Imported preflop chart: '+range.name,substituted=line.substituted||found.substituted;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),handMix,...line.offTree||found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:t.flop.iterations||0,exploitability:t.flop.exploitability,seconds:0,rangeAssumptions:[[t.ip,'ip'],[t.oop,'oop']].map(([seat,p])=>({seat,range:reachText(reachOf(t.spot,null,p,[[new Map(chunk.nodes.map(n=>[n.path,n])),line.flop.path],[new Map(line.turn.nodes.map(n=>[n.path,n])),found.path]]),[...C.cards(t.key),line.move(hand.board[3])]),source})),
-    library:{spot:t.spot.label,flop:t.key,turn:line.prefix.split('|')[1],standIn:false,line:line.prefix+(found.path?'/'+found.path:''),sizesMatched:!substituted,scale:t.scale,...gateOf(t.spot,t.key)?{ungraded:gateOf(t.spot,t.key)}:{}},
+    library:{spot:t.spot.label,flop:t.key,turn:line.prefix.split('|')[1],standIn:false,line:line.prefix+(found.path?'/'+found.path:''),sizesMatched:!substituted,...found.fit?{sizeFit:found.fit}:{},scale:t.scale,...gateOf(t.spot,t.key)?{ungraded:gateOf(t.spot,t.key)}:{}},
     warning:'Precomputed turn strategy for '+t.spot.label+' on '+spaced(t.key)+' '+line.prefix.split('|')[1]+' (the same board up to suits), solved by TexasSolver together with the flop for the preflop chart ranges'+(Math.abs(t.scale-1)>.02?' and scaled to this pot':'')+'.'+(substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+' Exploitability is the solver\'s own estimate for the whole flop solve, in percent of the pot. It reports no action EVs, so no decision cost is graded.'}};
  }
  // Each player's range at this point of the hand, as weights per combo (COMBOS order, real cards):
@@ -324,6 +349,6 @@
   if(!apply(chunk.nodes,line.flop.path)||!apply(line.turn.nodes,turn.path))return null;
   return weights;
  }
- const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry,libraryActions};
+ const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry,libraryActions,price};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerPostflopLibrary=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
