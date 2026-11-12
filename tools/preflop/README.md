@@ -41,7 +41,7 @@ A table matches a raked chart only with the same rake and cap. Any other raked t
 - At 25bb or less, all-in is offered at every raise.
 - From 300bb, a sized 5-bet comes before the all-in.
 
-**Depth matching:** the app uses the nearest depth within a factor of 1.6 (so 20-50bb and 200-500bb have no gap) and labels the substitution. All-ins and the largest pot-limit raise in the line map to the chart's largest raise, and the chart's sizes are kept within the table's legal range. A chip-EV chart used for a table with real payouts is labelled as such.
+**Depth matching:** the app uses the nearest depth within a factor of 1.6 and labels the substitution. NLH charts also exist at 30, 70 and 300bb (November 2026, same calibration as the v6 charts), so every depth from about 6bb to 1600bb is within 1.6 of a chart, and most are within 1.25. When the nearest chart has no answer for a line (no node, or a node its players never reach), the next chart within the tolerance answers it. All-ins and the largest pot-limit raise in the line map to the chart's largest raise, and the chart's sizes are kept within the table's legal range. A chip-EV chart used for a table with real payouts is labelled as such.
 
 **Untrained rows:** packs carry no reach, so the app rebuilds it from the rows. It does not serve a node that the other players reach with zero chart probability, or a hand class that reaches the node under 0.1% of the time; those rows are left at the solver's uniform start or an early iterate.
 
