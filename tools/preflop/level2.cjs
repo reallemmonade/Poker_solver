@@ -8,7 +8,8 @@
 // Solving again on the new charts and refitting converges the ranges and the shares together
 // (tools/calibration/level2.sh runs the rounds).
 //   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"]
-//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2]
+//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json]
+//   node tools/preflop/level2.cjs settle --old charts.json.gz --new charts.json.gz [--threshold .03]
 //   node tools/preflop/level2.cjs moved --old charts.json.gz --new charts.json.gz --spots per-spot-6max [--threshold .05]
 //   node tools/preflop/level2.cjs compare --a m0.json.gz --b dir|m.json.gz
 // compare (a diagnostic) prints, per line both measured and per side, the combo-weighted mean share
@@ -16,11 +17,17 @@
 // and the share of b's opponent range those extra classes make up; then the means by pot type.
 // extract keeps only the shares (a few hundred kB), to move solves between computers. fit keeps
 // for every line the last --keep measurements given (in --measure order) and writes them into the
-// base calibration (a set from calibrate.cjs --depths, or one fit). moved prints the flop lines
+// base calibration (a set from calibrate.cjs --depths, or one fit). --step a damps it: each class's
+// factor moves only a of the way (in logs) from the previous round's (--prior, that round's
+// calibration; none = the formula) to the measured one, so ranges and shares settle together instead
+// of overshooting (undamped, the pilot's round 1 jumped to the new values and 3-bets exploded).
+// settle prints how far the chart's preflop strategy moved between two rounds (largest and mean
+// change in any action's frequency, by combos, over nodes reached 1% or more) and exits 0 once the
+// largest node change is under --threshold. moved prints the flop lines
 // whose ranges moved more than --threshold (total variation over combos, either player) between
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
-const args={cmd:process.argv[2]||'help',a:'',b:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
+const args={cmd:process.argv[2]||'help',a:'',b:'',step:'',prior:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
@@ -47,14 +54,20 @@ const measurements=src=>fs.statSync(src).isDirectory()?extract(src,args.chart):r
 function fit(){
  const cal=read(args.base),keep=Math.max(1,Number(args.keep)|0),lines=new Map();
  for(const src of args.measure.split(','))for(const m of measurements(src)){const k=m.chart+'|'+m.key;if(!lines.has(k))lines.set(k,[]);lines.get(k).push({rangeIp:m.rangeIp,rangeOop:m.rangeOop,ip:m.ip,oop:m.oop,flops:m.flops});}
- const depth=k=>Number((k.match(/ (\d+)bb\|/)||[])[1]);
+ const depth=k=>Number((k.match(/ (\d+)bb\|/)||[])[1]),bucket=(c,k)=>c.buckets?c.buckets.find(b=>b.depth===depth(k)):c;
+ const step=args.step===''?null:Number(args.step),prior=args.prior&&fs.existsSync(args.prior)?read(args.prior):null;
+ if(step!==null&&!(step>0&&step<=1))throw Error('--step must be in (0, 1].');
+ // The previous round's entry for a line, only what solve.cjs needs to work its factors out again.
+ const before=k=>{const e=prior&&bucket(prior,k)?.spots?.[k];return e?.measured?.length?{measured:e.measured,...e.step!==undefined?{step:e.step,prior:e.prior}:{}}:undefined;};
  for(const [k,list]of lines){
   // A set keeps one fit per depth; the line goes into its own depth's bucket.
-  const target=cal.buckets?cal.buckets.find(b=>b.depth===depth(k)):cal;if(!target){console.log(`${k}: no ${depth(k)}bb fit in ${args.base}, skipped`);continue;}
-  target.spots=target.spots||{};target.spots[k]={...target.spots[k],measured:list.slice(-keep)};
+  const target=bucket(cal,k);if(!target){console.log(`${k}: no ${depth(k)}bb fit in ${args.base}, skipped`);continue;}
+  target.spots=target.spots||{};const e={...target.spots[k],measured:list.slice(-keep)};delete e.step;delete e.prior;
+  if(step!==null&&step<1){e.step=step;const p=before(k);if(p)e.prior=p;}
+  target.spots[k]=e;
  }
  fs.writeFileSync(args.out,JSON.stringify(cal));
- console.log(`Wrote ${args.out}: measured shares on ${lines.size} lines (${[...lines.values()].reduce((s,l)=>s+Math.min(keep,l.length),0)} measurements).`);
+ console.log(`Wrote ${args.out}: measured shares on ${lines.size} lines${step!==null&&step<1?`, damped ${step}${prior?' from '+args.prior:' from the formula'}`:''} (${[...lines.values()].reduce((s,l)=>s+Math.min(keep,l.length),0)} measurements).`);
 }
 
 function moved(){
@@ -67,6 +80,16 @@ function moved(){
  console.log(out.join(','));
 }
 
+function settle(){
+ const P=require('../../studio/preflop.js'),pick=f=>{const p=read(f);return P.validate(p.packs?p.packs.find(x=>x.name.startsWith(args.chart+' ')):p);},a=pick(args.old),b=pick(args.new);
+ const n=P.classes.map(c=>c.length===2?6:c[2]==='s'?4:12),N=n.reduce((x,y)=>x+y,0),th=Number(args.threshold),K=n.length;let max=0,maxKey='',sum=0,count=0;
+ const row=(node,i)=>{const A=node.actions.length;return node.table?Array.from(node.table.subarray(i*A,i*A+A),v=>v/1000):node.actions.map((_,x)=>node.strategy[P.classes[i]]?.[x]||0);};
+ for(const na of a.nodes){const nb=b.index.get(na.key);if(!nb||!((na.reach??1)>=.01)||nb.actions.length!==na.actions.length)continue;let d=0;
+  for(let i=0;i<K;i++){const ra=row(na,i),rb=row(nb,i);for(let x=0;x<ra.length;x++)d+=Math.abs(ra[x]-rb[x])*n[i]/N/2;}
+  sum+=d;count++;if(d>max){max=d;maxKey=na.key;}}
+ console.log(`settle: ${count} nodes, mean change ${(100*sum/Math.max(1,count)).toFixed(2)}%, largest ${(100*max).toFixed(2)}% at ${maxKey}`);
+ process.exit(count&&max<th?0:1);
+}
 // A side's mean share over its whole solved range, by combos.
 function whole(m,side){const n=c=>c.length===2?6:c[2]==='s'?4:12,own=side==='ip'?m.rangeIp:m.rangeOop;let w=0,x=0;for(const [c,v]of Object.entries(m[side])){const r=own[c]||0;w+=r*n(c);x+=r*n(c)*v;}return w?x/w:NaN;}
 function compare(){
@@ -92,6 +115,7 @@ if(require.main===module){
  else if(args.cmd==='fit')fit();
  else if(args.cmd==='moved')moved();
  else if(args.cmd==='compare')compare();
- else console.log(fs.readFileSync(__filename,'utf8').split('\n').slice(2,17).join('\n'));
+ else if(args.cmd==='settle')settle();
+ else console.log(fs.readFileSync(__filename,'utf8').split('\n').slice(2,24).join('\n'));
 }
 module.exports={extract};

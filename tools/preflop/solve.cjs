@@ -77,7 +77,7 @@ class Solver{
   const spots=this.m.variant==='NLH'&&this.o.spots;this.spotCount=0;this.measuredCount=0;
   const each=node=>{if(node.type==='decision'){node.children.forEach(each);return;}const f=node.type==='flop'&&spots[node.key];if(!f)return;
    node.M=f.sharpness!==undefined?fitted(f):node.raises>=2?this.M3:this.M;this.spotCount++;
-   if(f.measured?.length){node.M=this.measured(node.M,node,f.measured);delete node.commit;this.measuredCount++;}};
+   if(f.measured?.length){node.M=this.measured(node.M,node,f);delete node.commit;this.measuredCount++;}};
   if(spots)each(this.tree.root);
   const K=this.K,w=this.m.weight;this.mass=v=>{let s=0;for(let i=0;i<K;i++)s+=w[i]*v[i];return s;};
   for(const node of this.tree.nodes){const A=node.actions.length,K=this.K;node.regret=new Float64Array(A*K);node.sum=new Float64Array(A*K);}
@@ -148,42 +148,56 @@ class Solver{
  // measured, averaged in logs over the measurements (each against its own ranges). The matrix keeps
  // the model's card removal and opponent-hand shape; the measured value already reflects the
  // stack-to-pot ratio, so the line gets no all-in blend.
- measured(base,node,list){
-  const K=this.K,cls=this.m.classes,C=this.M.C,oop=node.players[1],names=node.aggressor===oop?['ipCaller','oopRaiser']:['ip','oop'],out={...base};
+ measured(base,node,entry){
+  const K=this.K,oop=node.players[1],names=node.aggressor===oop?['ipCaller','oopRaiser']:['ip','oop'],out={...base};
   ['ip','oop'].forEach((side,s)=>{
-   const S=base[names[s]],logk=new Float64Array(K),n=new Float64Array(K);
-   for(const m of list){
-    const opp=side==='ip'?m.rangeOop:m.rangeIp,target=m[side],r=Float64Array.from(cls,c=>opp[c]||0);
-    for(let i=0;i<K;i++){const t=target[cls[i]];if(!(t>0))continue;let won=0,seen=0;
-     for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}
-     if(won>0&&seen>0){logk[i]+=Math.log(t*seen/won);n[i]++;}}
-   }
-   // Each class's scale factor, then kicker order: the shares against the last measured range are
-   // kept non-increasing down each kicker chain (weighted pool-adjacent-violators on log share, as
-   // calibrate.cjs does for playability). A class measured on no flop keeps the model's share but
-   // carries almost no weight, so it is only capped by the nearest measured stronger kicker: the
-   // hands at the bottom of a range measure worst, and an unmeasured lower kicker would otherwise
-   // keep the model's more hopeful value. Copying the neighbour's factor instead lifted weak
-   // unmeasured hands into 3-bet bluffs (blind 3-bets doubled on the pilot's round-0 chart).
-   const k=Float64Array.from(logk,(x,i)=>n[i]?Math.min(10,Math.max(.05,Math.exp(x/n[i]))):1);
-   const last=list[list.length-1],opp=side==='ip'?last.rangeOop:last.rangeIp,own=side==='ip'?last.rangeIp:last.rangeOop,r=Float64Array.from(cls,c=>opp[c]||0);
-   const model=new Float64Array(K);for(let i=0;i<K;i++){let won=0,seen=0;for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}model[i]=seen>0?won/seen:0;}
-   // Classes sit in a kicker chain and possibly a connector chain: repeat until every chain holds.
-   for(let round=0;round<50;round++){let moved=false;
-    for(const chain of CHAINS){
-     const blocks=[];
-     for(const i of chain.map(c=>cls.indexOf(c))){if(!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:n[i]?(own[cls[i]]||0)+1e-3:1e-6,n:[i]});
-      while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
-     for(const b of blocks)for(const i of b.n){const v=Math.min(10,Math.max(.05,Math.exp(b.v)/model[i]));if(Math.abs(Math.log(v/k[i]))>1e-9)moved=true;k[i]=v;}
-    }
-    if(!moved)break;
-   }
+   const S=base[names[s]],k=this.factors(S,side,entry);
    const M=new Float64Array(K*K);
    // Shares above 1 are real: a hand can win more than the pot it reached the flop with.
    for(let i=0;i<K;i++)for(let j=0;j<K;j++)M[i*K+j]=S[i*K+j]*k[i];
    out[names[s]]=M;
   });
   return out;
+ }
+ // One side's per-class factors for a measured line. entry = {measured, step, prior}: without step the
+ // factor is the measured one (averaged in logs over the measurements, each against its own ranges).
+ // With step (level2.cjs fit --step, damping between rounds) it moves only that fraction of the way,
+ // in logs, from the previous round's factors (entry.prior, worked out the same way, recursively;
+ // none = the formula, factor 1) to the measured one. Undamped, round 1 of the pilot jumped straight
+ // to the measured values and the 3-bets exploded; the ranges and the shares then chase each other.
+ factors(S,side,entry){
+  const K=this.K,cls=this.m.classes,C=this.M.C,list=entry.measured,logk=new Float64Array(K),n=new Float64Array(K);
+  for(const m of list){
+   const opp=side==='ip'?m.rangeOop:m.rangeIp,target=m[side],r=Float64Array.from(cls,c=>opp[c]||0);
+   for(let i=0;i<K;i++){const t=target[cls[i]];if(!(t>0))continue;let won=0,seen=0;
+    for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}
+    if(won>0&&seen>0){logk[i]+=Math.log(t*seen/won);n[i]++;}}
+  }
+  const step=entry.step===undefined?1:Math.min(1,Math.max(0,Number(entry.step)));
+  const prior=step<1?(entry.prior?.measured?.length?this.factors(S,side,entry.prior):new Float64Array(K).fill(1)):null;
+  const clamp=x=>Math.min(10,Math.max(.05,x));
+  // Each class's scale factor, then kicker order: the shares against the last measured range are
+  // kept non-increasing down each kicker chain (weighted pool-adjacent-violators on log share, as
+  // calibrate.cjs does for playability). A class measured on no flop keeps the model's share (or
+  // the previous round's factor) but carries almost no weight, so it is only capped by the nearest
+  // measured stronger kicker: the hands at the bottom of a range measure worst, and an unmeasured
+  // lower kicker would otherwise keep the model's more hopeful value. Copying the neighbour's factor
+  // instead lifted weak unmeasured hands into 3-bet bluffs (blind 3-bets doubled on the pilot's
+  // round-0 chart). Probed solves (library.cjs --probe) measure every class, in range or not.
+  const k=Float64Array.from(logk,(x,i)=>{const p=prior?prior[i]:1;if(!n[i])return p;const t=clamp(Math.exp(x/n[i]));return prior?clamp(Math.exp(step*Math.log(t)+(1-step)*Math.log(p))):t;});
+  const last=list[list.length-1],opp=side==='ip'?last.rangeOop:last.rangeIp,own=side==='ip'?last.rangeIp:last.rangeOop,r=Float64Array.from(cls,c=>opp[c]||0);
+  const model=new Float64Array(K);for(let i=0;i<K;i++){let won=0,seen=0;for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}model[i]=seen>0?won/seen:0;}
+  // Classes sit in a kicker chain and possibly a connector chain: repeat until every chain holds.
+  for(let round=0;round<50;round++){let moved=false;
+   for(const chain of CHAINS){
+    const blocks=[];
+    for(const i of chain.map(c=>cls.indexOf(c))){if(!(model[i]>0))continue;blocks.push({v:Math.log(model[i]*k[i]),w:n[i]?(own[cls[i]]||0)+1e-3:1e-6,n:[i]});
+     while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
+    for(const b of blocks)for(const i of b.n){const v=clamp(Math.exp(b.v)/model[i]);if(Math.abs(Math.log(v/k[i]))>1e-9)moved=true;k[i]=v;}
+   }
+   if(!moved)break;
+  }
+  return k;
  }
  // Regret matching (current) or the averaged strategy, laid out [action*K+class].
  strategy(node,average){

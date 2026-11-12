@@ -6,10 +6,17 @@
 # level2-sync.sh, run on one computer that reaches them all (rsync over SSH, files never overwritten).
 # $CAL_WORK on the leader must hold preflop-library-v6-calibrated.json.gz, set2.json and either
 # ev2/ (pass-2 flops) or l2/m0.json.gz (level2.cjs extract of them); followers need nothing.
-#  Round 0: the pass-2 per-spot solves (60 flops a line on the pass-1 charts), no new solves.
-#  Round 1: every 6-max 100bb flop line on the round-0 charts, FLOPS flops with --floor, so hands the
-#           chart never plays a way still get a measured value there.
-#  Round 2: only the lines whose ranges moved more than MOVED (level2.cjs moved); the rest keep round 1.
+#  Round 0: the pass-2 per-spot solves (60 flops a line on the pass-1 charts), no new solves. With
+#           neither ev2/ nor l2/m0.json.gz, round 0 is the v6 chart as it is.
+#  Round 1: every 6-max 100bb flop line on the round-0 charts, FLOPS flops with --floor and --probe
+#           PROBE (every class at least PROBE of its combos in both ranges), so every hand class is
+#           measured on every line, including hands the chart never takes there.
+#  Round 2 on: only the lines whose ranges moved more than MOVED (level2.cjs moved); the rest keep
+#           their measurements. Up to ROUNDS rounds, stopping early once the chart settles: no
+#           node reached 1% or more changes by SETTLE or more (level2.cjs settle).
+# Every fit is damped (level2.cjs fit --step STEP --prior <previous round's calibration>): a class's
+# factor moves STEP of the way, in logs, from the previous round's toward the measured one. Undamped,
+# round 1 jumped straight to the measured values and the 3-bets exploded.
 # Each round's charts: the last KEEP measurements per line in set2.json, the 6-max 100bb chart
 # rebuilt at ITERATIONS, every other chart from v6. Final: l2/charts-final.json.gz, balance-checked
 # and order-checked (order-check.cjs, the 6-max 100bb chart only).
@@ -20,14 +27,14 @@ set -u
 K=${1:-1}; N=${2:-1}
 R=$(cd "$(dirname "$0")/../.." && pwd); W=${CAL_WORK:-$HOME/help}; L=$W/l2
 TSE=${SOLVER:-$R/tools/local-solver/TexasSolver/install/console_solver}
-JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; FLOPS=${FLOPS:-60}; FLOOR=${FLOOR:-0.006}; KEEP=${KEEP:-2}; MOVED=${MOVED:-0.05}; ITERATIONS=${ITERATIONS:-2000}; ROUNDS=${ROUNDS:-2}; LINES=${LINES:-per-spot-6max}; SOLVE_ITERATIONS=${SOLVE_ITERATIONS:-150}
+JOBS=${JOBS:-3}; THREADS=${THREADS:-4}; FLOPS=${FLOPS:-60}; FLOOR=${FLOOR:-0.006}; KEEP=${KEEP:-2}; MOVED=${MOVED:-0.05}; ITERATIONS=${ITERATIONS:-2000}; ROUNDS=${ROUNDS:-6}; PROBE=${PROBE:-0.01}; STEP=${STEP:-0.4}; SETTLE=${SETTLE:-0.03}; LINES=${LINES:-per-spot-6max}; SOLVE_ITERATIONS=${SOLVE_ITERATIONS:-150}
 V6=${V6:-$W/preflop-library-v6-calibrated.json.gz}; SET2=${SET2:-$W/set2.json}; CHART='NLH cash 6-handed 100bb'
 export NODE_OPTIONS=--max-old-space-size=16384
 cd "$R" || exit 1; mkdir -p $L
 say(){ echo "$(date -u '+%F %T') [$K/$N] $*"; }
 wait_for(){ say "waiting for $1"; until [ -f "$1" ]; do sleep 60; done; }
 solve(){ # charts out spots [more args]
-  node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $FLOPS --floor $FLOOR --accuracy 1 --iterations $SOLVE_ITERATIONS --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:4}" || say "FAILED solve into $2"
+  node tools/postflop/library.cjs solve --charts $1 --out $2 --spots $3 --flops $FLOPS --floor $FLOOR --probe $PROBE --accuracy 1 --iterations $SOLVE_ITERATIONS --jobs $JOBS --threads $THREADS --timeout 86400 --solver $TSE "${@:4}" || say "FAILED solve into $2"
 }
 # Solved flops in a round folder, and how many there should be (lines x flops).
 count(){ ls $1/*/ 2>/dev/null | grep -cE '^([2-9TJQKA][cdhs]){3}\.json$'; }
@@ -50,24 +57,29 @@ charts(){ # calibration out: the 6-max 100bb chart rebuilt, every other v6 chart
 spots(){ # round: the lines to solve
   if [ $1 = 1 ]; then echo $LINES; else node tools/preflop/level2.cjs moved --old $L/charts$(($1-2)).json.gz --new $L/charts$(($1-1)).json.gz --spots $LINES --threshold $MOVED 2>/dev/null; fi; }
 
+fit(){ # round measurements: the damped fit from the previous round's calibration
+  node tools/preflop/level2.cjs fit --measure $2 --base $SET2 --keep $KEEP --step $STEP --prior $L/cal$(($1-1)).json --out $L/cal$1.json; }
 if [ $K = 1 ]; then
-  [ -f $L/m0.json.gz ] || node tools/preflop/level2.cjs extract --work $W/ev2 --chart "$CHART" --out $L/m0.json.gz
-  node tools/preflop/level2.cjs fit --measure $L/m0.json.gz --base $SET2 --keep $KEEP --out $L/cal0.json
-  charts $L/cal0.json $L/charts0.json.gz
+  [ -f $L/m0.json.gz ] || { [ -d $W/ev2 ] && node tools/preflop/level2.cjs extract --work $W/ev2 --chart "$CHART" --out $L/m0.json.gz; }
+  if [ -f $L/m0.json.gz ]; then M0=$L/m0.json.gz; fit 0 $M0; charts $L/cal0.json $L/charts0.json.gz
+  else M0=; cp $SET2 $L/cal0.json; [ -f $L/charts0.json.gz ] || cp $V6 $L/charts0.json.gz; say "round 0: no pass-2 solves, starting from v6"; fi
 fi
 for r in $(seq 1 $ROUNDS); do
   wait_for $L/charts$((r-1)).json.gz
   if [ $K = 1 ]; then s=$(spots $r); echo "$s" > $L/spots$r.txt.tmp && mv $L/spots$r.txt.tmp $L/spots$r.txt; else wait_for $L/spots$r.txt; s=$(cat $L/spots$r.txt); fi
-  [ -z "$s" ] && { say "round $r: no line moved"; [ $K = 1 ] && cp $L/charts$((r-1)).json.gz $L/charts$r.json.gz; continue; }
+  [ "$s" = SETTLED ] && break
+  [ -z "$s" ] && { say "round $r: no line moved"; [ $K = 1 ] && { ROUNDS=$((r-1)); echo SETTLED > $L/spots$((r+1)).txt; }; break; }
   say "ROUND $r: $s"
   solve $L/charts$((r-1)).json.gz $L/r$r $s --shard $K/$N
   solve $L/charts$((r-1)).json.gz $L/r$r $s --reverse 1
   if [ $K = 1 ]; then
     complete $L/r$r $L/charts$((r-1)).json.gz $s
     # Lines not re-solved this round keep their earlier measurements (fit takes the last KEEP).
-    m=$L/m0.json.gz; for q in $(seq 1 $r); do m=$m,$L/r$q; done
-    node tools/preflop/level2.cjs fit --measure $m --base $SET2 --keep $KEEP --out $L/cal$r.json
+    m=$M0; for q in $(seq 1 $r); do m=${m:+$m,}$L/r$q; done
+    fit $r $m
     charts $L/cal$r.json $L/charts$r.json.gz
+    if node tools/preflop/level2.cjs settle --old $L/charts$((r-1)).json.gz --new $L/charts$r.json.gz --threshold $SETTLE | sed 's/^/  /'; [ ${PIPESTATUS[0]} = 0 ]; then
+      say "round $r: settled"; ROUNDS=$r; echo SETTLED > $L/spots$((r+1)).txt; break; fi
   fi
 done
 [ $K = 1 ] && { cp $L/charts$ROUNDS.json.gz $L/charts-final.json.gz; node tools/preflop/balance-check.cjs $L/charts-final.json.gz && say "BALANCE CHECK PASSED" || say "BALANCE CHECK FAILED"
