@@ -73,7 +73,9 @@
    const out={};for(const [k,w]of Object.entries(avg))if(w/peak>.005)out[k]=round(w/peak);return out;};
   const hero=data.heroCards.slice().sort((a,b)=>a-b).map(C.cardName).join(''),heroClass=C.handClass(data.heroCards),rangeIp=classes(ip),rangeOop=classes(oop),heroRange=data.actor===ip?rangeIp:rangeOop;
   if(!heroRange[heroClass])heroRange[heroClass]=.01;
-  return{version:1,board:data.board.map(C.cardName),pot,stack,sizes,allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,
+  // actionEVs: the app asking can grade on action EVs (options.actionEVs, set by studio/spot-ui.js). Only then does
+  // the bridge let the solver report them; a request without it gets exactly what a bridge from before them returned.
+  return{version:1,board:data.board.map(C.cardName),pot,stack,sizes,allinThreshold,rangeIp,rangeOop,path,hero,heroSeat:data.actor,heroIsIp:data.actor===ip,...opt.actionEVs===true?{actionEVs:true}:{},
    accuracy:Math.min(5,Math.max(.1,Number(opt.localAccuracy)||1)),maxIterations:Math.min(1000,Math.max(10,Number(opt.localIterations)||200))};
  }
 
@@ -200,6 +202,7 @@
   assert(num(s.accuracy,.1,5)&&Number.isInteger(s.maxIterations)&&num(s.maxIterations,10,1000),'Invalid accuracy settings.');
   assert(Array.isArray(s.path)&&s.path.length<=12&&s.path.every(p=>['check','call','bet','raise'].includes(p.kind)&&(p.amount===undefined||num(p.amount,0,1e8))),'Invalid action path.');
   assert(typeof s.hero==='string'&&COMBO.test(s.hero),'Invalid hero hand.');
+  assert(s.actionEVs===undefined||s.actionEVs===true,'Invalid action EV flag.');
   return s;
  }
 
@@ -255,6 +258,28 @@
   });
   const total=probs.reduce((a,b)=>a+b,0);return{actions,probs:probs.map(p=>p/total),index};
  }
+ // Chip EVs for each action from a TexasSolver built with tools/local-solver/texassolver-evs.patch: the solver's
+ // number for this hand at this node is the EV of taking the action and then both players following the solved
+ // average strategy ("best": the player best-responds after it), in chips net of half the street's starting pot.
+ // Adding that half and the chips already paid on this street gives bb from this decision, where folding is 0, as
+ // the on-device exact solves report them. Two solver actions that map onto one app action keep the better EV.
+ // The cost of an action is its EV gap to the best one, except that an action the solver mixes in at 5% or more
+ // whose gap is within the solve's own accuracy (its target in percent of the pot) costs nothing: at equilibrium
+ // those EVs are equal, and what is left is solver noise.
+ // No EVs (why says so) from an older solver, at tables that do not pay chips, on a line the opponent takes under 1%
+ // of the time in the solve (its range there is noise), or when the solve stopped before its accuracy target: those
+ // answers grade on frequency. A flop library that stores the same per-action EVs can be mapped by this function too.
+ const EV_MIN_REACH=.01,EV_MIX=.05;
+ function actionEVs(hand,evRow,probs,index,s,info){
+  if(!Array.isArray(evRow))return{};
+  const why=evRow.length!==index.length||!evRow.every(Number.isFinite)?'the solver sent malformed action EVs':hand.config.mode!=='cash'?'chip EVs, and this table pays prizes':!((info.reach??1)>=EV_MIN_REACH)?'the opponent takes this line under 1% of the time in the solve':!(Number.isFinite(info.exploitability)&&Number.isFinite(info.accuracy)&&info.exploitability<=info.accuracy)?'the solve stopped before its accuracy target':null;
+  if(why)return{why};
+  const paid=hand.streetPaid[hand.actor],mean=probs.map(()=>-Infinity);evRow.forEach((v,i)=>{const ev=Math.round(G.bb(v+s.pot/2+paid)*1000)/1000;if(ev>mean[index[i]])mean[index[i]]=ev;});
+  const best=mean.indexOf(Math.max(...mean)),tolerance=Math.round(G.bb(s.pot)*info.accuracy*10)/1000,loss=mean.map((v,i)=>{const gap=Math.round((mean[best]-v)*1000)/1000;return probs[i]>=EV_MIX&&gap<=tolerance?0:gap;});
+  return{mean,loss,best,solve:{evAvailable:true,evKind:info.kind==='best'?'best':'average',converged:true,evTolerance:tolerance,evReach:info.reach??1}};
+ }
+ const NO_EV_NOTE=' It does not report action EVs, so no decision cost is graded.',treeWarning=(text,evs)=>{const t=String(text||'');return evs?t.includes(EV_NOTE)?t:t.replace(NO_EV_NOTE,EV_NOTE):t.replace(EV_NOTE,NO_EV_NOTE);};
+ const EV_NOTE=' EVs are in bb from this decision, before rake: each action, then both players on the solved strategy.';
  // The acting player's whole range at this decision: each hand class's average action mix over its combos, in the
  // order of the mapped actions (index maps solver actions onto them). For the range grid.
  function classMix(table,index,size){
@@ -280,21 +305,24 @@
  // record); a line past that solves again.
  // The next street is not in it: the dump stops at the street's end, and a flop solve plays later streets with
  // one bet size, so the turn gets its own solve with every size.
+ // When the solver sent action EVs, the hero's own decisions also keep the hero hand's EV for each action (ev, in
+ // tenths of a chip as sent) and the share of the opponent's range that gets there (evReach): a kept tree only ever
+ // answers for the hand it was solved for, so one row a node is enough to grade a later decision on EV.
  const TREE_BYTES=160000,B64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
  function b64(bytes){let out='';for(let i=0;i<bytes.length;i+=3){const a=bytes[i],b=bytes[i+1],c=bytes[i+2],n=a<<16|(b||0)<<8|(c||0);out+=B64[n>>18&63]+B64[n>>12&63]+(i+1<bytes.length?B64[n>>6&63]:'=')+(i+2<bytes.length?B64[n&63]:'=');}return out;}
  function unb64(text){const clean=text.replace(/=+$/,''),out=new Uint8Array(Math.floor(clean.length*3/4));let bits=0,value=0,k=0;for(const ch of clean){value=value<<6|B64.indexOf(ch);bits+=6;if(bits>=8){bits-=8;out[k++]=value>>bits&255;}}return out;}
  function streetTree(tree,s,budget=TREE_BYTES){
-  const oop=tree.player,combos={},nodes=[],queue=[[tree,'']];let size=0;
+  const oop=tree.player,combos={},nodes=[],queue=[[tree,'']],hero=typeof s.hero==='string'?s.hero:'',heroSide=s.heroIsIp?'ip':'oop';let size=0;
   for(let q=0;q<queue.length;q++){
    const [node,line]=queue[q];if(!node||node.node_type!=='action_node'||!node.strategy?.strategy||!Array.isArray(node.actions))continue;
    const who=node.player===oop?'oop':'ip',table=node.strategy.strategy,list=combos[who]||(combos[who]=Object.keys(table).filter(c=>COMBO.test(c))),A=node.actions.length,out=new Uint8Array(list.length*A);
    list.forEach((c,i)=>{const row=table[c];if(!Array.isArray(row)||row.length!==A)return;const t=row.reduce((x,y)=>x+(y>0?y:0),0);if(!(t>0))return;let left=255,best=0;row.forEach((p,a)=>{if(p>row[best])best=a;});row.forEach((p,a)=>{if(a===best)return;const v=Math.min(left,Math.max(0,Math.round(p/t*255)));out[i*A+a]=v;left-=v;});out[i*A+best]=left;});
-   const table64=b64(out);size+=table64.length+line.length+40;if(size>budget)break;
-   nodes.push({line,player:who,actions:node.actions.slice(),table:table64});
+   const table64=b64(out),evTable=who===heroSide&&node.action_evs,ev=evTable&&hero?evTable[hero]||evTable[hero.slice(2)+hero.slice(0,2)]:null,evs=Array.isArray(ev)&&ev.length===A&&ev.every(Number.isFinite);size+=table64.length+line.length+40+(evs?10*A:0);if(size>budget)break;
+   nodes.push({line,player:who,actions:node.actions.slice(),table:table64,...evs?{ev:ev.slice(),evReach:Number.isFinite(node.action_evs_reach)?node.action_evs_reach:1}:{}});
    for(const a of node.actions){const child=node.childrens&&node.childrens[a];if(child)queue.push([child,line?line+'/'+a:a]);}
   }
   if(!nodes.length||!combos.ip&&!combos.oop)return null;
-  return{v:1,board:s.board.slice(),pot:s.pot,stack:s.stack,ranges:{ip:s.rangeIp,oop:s.rangeOop},combos:{ip:(combos.ip||[]).join(','),oop:(combos.oop||[]).join(',')},nodes};
+  return{v:1,board:s.board.slice(),pot:s.pot,stack:s.stack,ranges:{ip:s.rangeIp,oop:s.rangeOop},combos:{ip:(combos.ip||[]).join(','),oop:(combos.oop||[]).join(',')},...nodes.some(n=>n.ev)?{evHero:hero,evKind:tree.action_evs_kind==='best'?'best':'average',accuracy:s.accuracy}:{},nodes};
  }
  // One street's line as tree steps, the way spec builds the solved line: each action's kind and the chips it
  // adds, with who is in and out of position and the effective stack at the street's start. null unless heads-up.
@@ -347,12 +375,14 @@
   const saved=result?.solve?.tree,street=data.board.length-2;if(!saved||saved.v!==1||saved.game||saved.board.length!==data.board.length||saved.board.join()!==data.board.map(C.cardName).join())return null;
   const line=streetLine(data,street);if(!line)return null;const w=walkTree(saved,line.path);if(!w?.node||w.node.player!==(data.actor===line.ip?'ip':'oop'))return null;
   const table=treeTable(saved,w.node),key=findCombo(table,comboKey(data.heroCards));if(!key)return null;
-  const {actions,probs,index}=mapActions(hand,w.node,table[key],saved),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
+  const {actions,probs,index}=mapActions(hand,w.node,table[key],saved),frequent=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:hand.actor,classes:classMix(table,index,actions.length),combos:comboMix(table,index,actions.length)};}catch{}
   const q=result.solve,sources=new Map((q.rangeAssumptions||[]).map(r=>[r.seat,r.source])),rangeAssumptions=[];
+  // The kept EVs belong to the hand the street was solved for.
+  const ev=actionEVs(hand,saved.evHero&&(saved.evHero===key||saved.evHero===key.slice(2)+key.slice(0,2))?w.node.ev:null,probs,index,saved,{reach:w.node.evReach,kind:saved.evKind,exploitability:q.exploitability,accuracy:saved.accuracy}),best=ev.mean?ev.best:frequent;
   for(const [seat,who]of [[line.ip,'ip'],[line.oop,'oop']]){const r=reachText(treeReach(saved,who,w.steps),who===w.node.player?key:null);if(!r)return null;rangeAssumptions.push({seat,range:r.text,combinations:r.combinations,source:(sources.get(seat)||'Solved range')+', narrowed by this street\'s actions with the solved frequencies'});}
-  return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:result.units||(hand.config.mode==='cash'?'bb':'prize units'),ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
-   solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
-    warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+String(q.warning||'')}};
+  return{supported:true,actions,reference:probs,mean:ev.mean||zeros,se:zeros,loss:ev.loss||zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:result.units||(hand.config.mode==='cash'?'bb':'prize units'),ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...ev.mean?{reliable:true}:{},...handMix?{handMix}:{},
+   solve:{version:1,method:'local-texassolver',exact:false,approximate:false,iterations:q.iterations||0,exploitability:q.exploitability,seconds:0,...ev.solve,...ev.why?{evSkipped:ev.why}:{},rangeAssumptions,actionTree:q.actionTree,...q.solvedOn?{solvedOn:q.solvedOn}:{},fromTree:{line:w.line,decisions:w.steps.length},
+    warning:'From the solve of this street\'s first decision, which already played out this line: no second solve was needed. '+treeWarning(q.warning,!!ev.mean)}};
  }
 
  // The 3-way solver's output holds its street's whole tree too (actions with street totals, each combo's mix), so a
@@ -504,11 +534,13 @@
    if(this.error)return{supported:false,message:'Local solver: '+this.error};
    if(this.spec.game==='PLO4')return resultPLO(this);
    if(this.spec.game==='NLH3')return resultMW(this);
-   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),best=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length),combos:comboMix(node.strategy.strategy,index,actions.length)};}catch{}
+   const node=follow(this.body.tree,this.spec.path),row=heroRow(node,this.spec.hero),{actions,probs,index}=mapActions(this.hand,node,row,this.spec),frequent=probs.indexOf(Math.max(...probs)),zeros=actions.map(()=>0);let handMix=null;try{handMix={seat:this.hand.actor,classes:classMix(node.strategy.strategy,index,actions.length),combos:comboMix(node.strategy.strategy,index,actions.length)};}catch{}
    let tree=null;try{tree=streetTree(this.body.tree,this.spec);}catch{}
-   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},
-    solve:{version:1,method:'local-texassolver',...tree?{tree}:{},exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
-     warning:'Solved by TexasSolver on this computer for the ranges shown, with the listed bet sizes on every later street. Exploitability is the solver\'s own estimate, in percent of the pot. It does not report action EVs, so no decision cost is graded.'+chipCaveat(this.hand.config)}};
+   // Action EVs for this hand when the solver on the bridge reports them (an older build does not: frequencies only).
+   const evTable=node.action_evs,ev=actionEVs(this.hand,evTable&&typeof evTable==='object'?evTable[this.spec.hero]||evTable[this.spec.hero.slice(2)+this.spec.hero.slice(0,2)]:null,probs,index,this.spec,{reach:node.action_evs_reach,kind:this.body.tree.action_evs_kind,exploitability:this.body.exploitability,accuracy:this.spec.accuracy}),best=ev.mean?ev.best:frequent;
+   return{supported:true,actions,reference:probs,mean:ev.mean||zeros,se:zeros,loss:ev.loss||zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:this.hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...ev.mean?{reliable:true}:{},...handMix?{handMix}:{},
+    solve:{version:1,method:'local-texassolver',...tree?{tree}:{},exact:false,approximate:false,iterations:this.body.iterations||0,exploitability:this.body.exploitability,seconds:this.body.seconds,...ev.solve,...ev.why?{evSkipped:ev.why}:{},rangeAssumptions:this.ranges.descriptions,actionTree:{betSizes:this.spec.sizes[this.spec.heroIsIp?'ip':'oop'][STREETS[this.spec.board.length-3]].bet.map(x=>x/100),raiseSizes:this.spec.sizes.ip[STREETS[this.spec.board.length-3]].raise.map(x=>x/100),maxAggressions:4,jam:true},
+     warning:'Solved by TexasSolver on this computer for the ranges shown, with the listed bet sizes on every later street. Exploitability is the solver\'s own estimate, in percent of the pot.'+(ev.mean?EV_NOTE:NO_EV_NOTE)+chipCaveat(this.hand.config)}};
   }
  }
 
@@ -567,6 +599,6 @@
    solve:{version:1,method:'local-preflop',exact:false,approximate:false,iterations:body.iterations,exploitability:body.nashConv,seconds:body.seconds,effort:body.effort,threeWay:body.threeWay,rangeAssumptions,solvedOn:'This computer (local solver)',warning:notes.join(' ')}};
  }
 
- const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
+ const api={DEFAULT_URL,spec,validate,input,follow,heroRow,mapActions,actionEVs,streetTree,streetLine,walkTree,treeAnswer,mwStreetTree,treeCarry,TREE_BYTES,followPLO,mapPLO,followMW,mapMW,mwRunouts,Engine,SpotEngine,PreflopEngine,preflopResult,betPercent,raisePercent,PLO_TREE,MW_TREE};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerLocalSolver=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

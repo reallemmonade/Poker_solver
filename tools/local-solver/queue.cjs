@@ -51,7 +51,8 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
   const data=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(data.error||'Account service error '+r.status),{status:r.status});return data;
  }
  const meta=(id,value,t=Date.now())=>({store:'meta',id,t,data:{id,value}});
- const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),beat:BEAT_MS,name,rate,features:update?['preflop','update','targets','trees','mwtrees']:['preflop','targets','trees','mwtrees'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
+ // 'evs': this bridge's files are from the version whose install builds TexasSolver with action EVs (chip-EV grading).
+ const heartbeat=()=>meta(name==='mac'?'macsolver':'solver-'+name,{seen:Date.now(),beat:BEAT_MS,name,rate,features:update?['preflop','update','targets','trees','mwtrees','evs']:['preflop','targets','trees','mwtrees','evs'],threads,load:Math.round(os.loadavg()[0]/os.cpus().length*100)/100,busy:busy()});
  async function pull(){
   for(;;){const page=await api('GET','/api/sync?since='+cursor);
    for(const r of page.rows)if(r.store==='meta'&&r.data?.value&&typeof r.data.value==='object'){if(r.id==='macupdate')updateWant={...r.data.value,t:r.t};else if(/^solvejob-/.test(r.id)&&(!once||r.id===once.id))jobs.set(r.id,{...r.data.value,t:r.t});else if(/^(flopwant|preflopwant)-/.test(r.id)&&!(learning?.id===r.id))wants.set(r.id,r.data.value);}

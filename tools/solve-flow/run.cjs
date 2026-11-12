@@ -11,6 +11,8 @@
 //   - the same decision solved more than once,
 //   - a solve that finished but was never shown or used to grade,
 //   - a solve still queued or running long after the hand ended,
+//   - a decision graded against a live TexasSolver answer that neither carries its EV loss nor says why it was graded
+//     on frequency instead (the stand-in and a solver built by the installers both report action EVs),
 //   - a page error.
 //
 //   node tools/solve-flow/run.cjs [--hands 12] [--tables hu,3way,6max,9max] [--stacks 100] [--mode cash] [--style follow]
@@ -91,13 +93,17 @@ async function main(){
   const r=await playHand(page,table,n);results.push(r);
   log(table+' '+r.stacks.join('/')+'bb '+r.mode+' '+r.style+' hand '+(n+1)+': '+r.hand+' '+(r.problems.length?'FAIL '+r.problems.join('; '):'ok')+' · '+r.summary);
  }
+ // Chip-EV grading: decisions graded against a live heads-up solve report the EV they lost.
+ const live=results.flatMap(r=>r.liveGrades||[]),onEV=live.filter(g=>g.onEV),noEV=live.length>0&&!onEV.length;
+ log(live.length+' decisions graded against a live TexasSolver solve: '+onEV.length+' on EV ('+onEV.filter(g=>g.loss>0).length+' lost EV, most '+(onEV.length?Math.max(...onEV.map(g=>g.loss)).toFixed(2):'0')+' bb), '+(live.length-onEV.length)+' on frequency'+(live.some(g=>g.evSkipped)?' ('+[...new Set(live.filter(g=>g.evSkipped).map(g=>g.evSkipped))].join('; ')+')':'')+'.');
+ if(noEV)log('FAIL no decision graded against a live solve carried an EV loss.');
  const failed=results.filter(r=>r.problems.length);
- const report={at:new Date().toISOString(),seed:SEED,tables:TABLES,stacks:STACKS,mode:MODE,style:STYLE,hands:results.length,failed:failed.length,clouds,pageErrors:errors,results};
+ const report={at:new Date().toISOString(),seed:SEED,tables:TABLES,stacks:STACKS,mode:MODE,style:STYLE,hands:results.length,failed:failed.length,clouds,liveGrades:{total:live.length,onEV:onEV.length,lostEV:onEV.filter(g=>g.loss>0).length},pageErrors:errors,results};
  fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,1));
  if(errors.length)log('Page errors:\n'+errors.join('\n'));
  log(results.length+' hands, '+failed.length+' with problems, '+clouds+' cloud solves. Report: '+path.relative(repo,out)+'/report.json');
  await browser.close();
- return failed.length||errors.length?1:0;
+ return failed.length||errors.length||noEV?1:0;
 }
 
 // One hand at the given table, the hero choosing at random (seeded) whether to solve each decision, where, and whether
@@ -151,7 +157,7 @@ async function playHand(page,table,n){
  await page.waitForTimeout(3000);
  const trace=await page.evaluate(id=>{HandTrace.flush();const t=HandTrace.get(id);const jobs=[...spotUI.jobs.values()].filter(j=>j.hand===id).map(j=>({job:j.rowId.slice(5),status:j.status}));const h=state.hand?.dealId===id?state.hand:null;return t&&{...JSON.parse(JSON.stringify(t)),jobsNow:jobs,config:h&&JSON.parse(JSON.stringify(h.config)),actionLog:h&&JSON.parse(JSON.stringify(h.actionLog)),board:h&&h.board?.map(c=>G.Core.cardName(c))};},id);
  fs.writeFileSync(path.join(out,'trace-'+id+'.json'),JSON.stringify(trace,null,1));
- return{hand:id,table,...setup,decisions,solves,problems:check(trace),summary:summary(trace)};
+ return{hand:id,table,...setup,decisions,solves,problems:check(trace),liveGrades:liveGrades(trace),summary:summary(trace)};
 }
 
 // What the trace must never show.
@@ -165,8 +171,12 @@ function check(t){
   if(j.status==='done'&&!used.has(j.job)&&!p.some(x=>x.includes(' '+j.job+' ')))p.push('solve-not-shown: solve '+j.job+' finished but was never shown or used to grade');
   if(j.status==='queued'||j.status==='running')p.push('solve-stuck: solve '+j.job+' still '+j.status+' '+(REAL?'7':'2')+' minutes after the hand');
  }
+ for(const g of liveGrades(t))if(!g.onEV&&!g.evSkipped)p.push('live-solve-no-ev: '+g.action+' was graded against a live solve without an EV loss, and the trace does not say why');
  return[...new Set(p)];
 }
+// Decisions graded against a live TexasSolver answer (this street's solve, or its kept tree): on EV with the bb lost,
+// or on frequency with the reason the EVs were set aside.
+function liveGrades(t){return(t?.events||[]).filter(e=>e.type==='graded'&&e.source==='local-texassolver').map(e=>({action:e.action,onEV:/^EV from a live solve/.test(e.gradedOn||'')&&e.rated===true&&Number.isFinite(e.loss)&&Number.isFinite(e.ev),loss:e.loss,ev:e.ev??null,best:e.best||null,frequency:e.frequency??null,evSkipped:e.evSkipped||null}));}
 function summary(t){if(!t)return'';const c=k=>t.events.filter(e=>e.type===k).length;return c('solve')+' solves, '+c('show job')+' shown, '+c('grade from job')+' graded from jobs, '+c('graded')+' graded, '+c('cancel')+' cancelled';}
 
 main().then(code=>{process.exitCode=code;},e=>{console.error(e);process.exitCode=1;}).finally(()=>{for(const c of children)try{c.kill();}catch{}if(!opt('keep',false))fs.rmSync(work,{recursive:true,force:true});});

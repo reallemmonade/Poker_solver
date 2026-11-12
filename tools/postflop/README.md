@@ -62,7 +62,17 @@ A flop decision is answered from the library only when all of these hold:
 - Your hand is in the solved range.
 - Both players' chart ranges still match the ranges the library was solved for. A chart re-solved under the same name gets no library answers until the library is rebuilt from it.
 
-Otherwise the app solves the spot as before: in the browser, or with TexasSolver on your computer, using ranges from the same chart. TexasSolver reports no action EVs, so library answers show frequencies and are not graded.
+Otherwise the app solves the spot as before: in the browser, or with TexasSolver on your computer, using ranges from the same chart.
+
+**Grading.** Library answers hold frequencies only, so they are graded on frequency: an action the library plays 5% or more of the time is correct. A live TexasSolver solve also carries each action's EV and is graded on the EV lost ([tools/local-solver/README.md](../local-solver/README.md), "Action EVs").
+
+**What a library needs to grade on EV.** The solver already writes the EVs (`action_evs` on every flop decision of a dump made with the current `texassolver-evs.patch`); the library does not keep them. To keep them:
+
+- **Re-solve every flop.** Saved flops (`postflop-work/<spot>/<flop>.json`) hold packed frequencies, not the dump, so the EVs cannot be added afterwards. `solve --need-evs 1` already re-solves flops saved without per-class EVs; the same switch can cover action EVs.
+- **Store them.** `nodes()` in `library.cjs` packs each node's mix as one byte per combo and action. EVs need one more table per node: for example each combo's best EV as 16 bits plus each action's gap to it as one byte on a square-root scale, with the node's `action_evs_reach`. That roughly doubles a `.cpl` file; `PostflopLibrary.validate` and `tools/split-libraries.cjs` must accept the new field.
+- **Scale them.** A library answer is scaled to the hand's pot (the stack-to-pot ratio may differ by up to 1.5 times), so its EVs are scaled by the same factor and are approximate when the ratio or a bet size differs. Stand-in flops and nearest-size answers (`standIn`, `sizesMatched: false`) should stay on frequency.
+- **Hand them to the app.** `query()` in `studio/postflop-library.js` should fill what a live solve fills: `mean` (bb from the decision), `loss` and `best` through `PokerLocalSolver.actionEVs`, and `solve.evAvailable`, `evKind`, `converged`, `evTolerance` and `evReach`. The grading side already accepts a `postflop-library` answer with those fields (`solverEV` in `studio/trainer.js`); without them nothing changes.
+- **Turn files** (`--turn 1`) would need EVs for decisions after the turn card too. The patch only writes them before the next card; extending it means keeping the EVs by dealt card in `BestResponse::actionBestResponse` and applying the suit swaps the strategy dump applies.
 
 **Flop reports** (under the import controls) average each flop's strategy over the acting player's range. For example, they show how often BB checks, or how often BTN c-bets after a check, on each solved flop.
 
