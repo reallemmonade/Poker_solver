@@ -56,7 +56,12 @@
   // Counts scale with the number of actions; a state also needs a measured, small policy drift
   // (queries from read-only packs carry no drift and are judged on counts alone).
   function referenceEvidence(query){const n=query?.actions?.length||query?.actionCount||2;return !!(query?.trained&&query.visits>=STABLE_VISITS&&query.updates>=2*STABLE_UPDATES*n&&!(query.drift>STABLE_DRIFT));}
+  // A solver answer that carries each action's chip EV for this hand and reached its accuracy target: a live TexasSolver
+  // solve on the Mac or in the cloud (studio/local-solver.js actionEVs), or a flop library solved with the same EV dump.
+  // These grade on EV lost, like the on-device exact solves; without the fields they grade on frequency.
+  const solverEV=q=>!!q&&['local-texassolver','postflop-library'].includes(q.method)&&q.evAvailable===true&&q.converged===true;
   function assessmentEvidence(result){
+    if(result?.solve?.version===1&&solverEV(result.solve))return result.supported?{usable:true,reasons:[]}:{usable:false,reasons:[result.message||'No completed solve.']};
     if(result?.solve?.version===1){const q=result.solve,reasons=[];if(!result.supported)reasons.push(result.message||'No completed solve.');if(!['exact-river','exact-postflop','exact-multiway'].includes(q.method)||!q.exact)reasons.push('This sampled solve has no measured equilibrium gap.');else if(!Number.isFinite(q.gap)||!Number.isFinite(q.tolerance)||q.gap>q.tolerance||!Number.isFinite(q.handRegret)||q.handRegret>(q.handTolerance??q.tolerance))reasons.push('The finite betting game has not reached the requested deviation gap.');return{usable:!reasons.length,reasons};}
     const reasons=['This rollout has no measured equilibrium deviation gap.'];if(!result?.supported)return{usable:false,reasons:[result?.message||'No decision estimate is available.']};
     if(!result.referenceTrained)reasons.push('No learned strategy covers this action history.');
@@ -84,5 +89,5 @@
       return{supported:true,reliable:ess>=20,actions:this.actions,mean,se,loss,lossSE,best,samples:this.rows.length,effectiveSamples:ess,coverage:this.rolloutDecisions?this.trainedDecisions/this.rolloutDecisions:1,evidenceCoverage:this.rolloutDecisions?this.evidenceDecisions/this.rolloutDecisions:1,actionCoverage:this.actionDecisions.map((count,i)=>count?this.actionEvidence[i]/count:1),beliefCoverage:this.beliefDecisions?this.trainedBeliefDecisions/this.beliefDecisions:1,continuationDecisions:this.rolloutDecisions,reference:this.rootQuery.probs,referenceVisits:this.rootQuery.visits,referenceUpdates:this.rootQuery.updates,referenceDrift:Number.isFinite(this.rootQuery.drift)?this.rootQuery.drift:this.rootQuery.drift==null?undefined:null,referenceActionCount:this.rootQuery.actions.length,referenceTrained:this.rootQuery.trained,ignoredPublicActions:this.ignored,units:this.config.mode==='cash'?'bb':'prize units',warning:'Rollout values estimate this sampled model, not a certified GTO equilibrium. Sampling intervals do not include strategy-model error.'};
     }
   }
-  const api={Model,Table,Analysis,episode,matching,normalizeAbstraction,matchAction,referenceEvidence,assessmentEvidence,VERSION};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerTraining=api;
+  const api={Model,Table,Analysis,episode,matching,normalizeAbstraction,matchAction,referenceEvidence,assessmentEvidence,solverEV,VERSION};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerTraining=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

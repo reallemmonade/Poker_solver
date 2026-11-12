@@ -50,7 +50,35 @@ Options:
 - **Spot:** the current street onward, for the two players left in the hand. Ranges are the app's ranges, averaged per hand class so TexasSolver can use suit isomorphism.
 - **Bet tree:** one bet size per street (flop 33%, turn 66%, river 75% of pot) and all-in, plus a 66% raise on the flop. Turn and river raises are all-in only, and there are no donk bets. Any bet committing more than two thirds of the stack becomes all-in. The sizes actually used on the current street are added so the real line exists in the tree.
 - **Stopping rule:** the solve stops at 1% exploitability (in percent of the pot) or 200 iterations.
-- **Not reported:** TexasSolver doesn't report action EVs, so these results show frequencies and are never used for grades.
+- **Action EVs and grades:** the install script builds TexasSolver with `texassolver-evs.patch`, so its result also holds, for every decision on the solved street, each hand's EV for each action. The app shows them in bb from the decision (folding is 0) and grades your action on the EV it lost, as it does for the solves it runs itself. Details below.
+
+### Action EVs (chip-EV grading)
+
+**What the solver writes.** Next to each dumped decision's `strategy`, the patched solver writes:
+
+- `action_evs`: for each combo in the acting player's range, one number per action (in the order of `actions`), to a tenth of a chip. It is the EV of taking that action and then both players following the solved average strategy, given the other player's range at that node, in chips net of half the starting pot (folding loses exactly what the player has put in).
+- `action_evs_reach`: the share of the other player's starting range that gets to the node.
+- `action_evs_kind` on the root: `average`, or `best` when the solver ran with `TEXASSOLVER_ACTION_EVS=best` (the player best-responds after the action instead; the other player still plays the average strategy). `TEXASSOLVER_ACTION_EVS=off` leaves all three out.
+
+Only decisions before the next card carry them (the street the app reads). They cost one more pass over the tree after the solve, and make the dump about half as large again. The root's `evs` (each hand's best-response EV at the root, used to calibrate the preflop model) is unchanged.
+
+**Why the average strategy.** On real river and turn solves the two kinds agree to about 0.01 to 0.1 bb at every node the other player reaches more than 1% of the time, and an action the solver plays loses about 0.02 bb there. On a line the other player takes under 1% of the time, both are noise, like the frequencies at that node.
+
+**What the app does with them** (`studio/local-solver.js` `actionEVs`):
+
+- The EV of each action becomes bb from the decision, and its cost is the gap to the best action.
+- An action the solver mixes in at 5% or more whose gap is within the solve's accuracy target (1% of the pot by default) costs nothing: at equilibrium those EVs are equal, and what is left is solver noise.
+- The answer is graded on EV lost (0.05 bb or less is still a correct play), the Analysis shows the EV table, and the hand report shows the chips lost. The hand trace's `graded` line says `EV from a live solve`.
+- A later decision on the same street is read from the kept tree, which holds your hand's EVs at your own decisions, so it grades on EV too without a second solve.
+
+**When it still grades on frequency** (an action played 5% or more is correct, as before), and the trace says why (`evSkipped`):
+
+- the solver was built before this patch (the bridge says so once in its log; run the install script again);
+- the table pays prizes (ICM): the EVs are chips;
+- the other player takes the line under 1% of the time in the solve;
+- the solve stopped before its accuracy target.
+
+Flop libraries are still graded on frequency: see [tools/postflop/README.md](../postflop/README.md).
 
 ## PLO: what plo_solver solves
 
@@ -84,7 +112,7 @@ Options:
 - its EV for each action, given the other player's strategy;
 - its own reach probability.
 
-The EVs are chips won from the pot minus chips put in since the street began, so the two players' EVs sum to the pot. No rake is taken. The app shows them in bb from the current decision. It does not grade these decisions; grades still come only from the in-browser exact solvers. If a combo reaches a node less than 0.5% of the time in its own strategy, its average there rests on early iterations, so its row shows the best-EV action instead.
+The EVs are chips won from the pot minus chips put in since the street began, so the two players' EVs sum to the pot. No rake is taken. The app shows them in bb from the current decision. It does not grade these decisions; grades come only from the in-browser exact solvers and live TexasSolver solves. If a combo reaches a node less than 0.5% of the time in its own strategy, its average there rests on early iterations, so its row shows the best-EV action instead.
 
 ### PLO speed and memory
 

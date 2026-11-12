@@ -39,4 +39,29 @@ ok(h.street===2&&L.treeAnswer(result,data(h),h)===null,'a turn decision is not r
 // A small budget keeps the first nodes only.
 const small=L.streetTree(dump,spec,140);ok(small&&small.nodes.length>=1&&small.nodes.length<4,'a small budget keeps '+(small&&small.nodes.length)+' node(s)');
 h=hand({kind:'check'},{kind:'bet',target:166});ok(L.treeAnswer({...result,solve:{...result.solve,tree:small}},data(h),h)===null,'a line past the kept nodes solves again');
+// Action EVs, as a solver built with texassolver-evs.patch dumps them: chips net of half the 5 bb pot for each action,
+// so folding to the bet is -250. The kept tree holds the hero hand's row at the hero's nodes, and a decision read from
+// it carries EVs in bb from the decision (fold 0) and grades on EV lost.
+const T=require('../../studio/trainer.js'),evDump=JSON.parse(JSON.stringify(dump)),facing=evDump.childrens.CHECK.childrens['BET 166.000000'];
+evDump.action_evs_kind='average';evDump.action_evs_reach=1;evDump.action_evs={AsKd:[-100,-103],QcQd:[40,90],AcKh:[-100,-101]};
+facing.action_evs_reach=.4;facing.action_evs={AsKd:[-250,-190,-420],QcQd:[-250,80,150],AcKh:[-250,-240,-500]};
+const evSpec={...spec,hero:'KdAs',accuracy:1},evTree=L.streetTree(evDump,evSpec),evResult={...result,solve:{...result.solve,tree:evTree}};
+ok(evTree&&evTree.evKind==='average'&&evTree.nodes.filter(n=>n.ev).length===2&&!evTree.nodes.some(n=>n.player==='ip'&&n.ev),'the tree keeps the hero hand\'s action EVs at the hero\'s two decisions');
+ok(!result.solve.tree.evKind&&!result.solve.tree.nodes.some(n=>n.ev)&&!T.assessmentEvidence(a).usable,'a dump without action EVs (an older solver) keeps none and grades on frequency');
+h=hand({kind:'check'},{kind:'bet',target:166});a=L.treeAnswer(evResult,data(h),h);
+ok(a&&near(a.mean[0],0)&&near(a.mean[1],.6)&&near(a.mean[2],-1.7)&&a.best===1,'facing the bet: EVs from the decision are fold 0, call +0.6, raise -1.7 bb ('+(a?a.mean.join('/'):'none')+')');
+ok(a&&near(a.loss[0],.6)&&a.loss[1]===0&&near(a.loss[2],2.3)&&near(a.reference[1],.6),'folding costs 0.6 bb and raising 2.3 bb; the frequencies are unchanged');
+ok(a&&a.solve.evAvailable===true&&a.solve.evKind==='average'&&near(a.solve.evReach,.4)&&T.assessmentEvidence(a).usable,'that answer grades on EV');
+// A mixed action within the solve's accuracy (1% of the 5 bb pot) costs nothing: check 70%, bet 30%, 0.03 bb apart.
+h=hand();a=L.treeAnswer(evResult,data(h),h);
+ok(a&&near(a.mean[0],1.5)&&near(a.mean[1],1.47)&&a.loss[0]===0&&a.loss[1]===0&&near(a.solve.evTolerance,.05),'the first decision: check +1.5, bet +1.47 bb, both in the mix and free');
+// EVs are set aside, with the reason, on a line the opponent almost never takes and when the solve did not converge.
+const rare=JSON.parse(JSON.stringify(evDump));rare.childrens.CHECK.childrens['BET 166.000000'].action_evs_reach=.004;
+h=hand({kind:'check'},{kind:'bet',target:166});a=L.treeAnswer({...result,solve:{...result.solve,tree:L.streetTree(rare,evSpec)}},data(h),h);
+ok(a&&a.mean.every(x=>x===0)&&a.loss.every(x=>x===0)&&/under 1%/.test(a.solve.evSkipped)&&!T.assessmentEvidence(a).usable&&near(a.reference[1],.6),'a line the opponent takes 0.4% of the time grades on frequency: '+(a&&a.solve.evSkipped));
+a=L.treeAnswer({...evResult,solve:{...evResult.solve,exploitability:1.6}},data(h),h);
+ok(a&&a.mean.every(x=>x===0)&&/accuracy target/.test(a.solve.evSkipped)&&!T.assessmentEvidence(a).usable,'a solve that stopped at 1.6% (target 1%) grades on frequency: '+(a&&a.solve.evSkipped));
+// The other player's cards never read the hero's EVs.
+const swapped={...evTree,evHero:'QcQd'};a=L.treeAnswer({...evResult,solve:{...evResult.solve,tree:swapped}},data(h),h);
+ok(a&&a.mean.every(x=>x===0)&&!a.solve.evAvailable,'EVs kept for another hand are not used');
 console.log(fail?fail+' check(s) failed.':'All tree checks passed.');process.exit(fail?1:0);

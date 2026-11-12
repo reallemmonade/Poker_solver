@@ -1,27 +1,70 @@
 diff --git a/include/solver/BestResponse.h b/include/solver/BestResponse.h
-index 9e36411..89f632a 100644
+index 9e36411..bda6ea0 100644
 --- a/include/solver/BestResponse.h
 +++ b/include/solver/BestResponse.h
-@@ -45,6 +45,9 @@ public:
+@@ -17,6 +17,7 @@
+ #include <nodes/ShowdownNode.h>
+ #include <tools/utils.h>
+ 
++#include <map>
+ using namespace std;
+ 
+ class BestResponse {
+@@ -45,6 +46,17 @@ public:
              );
      float printExploitability(shared_ptr<GameTreeNode> root, int iterationCount, float initial_pot, uint64_t initialBoard);
      float getBestReponseEv(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard,int deal);
 +    // Per-hand EV (chips, net of half the starting pot) of a best response to the
 +    // opponent's average strategy; -1e30 for hands that collide with the board.
 +    vector<float> handEvs(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard);
++    // Per-hand EV of each action at every decision of `player` before the next card is dealt: the EV (chips, net of
++    // half the starting pot) of taking the action and then both players following the solved average strategy, given
++    // the opponent's range at that node. With best_after the player instead plays its best response after the action
++    // (the opponent still plays the average strategy). out[node].evs[action][hand], -1e30 for hands that cannot be
++    // there; out[node].reach is the share of the opponent's starting range that gets to the node.
++    struct ActionEvs { float reach = 0; vector<vector<float>> evs; };
++    void actionEvs(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard,
++                   std::map<GameTreeNode*,ActionEvs>& out, bool best_after = false);
  
  private:
      vector<float> bestResponse(shared_ptr<GameTreeNode> node, int player, const vector<vector<float>>& reach_probs, uint64_t board,int deal);
+@@ -54,6 +66,10 @@ private:
+     vector<float> showdownBestResponse(shared_ptr<ShowdownNode> node, int player, const vector<vector<float>>& reach_probs,uint64_t board,int deal);
+     int color_iso_offset[52 * 52 * 2][4];
+     GameTreeNode::GameRound split_round;
++    // Set by actionEvs: the player follows the average strategy at its own decisions instead of the best action.
++    bool average_mode = false;
++    bool best_after = false;
++    std::map<GameTreeNode*,ActionEvs>* action_ev_out = nullptr;
+ };
+ 
+ 
 diff --git a/include/solver/PCfrSolver.h b/include/solver/PCfrSolver.h
-index 3bcfcf2..5417e89 100644
+index 3bcfcf2..4275f37 100644
 --- a/include/solver/PCfrSolver.h
 +++ b/include/solver/PCfrSolver.h
-@@ -92,6 +92,8 @@ public:
+@@ -12,6 +12,8 @@
+ #include <trainable/CfrPlusTrainable.h>
+ #include <trainable/DiscountedCfrTrainable.h>
+ #include "Solver.h"
++#include "solver/BestResponse.h"
++#include <map>
+ #include <omp.h>
+ #include "tools/lookup8.h"
+ #include "tools/utils.h"
+@@ -92,6 +94,15 @@ public:
      );
      void train() override;
      json dumps(bool with_status,int depth);
 +    // Per-hand EVs at the root for both players, keyed by combo.
 +    json dumpEvs();
++    // Per-hand per-action EVs of every decision before the next card, filled by dumps() and written next to each
++    // dumped node's strategy as "action_evs" (with "action_evs_reach", the share of the other player's range there).
++    // The root also says which kind they are ("action_evs_kind"): "average" (both players follow the solved average
++    // strategy after the action) or, when TEXASSOLVER_ACTION_EVS=best, "best" (the player best-responds after it).
++    std::map<GameTreeNode*,BestResponse::ActionEvs> action_evs;
++    bool action_evs_best = false;
++    void fillActionEvs();
  private:
      vector<vector<PrivateCards>> ranges;
      vector<PrivateCards> range1;
@@ -40,10 +83,58 @@ index 0cf7fc4..c48a1a7 100644
      fileWriter.open(dump_file);
      fileWriter << dump_json;
 diff --git a/src/solver/BestResponse.cpp b/src/solver/BestResponse.cpp
-index 49e2560..a9046bb 100644
+index 49e2560..690b892 100644
 --- a/src/solver/BestResponse.cpp
 +++ b/src/solver/BestResponse.cpp
-@@ -458,3 +458,23 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
+@@ -231,6 +231,47 @@ BestResponse::actionBestResponse(shared_ptr<ActionNode> node, int player, const
+         // 这里可以当成"player"做决定的时候，action prob是0-1分布，因为需要使用最好的策略去expliot对方，最好的策略一定是ont-hot的
+         vector<float> my_exploitability = vector<float>(reach_probs[player].size());
+ 
++        if(this->average_mode){
++            // Action EVs: the value of each action with both players on the average strategy afterwards. These are
++            // sums over the opponent's hands weighted by its reach, so they do not depend on the player's own reach.
++            const vector<float>& own_strategy = node->getTrainable(deal)->getAverageStrategy();
++            int hands = reach_probs[player].size();
++            bool keep = this->action_ev_out != nullptr && deal == 0;
++            vector<vector<float>> per_action;
++            fill(my_exploitability.begin(),my_exploitability.end(),0);
++            for(int action_ind = 0;action_ind < node->getChildrens().size();action_ind ++){
++                const vector<float>& node_ev = this->bestResponse(node->getChildrens()[action_ind],player,reach_probs,board,deal);
++                if(!this->best_after) for(int i = 0;i < hands;i ++) my_exploitability[i] += own_strategy[action_ind * hands + i] * node_ev[i];
++                else if(action_ind == 0) my_exploitability.assign(node_ev.begin(),node_ev.end());
++                else for(int i = 0;i < hands;i ++) my_exploitability[i] = max(my_exploitability[i],node_ev[i]);
++                if(keep) per_action.push_back(node_ev);
++            }
++            if(keep){
++                // Divide by the opponent's weight this hand can face here, so each value is an EV given this node.
++                vector<PrivateCards>& player_combo = this->private_combos[player];
++                vector<PrivateCards>& oppo_combo = this->private_combos[1 - player];
++                const vector<float>& oppo_reach = reach_probs[1 - player];
++                for(int i = 0;i < hands;i ++){
++                    uint64_t private_long = player_combo[i].toBoardLong();
++                    float oppo_sum = 0;
++                    if(!Card::boardsHasIntercept(private_long,board)){
++                        for(int j = 0;j < oppo_combo.size();j ++){
++                            uint64_t private_long_oppo = oppo_combo[j].toBoardLong();
++                            if(Card::boardsHasIntercept(private_long,private_long_oppo) || Card::boardsHasIntercept(private_long_oppo,board)) continue;
++                            oppo_sum += oppo_reach[j];
++                        }
++                    }
++                    for(vector<float>& one_action:per_action) one_action[i] = oppo_sum > 1e-9f ? one_action[i] / oppo_sum : -1e30f;
++                }
++                float reach = 0, start = 0;
++                for(int j = 0;j < oppo_combo.size();j ++){ reach += oppo_reach[j]; start += oppo_combo[j].weight; }
++                ActionEvs& kept = (*this->action_ev_out)[node.get()];
++                kept.reach = start > 0 ? reach / start : 0;
++                kept.evs = per_action;
++            }
++            return my_exploitability;
++        }
++
+         bool first_action_flag = true;
+         for(shared_ptr<GameTreeNode> one_node:node->getChildrens()){
+             const vector<float>& node_ev = this->bestResponse(one_node,player,reach_probs,board,deal);
+@@ -458,3 +499,33 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
      return payoffs;
  }
  
@@ -67,20 +158,32 @@ index 49e2560..a9046bb 100644
 +    }
 +    return out;
 +}
++
++void BestResponse::actionEvs(shared_ptr<GameTreeNode> node, int player, vector<vector<float>> reach_probs,
++                             uint64_t initialBoard, std::map<GameTreeNode*,ActionEvs>& out, bool best_after) {
++    this->average_mode = true;
++    this->best_after = best_after;
++    this->action_ev_out = &out;
++    bestResponse(node, player, reach_probs, initialBoard, 0);
++    this->average_mode = false;
++    this->action_ev_out = nullptr;
++}
 diff --git a/src/solver/PCfrSolver.cpp b/src/solver/PCfrSolver.cpp
-index f0e022b..9ba3ba3 100644
+index f0e022b..d1db921 100644
 --- a/src/solver/PCfrSolver.cpp
 +++ b/src/solver/PCfrSolver.cpp
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,10 @@
  
  #include <solver/BestResponse.h>
  #include "solver/PCfrSolver.h"
 +#include <cstdlib>
 +#include <fstream>
++#include <cmath>
++#include <map>
  
  //#define DEBUG;
  
-@@ -732,8 +734,15 @@ void PCfrSolver::train() {
+@@ -732,8 +736,15 @@ void PCfrSolver::train() {
  
      uint64_t begintime = timeSinceEpochMillisec();
      uint64_t endtime = timeSinceEpochMillisec();
@@ -96,7 +199,35 @@ index f0e022b..9ba3ba3 100644
          for(int player_id = 0;player_id < this->player_number;player_id ++) {
              this->round_deal = vector<int>{-1,-1,-1,-1};
              //#pragma omp parallel
-@@ -966,3 +975,23 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+@@ -859,6 +870,21 @@ void PCfrSolver::reConvertJson(const shared_ptr<GameTreeNode>& node,json& strate
+ 
+             }
+             PCfrSolver::filterColliding((*retval)["strategy"],current_board_long);
++            // Each hand's EV for each action (same order as "actions"), to a tenth of a chip, for hands in range
++            // that can be at this node. Only decisions before the next card carry them.
++            auto found = this->action_evs.find(node.get());
++            if(found != this->action_evs.end() && !found->second.evs.empty()){
++                vector<PrivateCards> cards = this->pcm.getPreflopCards(one_node->getPlayer());
++                json evs = json::object();
++                for(int i = 0;i < cards.size();i ++){
++                    if(!(found->second.evs[0][i] > -1e29f)) continue;
++                    vector<double> row;
++                    for(const vector<float>& one_action:found->second.evs) row.push_back(std::round((double)one_action[i] * 10) / 10);
++                    evs[cards[i].toString()] = row;
++                }
++                (*retval)["action_evs"] = evs;
++                (*retval)["action_evs_reach"] = std::round((double)found->second.reach * 1e5) / 1e5;
++            }
+         }
+         (*retval)["node_type"] = "action_node";
+ 
+@@ -962,7 +988,46 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+         throw runtime_error("");
+     }
+     json retjson;
++    this->fillActionEvs();
+     this->reConvertJson(this->tree->getRoot(),retjson,"",0,depth,vector<string>({"begin"}),0,vector<vector<int>>(),this->initial_board_long);
++    if(!this->action_evs.empty()) retjson["action_evs_kind"] = this->action_evs_best ? "best" : "average";
      return std::move(retjson);
  }
  
@@ -119,4 +250,21 @@ index f0e022b..9ba3ba3 100644
 +        out[std::to_string(p)] = one;
 +    }
 +    return out;
++}
++
++void PCfrSolver::fillActionEvs() {
++    this->action_evs.clear();
++    const char* kind = getenv("TEXASSOLVER_ACTION_EVS");
++    if(kind != nullptr && string(kind) == "off") return;
++    this->action_evs_best = kind != nullptr && string(kind) == "best";
++    vector<vector<PrivateCards>> player_privates(this->player_number);
++    player_privates[0] = pcm.getPreflopCards(0);
++    player_privates[1] = pcm.getPreflopCards(1);
++    BestResponse br = BestResponse(player_privates,this->player_number,this->pcm,this->rrm,this->deck,this->debug,this->color_iso_offset,this->split_round,this->num_threads);
++    vector<vector<float>> reach_probs(this->player_number);
++    for(int p = 0;p < this->player_number;p ++){
++        reach_probs[p] = vector<float>(player_privates[p].size());
++        for(int i = 0;i < player_privates[p].size();i ++) reach_probs[p][i] = player_privates[p][i].weight;
++    }
++    for(int p = 0;p < this->player_number;p ++) br.actionEvs(this->tree->getRoot(), p, reach_probs, this->initial_board_long, this->action_evs, this->action_evs_best);
 +}

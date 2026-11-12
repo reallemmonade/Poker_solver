@@ -102,8 +102,10 @@ git -C "$src" submodule update --init --recursive --quiet
 cd "$src"
 git checkout --quiet -- CMakeLists.txt
 # Per-hand root EVs in the dumped result ("evs"), used to calibrate the preflop model
-# (tools/preflop/calibrate.cjs), and an early stop once the file TEXASSOLVER_STOP_FILE names exists (a cloud solve
-# at its price cap still dumps its strategy so far). Reset first so a second install applies it cleanly.
+# (tools/preflop/calibrate.cjs); each hand's EV for each action at every decision of the solved street
+# ("action_evs"), which the app grades your play on; and an early stop once the file TEXASSOLVER_STOP_FILE names
+# exists (a cloud solve at its price cap still dumps its strategy so far). Reset first so a second install applies
+# it cleanly.
 git checkout --quiet -- include src
 git apply "$here/texassolver-evs.patch"
 sed -i.bak -e 's/ *-fopenmp//g' -e '/CMAKE_OSX_DEPLOYMENT_TARGET/d' CMakeLists.txt
@@ -141,4 +143,4 @@ set_dump_rounds 1
 dump_result smoke.json
 EOF
 (cd build && ../install/console_solver -i smoke.txt --resource_dir ../install/resources >/dev/null)
-test -s build/smoke.json && echo "TexasSolver is ready: $src/install/console_solver"
+test -s build/smoke.json && grep -q '"action_evs"' build/smoke.json && echo "TexasSolver is ready: $src/install/console_solver"

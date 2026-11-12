@@ -6,7 +6,7 @@
 // spots with three or more players.
 // Listens on 127.0.0.1 only. The app posts a solve spec (studio/local-solver.js);
 // the bridge validates it, writes the solver input itself, runs one solve at
-// a time and returns the strategy for the current street.
+// a time and returns the strategy for the current street, with each action's EV when the solver reports them.
 //   node tools/local-solver/server.cjs [--solver path/to/console_solver] [--plo-solver path/to/plo_solver] [--mw-solver path/to/mw_solver] [--port 8787] [--threads N] [--memory MB]
 //     [--name NAME --rate DOLLARS_PER_HOUR]   another computer solving for your account: it takes the jobs the app
 //                                            sends to NAME (see queue.cjs; link it with link.cjs)
@@ -35,7 +35,7 @@ const once=args.once?JSON.parse(fs.readFileSync(args.once,'utf8')):null;
 const allowed=(process.env.RANGE_LAB_ORIGINS||'https://guava.poker,https://www.guava.poker,https://range-lab-poker-studio.onrender.com,http://localhost,http://127.0.0.1').split(',').map(s=>s.trim()).filter(Boolean);
 const originOK=o=>!o||allowed.some(a=>o===a||(/^http:\/\/(localhost|127\.0\.0\.1)$/.test(a)&&o.startsWith(a+':')));
 
-let job=null,finished=null;
+let job=null,finished=null,warnedNoEvs=false;
 // A flop being learned (learn.cjs) runs only while nothing else wants the solver: any solve from the app or the queue
 // stops it, and it is tried again later.
 const busy=()=>!!job&&!job.learning;
@@ -84,7 +84,11 @@ function solve(spec,learning=false){
    clearTimeout(timer);if(Date.now()>=stopAt-5000)capHit=true;const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
    try{
     if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(cancelled?'The solve was cancelled.':code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
-    resolve({tree:JSON.parse(fs.readFileSync(out,'utf8')),iterations,exploitability,seconds,threads:args.threads});
+    // The dump goes to the app whole. A TexasSolver built with texassolver-evs.patch puts each hand's EV for each action
+    // on every node of the street ("action_evs"), which the app grades on (studio/local-solver.js actionEVs); a build
+    // from before that has none, and its answers grade on frequency as they always did.
+    const tree=JSON.parse(fs.readFileSync(out,'utf8'));if(!own&&!tree.action_evs&&!warnedNoEvs){warnedNoEvs=true;console.log('TexasSolver here reports no action EVs, so its answers are graded on frequency. Run tools/local-solver/install-mac.sh again to rebuild it.');}
+    resolve({tree,iterations,exploitability,seconds,threads:args.threads,...own?{}:{actionEvs:!!tree.action_evs}});
    }catch(error){reject(error);}finally{fs.rmSync(dir,{recursive:true,force:true});}
   });
  });
