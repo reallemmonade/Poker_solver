@@ -143,4 +143,7 @@ set_dump_rounds 1
 dump_result smoke.json
 EOF
 (cd build && ../install/console_solver -i smoke.txt --resource_dir ../install/resources >/dev/null)
-test -s build/smoke.json && grep -q '"action_evs"' build/smoke.json && echo "TexasSolver is ready: $src/install/console_solver"
+test -s build/smoke.json && grep -q '"action_evs"' build/smoke.json
+# Keep the patch this build was made from next to it: setup-mac.sh rebuilds TexasSolver when the patch has changed since.
+cp "$here/texassolver-evs.patch" "$src/install/texassolver-evs.patch"
+echo "TexasSolver is ready: $src/install/console_solver"

@@ -40,8 +40,10 @@ src="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
 for part in studio river tools/local-solver tools/plo-solver tools/multiway-solver tools/postflop tools/preflop; do mkdir -p "$dir/$part"; cp -R "$src/$part/." "$dir/$part/"; done
 
 say "3/4 Building the solvers"
-if [ -x "$dir/tools/local-solver/TexasSolver/install/console_solver" ] && [ -x "$dir/tools/plo-solver/plo_solver" ]; then
-  echo "TexasSolver is already built. (Delete $dir/tools/local-solver/TexasSolver to rebuild it.) Rebuilding the PLO and 3-way solvers..."
+# TexasSolver is rebuilt when its patch (texassolver-evs.patch) has changed since the last build, which keeps a copy of
+# the patch it was made from; a build from before that copy existed is rebuilt once.
+if [ -x "$dir/tools/local-solver/TexasSolver/install/console_solver" ] && [ -x "$dir/tools/plo-solver/plo_solver" ] && cmp -s "$dir/tools/local-solver/texassolver-evs.patch" "$dir/tools/local-solver/TexasSolver/install/texassolver-evs.patch"; then
+  echo "TexasSolver is already built and up to date. Rebuilding the PLO and 3-way solvers..."
   PATH="$(dirname "$brew"):$PATH" bash "$dir/tools/local-solver/install-mac.sh" --plo-only
 else
   echo "This takes about 10 minutes the first time."
