@@ -94,7 +94,8 @@ function spotSettings(hand,pending={}){
 //   (tools/local-solver/README.md) and turns seconds. Pots with three or more players run the app's own engines
 //   on the Mac up to the bridge's 30-minute limit, and very wide ones can stop without a settled answer, except
 //   three-way NLH pots, which go to the 3-way solver (tools/multiway-solver): MW3_SECONDS are Mac estimates from
-//   its 4-core Linux measurements (README there), flop, turn and river.
+//   its 4-core Linux measurements (README there), flop, turn and river: the earlier 150, 120 and 10 s times what
+//   flop leads and exact card removal cost on Linux (flop 3.0, turn 1.9, river 2.1), not yet timed on a Mac.
 // - Preflop answers come from charts. A no-limit hold'em line no chart covers goes to the preflop spot solver on the
 //   Mac (tools/preflop/spot.cjs): the chart solver again with this line in its tree, about 0.075 s per iteration per
 //   seat on the Mac (1,100 iterations, 0.01 s heads-up), plus, when the spot can reach the flop three-way, 40 sample
@@ -102,7 +103,7 @@ function spotSettings(hand,pending={}){
 // A queued solve adds about 30 s: the bridge and the phone each sync every 20 seconds.
 // Times scale with the Mac's threads and load, and each finished solve corrects later estimates on this device.
 const SOLVE_EFFORTS={quick:{label:'Quick',accuracy:2,factor:.5},standard:{label:'Standard',accuracy:1,factor:1},deep:{label:'Deep',accuracy:.5,factor:2}};
-const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[150,120,10],MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
+const TURN_SECONDS=15,RIVER_SECONDS=5,PLO_FLOP_SECONDS=300,PLO_TURN_SECONDS=10,MULTIWAY_SECONDS=1800,MW3_SECONDS=[450,225,20],MAC_OFFLINE_MS=10*60000,QUEUE_SECONDS=30;
 // Cloud solves (tools/cloud): when your Mac is offline or busy, a queued solve can go to a container on Modal that is
 // billed by the second, and the button says what it should cost. url is the deployed endpoint (empty: no cloud);
 // rate is its dollars an hour, boot the seconds a cold container takes to start. A rented server running the bridge

@@ -49,7 +49,7 @@ function spec(spot, board) {
   const ranges = spot.classes.map(cl => { const o = {}; for (const cs of G.combinations([...Array(52).keys()].filter(c => !dead.has(c)), 2)) { const w = cl[C.handClass(cs)]; if (w > 0) o[name(cs)] = w; } return o; });
   const t = L.MW_TREE.flop, sizes = {}, caps = {}; for (const [k, v] of Object.entries(t)) { sizes[k] = { bet: v.bet.map(x => Math.round(x * 1e4) / 1e4), raise: v.raise.map(x => Math.round(x * 1e4) / 1e4) }; caps[k] = L.MW_TREE.cap; }
   const hero = Object.keys(ranges[0])[0];
-  return L.validate({ version: 1, game: 'NLH3', board, pot: spot.pot, stack: spot.stack, minBet: 100, sizes, caps, lead: { flop: spot.seats.map(i => i === spot.raiser) }, allin: true, allinThreshold: L.MW_TREE.allinThreshold, runouts: args.runouts === 'auto' ? L.mwRunouts(ranges) : Number(args.runouts), ranges, seats: spot.seats, path: [], hero, heroIndex: 0, accuracy: Number(args.accuracy), maxIterations: Number(args.iterations) });
+  return L.validate({ version: 1, game: 'NLH3', board, pot: spot.pot, stack: spot.stack, minBet: 100, sizes, caps, lead: { flop: spot.seats.map(i => i === spot.raiser) }, leadSizes: { flop: L.MW_TREE.lead.map(x => Math.round(x * 1e4) / 1e4) }, allin: true, allinThreshold: L.MW_TREE.allinThreshold, runouts: args.runouts === 'auto' ? L.mwRunouts(ranges) : Number(args.runouts), ranges, seats: spot.seats, path: [], hero, heroIndex: 0, accuracy: Number(args.accuracy), maxIterations: Number(args.iterations) });
 }
 function run(input, dir) {
   return new Promise((resolve, reject) => {
@@ -90,7 +90,7 @@ async function solve() {
   const ids = args.spots.split(','), flops = args.flops === 'all' ? F.all() : F.subset(Number(args.flops)), tasks = [];
   for (const id of ids) {
     const spot = prepare(id), dir = path.join(args.out, id); fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'spot.json'), JSON.stringify({ id, label: spot.label, game: 'NLH3', seats: spot.seats, actions: spot.actions, pot: spot.pot, stack: spot.stack, tree: L.MW_TREE.flop, ranges: spot.classes }, null, 1));
+    fs.writeFileSync(path.join(dir, 'spot.json'), JSON.stringify({ id, label: spot.label, game: 'NLH3', seats: spot.seats, actions: spot.actions, pot: spot.pot, stack: spot.stack, tree: { ...L.MW_TREE.flop, lead: L.MW_TREE.lead }, ranges: spot.classes }, null, 1));
     console.log(spot.label + ': pot ' + G.bb(spot.pot) + ' bb, stack ' + G.bb(spot.stack) + ' bb, ' + flops.length + ' flops');
     for (const fl of flops) { const file = path.join(dir, fl.key + '.json'); if (!fs.existsSync(file)) tasks.push({ id, spot, f: fl, file, index: ids.indexOf(id) * flops.length + flops.indexOf(fl) }); }
   }
