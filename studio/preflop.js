@@ -151,9 +151,10 @@
  }
  function nearest(packs,hand,controlActions=[],tolerance=1.6){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
-  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
-  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null||best&&gap+f>=best.score)continue;best={pack,gap,chart,score:gap+f,rakeFree:f===1,tourney:f===2};}
-  if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
+  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];const cands=[];
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null)continue;cands.push({pack,gap,chart,score:gap+f,rakeFree:f===1,tourney:f===2});}
+  // The nearest chart answers first; when it has no answer for this line (no node, or one its players never reach), the next chart within the tolerance does.
+  cands.sort((a,b)=>a.score-b.score);for(const best of cands){const r=(()=>{const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
   // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
   // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
   const eff=Math.min(hand.initial[hero],Math.max(...others));
@@ -187,6 +188,7 @@
   if(sizeMatch.length){result.sizeMatch=sizeMatch;result.referenceSource.name+=' · earlier raise sizes mapped to the chart\'s: '+sizeMatch.map(m=>m.actual+' → '+m.chart+' bb').join(', ');result.referenceKey+='|sizes:'+sizeMatch.map(m=>m.actual+'>'+m.chart).join(',');}
   const standIn=(best.pack.chipEV||best.tourney)&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.tourney&&(deadMoney(best.pack.config)!==deadMoney(table)||table.ante>0&&best.pack.config.anteMode!==table.anteMode)){result.anteStandIn=true;result.referenceSource.name+=' · chart ante differs from this table\'s';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
+  })();if(r)return r;}return null;
  }
  // NLH: each live player's range at this node (the chart's frequency of every action they took on the
  // way, by hand class, scaled so the widest class is 1) and the actor's whole strategy by hand class,
