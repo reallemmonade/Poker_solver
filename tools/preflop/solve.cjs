@@ -197,6 +197,11 @@ class Solver{
    }
    if(!moved)break;
   }
+  // entry.probeCap (level2.cjs fit --probe-cap c): a class the line's solved ranges hold at under 5% of
+  // its combos (a probe hand, library.cjs --probe) is only measured, not played, so its factor may move
+  // the formula's value by at most c either way. Played classes keep their measured factors.
+  const cap=Number(entry.probeCap)||0;
+  if(cap>1)for(let i=0;i<K;i++)if(!((own[cls[i]]||0)>=.05))k[i]=Math.min(cap,Math.max(1/cap,k[i]));
   return k;
  }
  // Regret matching (current) or the averaged strategy, laid out [action*K+class].
