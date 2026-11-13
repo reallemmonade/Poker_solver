@@ -184,9 +184,15 @@ class Solver{
   // lower kicker would otherwise keep the model's more hopeful value. Copying the neighbour's factor
   // instead lifted weak unmeasured hands into 3-bet bluffs (blind 3-bets doubled on the pilot's
   // round-0 chart). Probed solves (library.cjs --probe) measure every class, in range or not.
-  const k=Float64Array.from(logk,(x,i)=>{const p=prior?prior[i]:1;if(!n[i])return p;const t=clamp(Math.exp(x/n[i]));return prior?clamp(Math.exp(step*Math.log(t)+(1-step)*Math.log(p))):t;});
   const last=list[list.length-1],opp=side==='ip'?last.rangeOop:last.rangeIp,own=side==='ip'?last.rangeIp:last.rangeOop,r=Float64Array.from(cls,c=>opp[c]||0);
   const model=new Float64Array(K);for(let i=0;i<K;i++){let won=0,seen=0;for(let j=0;j<K;j++)if(r[j]){won+=S[i*K+j]*r[j];seen+=C[i*K+j]*r[j];}model[i]=seen>0?won/seen:0;}
+  // entry.probeDiscount (level2.cjs fit --probe-discount d): a class held at under 5% of its combos in
+  // the line's solved ranges (a probe hand) is not in the opponent's model of the range, so it plays
+  // like a hidden hand and measures about 1.2-1.3 times better than the same class does when it is
+  // really played (pilot data, 76s-65s as probes vs in range). Its measured factor is divided by d
+  // before damping, so a probe hand enters only if it measures well beyond that bonus.
+  const disc=Number(entry.probeDiscount)||1,probed=i=>disc>1&&!((own[cls[i]]||0)>=.05);
+  const k=Float64Array.from(logk,(x,i)=>{const p=prior?prior[i]:1;if(!n[i])return p;const t=clamp(Math.exp(x/n[i])/(probed(i)?disc:1));return prior?clamp(Math.exp(step*Math.log(t)+(1-step)*Math.log(p))):t;});
   // Classes sit in a kicker chain and possibly a connector chain: repeat until every chain holds.
   for(let round=0;round<50;round++){let moved=false;
    for(const chain of CHAINS){
