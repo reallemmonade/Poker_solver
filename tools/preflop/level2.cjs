@@ -28,7 +28,7 @@
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
 const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',probecap:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
-for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
+for(let i=3;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,'').replace(/-/g,'');if(!(k in args))throw Error('Unknown option '+process.argv[i]);args[k]=process.argv[i+1];}
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
 // Combos of a hand class (AKs, AKo, 77) that no board card blocks. A flop that hits a class (88 on
