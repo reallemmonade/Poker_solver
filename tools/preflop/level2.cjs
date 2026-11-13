@@ -8,7 +8,7 @@
 // Solving again on the new charts and refitting converges the ranges and the shares together
 // (tools/calibration/level2.sh runs the rounds).
 //   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"] [--live 0 for the old flop-only weighting]
-//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json]
+//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json] [--probe-cap 1.2]
 //   node tools/preflop/level2.cjs settle --old charts.json.gz --new charts.json.gz [--threshold .03]
 //   node tools/preflop/level2.cjs moved --old charts.json.gz --new charts.json.gz --spots per-spot-6max [--threshold .05]
 //   node tools/preflop/level2.cjs compare --a m0.json.gz --b dir|m.json.gz
@@ -27,7 +27,7 @@
 // whose ranges moved more than --threshold (total variation over combos, either player) between
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
-const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
+const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',probecap:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
@@ -73,7 +73,7 @@ function fit(){
  for(const [k,list]of lines){
   // A set keeps one fit per depth; the line goes into its own depth's bucket.
   const target=bucket(cal,k);if(!target){console.log(`${k}: no ${depth(k)}bb fit in ${args.base}, skipped`);continue;}
-  target.spots=target.spots||{};const e={...target.spots[k],measured:list.slice(-keep)};delete e.step;delete e.prior;
+  target.spots=target.spots||{};const e={...target.spots[k],measured:list.slice(-keep)};delete e.step;delete e.prior;delete e.probeCap;if(Number(args.probecap)>1)e.probeCap=Number(args.probecap);
   if(step!==null&&step<1){e.step=step;const p=before(k);if(p)e.prior=p;}
   target.spots[k]=e;
  }
