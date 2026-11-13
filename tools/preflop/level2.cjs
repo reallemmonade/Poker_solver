@@ -7,7 +7,7 @@
 // solved against) makes solve.cjs scale the line's share matrix class by class to match them.
 // Solving again on the new charts and refitting converges the ranges and the shares together
 // (tools/calibration/level2.sh runs the rounds).
-//   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"]
+//   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"] [--live 0 for the old flop-only weighting]
 //   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json]
 //   node tools/preflop/level2.cjs settle --old charts.json.gz --new charts.json.gz [--threshold .03]
 //   node tools/preflop/level2.cjs moved --old charts.json.gz --new charts.json.gz --spots per-spot-6max [--threshold .05]
@@ -27,10 +27,21 @@
 // whose ranges moved more than --threshold (total variation over combos, either player) between
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
-const args={cmd:process.argv[2]||'help',a:'',b:'',step:'',prior:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
+const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
 for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
+// Combos of a hand class (AKs, AKo, 77) that no board card blocks. A flop that hits a class (88 on
+// 8-x-x, A5s on A-x-x) leaves it few live combos, and a class's EV there is an average over those
+// few only, so a flop average over boards has to weight each board by them: weighting by the flop
+// alone counted the boards that block a class as fully as the ones that don't, and those are the
+// boards where the class is strongest. Measured shares came out about 1.23 of the pot, not 1.05.
+function live(cls,board){
+ const dead=new Set(board.match(/[2-9TJQKA][cdhs]/g)||[]),a=cls[0],b=cls[1],suits='cdhs';let n=0;
+ if(cls.length===2){const left=suits.split('').filter(s=>!dead.has(a+s)).length;return left*(left-1)/2;}
+ for(const s of suits)for(const t of suits){if(dead.has(a+s)||dead.has(b+t))continue;if(cls[2]==='s'?s===t:s!==t)n++;}
+ return n;
+}
 
 // One record per solved line: its chart, key, ranges and each class's average pot share.
 function extract(dirs,chart){
@@ -41,7 +52,7 @@ function extract(dirs,chart){
   const sum={ip:{},oop:{}},mass={ip:{},oop:{}};let flops=0;
   for(const f of fs.readdirSync(path.join(dir,id)).filter(x=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(x))){
    let r;try{r=JSON.parse(fs.readFileSync(path.join(dir,id,f),'utf8'));}catch{continue;}if(!r.evs)continue;flops++;
-   for(const side of ['ip','oop'])for(const [c,ev]of Object.entries(r.evs[side])){sum[side][c]=(sum[side][c]||0)+r.weight*(spot.pot/2+ev)/spot.pot;mass[side][c]=(mass[side][c]||0)+r.weight;}
+   for(const side of ['ip','oop'])for(const [c,ev]of Object.entries(r.evs[side])){{const w=r.weight*(args.live==='0'?1:live(c,f.replace('.json',''))),x=(spot.pot/2+ev)/spot.pot;if(!(w>0))continue;sum[side][c]=(sum[side][c]||0)+w*x;mass[side][c]=(mass[side][c]||0)+w;}}
   }
   if(!flops)continue;
   const share=side=>Object.fromEntries(Object.keys(sum[side]).sort().map(c=>[c,round(sum[side][c]/mass[side][c])]));
