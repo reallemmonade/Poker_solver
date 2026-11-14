@@ -50,6 +50,12 @@ const ORDER_PAIRS=(()=>{const R='AKQJT98765432',out=[];for(let i=0;i<13;i++)for(
  for(const gap of [1,2])for(let i=1;i+gap<13;i++)for(let k=i+1;k+gap<13;k++)out.push([R[i]+R[i+gap]+'s',R[k]+R[k+gap]+'s']);return out;})();
 function chartOrderBreach(classes,cls,fold){if(!classes||!(fold>=0)||!classes[cls])return false;const cont=c=>Array.isArray(classes[c])?1-(classes[c][fold]||0):null;
  for(const [hi,lo] of ORDER_PAIRS){if(hi!==cls&&lo!==cls)continue;const a=cont(hi),b=cont(lo);if(a!==null&&b!==null&&b-a>=.5)return true;}return false;}
+// Two chart families are not graded at all (spot trust audit, tools/spot-trust/audit.cjs): PLO preflop (hand-group charts
+// never checked against an outside reference) and the big blind facing a limp (the limp trees' realization model raises
+// 31-59% there, likely too often, with no outside reference). Read from the saved line and variant, so older grades
+// follow the same rule. chartLimped: nobody has raised, someone limped, and the hero has not acted yet.
+function chartLimped(actions,hero){return actions.some(a=>a.kind==='call')&&!actions.some(a=>a.kind==='raise'||a.kind==='bet'||a.seat===hero&&a.kind!=='fold');}
+function gradeUnreliableChart(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions))return false;return/^PLO/i.test(g.variant||g.config?.variant||'')||Number.isInteger(g.hero)&&chartLimped(g.actions,g.hero);}
 function gradeOrderBreach(g){return!!g?.orderBreach&&gradeSplit(g)!=='after';}
 // A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
 // Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
@@ -67,7 +73,7 @@ function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
 // Neither is graded; older grades, made when the chart offered no call at all, are found from the saved line and options.
 function gradeOvercall(g){if(gradeSplit(g)!=='vsopen')return false;let raised=false,flat=false;for(const a of g.actions){if(a.kind==='raise'||a.kind==='bet')raised=true;else if(raised&&a.kind==='call'&&a.seat!==g.hero)flat=true;}
  return flat&&(!!g.overcall||!(g.options||[]).some(o=>/^call\b/i.test(o?.label||'')));}
-function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||gradeOrderBreach(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeUnreliableChart(g)||gradeOffChart(g)||gradeOpenConnector(g)||gradeOrderBreach(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
