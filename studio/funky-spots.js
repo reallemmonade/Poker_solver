@@ -19,6 +19,7 @@
   'premium-fold':'The answer folds a premium hand preflop',
   'impossible-mix':'An answer\'s frequencies do not add up',
   'ungraded-silently':'A decision you played got no grade, and the trace does not say why',
+  'full-solve-fewer-sizes':'A solve asked for every bet size came back with fewer (a flop library or learned flop answered it)',
  };
  const STUCK_MS=15*60*1000,MISROUTED=/joint-deal budget|compatibility-search budget|This exact (heads-up|multiplayer) (tree|calculation)|Exact (heads-up|multiplayer) tree preparation|One iteration of this exact/;
  const used=e=>e.type==='show job'||e.type==='grade from job'||e.type==='answer'&&e.from==='finished job';
@@ -49,6 +50,11 @@
    if(e.type==='cloud start'&&e.ok===false)add('solve-error','cloud solve did not start: '+(e.error||'no message'),{job:e.job});
    if(e.type==='finished job not shown'&&e.reason==='answer not usable')add('solve-not-shown','solve '+e.job+' finished with an answer that could not be used',{job:e.job,spot:e.spot});
   }
+  // A full-size solve (asked from a flop library that bets only 33%) must come back with every size: a job whose answer
+  // is itself a fewer-sizes library answer means the Mac or cloud answered from a library or a learned flop instead.
+  {const full=new Set(ev.filter(e=>e.type==='solve'&&e.job&&ev.some(a=>a.type==='ask'&&a.fullTree===true&&(a.ms||0)<=(e.ms||0)&&(e.ms||0)-(a.ms||0)<5000)).map(e=>e.job));
+   for(let i=0;i<ev.length;i++){const e=ev[i];if(e.type!=='show job'||!full.has(e.job))continue;const r=ev.slice(i+1,i+4).find(x=>x.type==='result');
+    if(r&&r.fewerSizes===true){add('full-solve-fewer-sizes','solve '+e.job+' was asked for every bet size but showed a fewer-sizes '+(r.from||'library')+' answer',{job:e.job,spot:e.spot});full.delete(e.job);}}}
   // A decision whose grade waited for a solve: it must end graded (or be dropped with a reason we can see).
   for(const e of ev)if(e.type==='grade waits for job'||e.type==='grade waits for street tree'){
    const done=ev.some(x=>(x.ms||0)>=(e.ms||0)&&(x.type==='grade wait dropped'||(x.type==='grade from job'||x.type==='graded')&&(x.spot===e.spot||!e.spot)));
