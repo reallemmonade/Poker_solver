@@ -37,9 +37,14 @@
   // Job lifecycle: the last status each job reached.
   const last=new Map(),lastAt=new Map();for(const e of ev)if(e.type==='job'&&e.job){last.set(e.job,e);lastAt.set(e.job,e.ms||0);}
   const shown=new Set(ev.filter(used).map(e=>e.job));
+  // A job can only be called stuck if the app was still there to hear it finish: the hand ended, or the trace kept
+  // recording (or saving) for a while after the job's last change. A page closed mid-hand with a solve out stops the
+  // trace right there, and the solve's end is never heard (not a stuck solve).
+  const ended=ev.some(e=>e.type==='end'),heard=Math.max(ev.reduce((m,e)=>Math.max(m,e.ms||0),0),t.savedAt&&t.startedAt?t.savedAt-t.startedAt:0);
+  const watched=at=>ended||heard-at>STUCK_MS;
   for(const [job,e] of last){
    if(e.status==='done'&&!shown.has(job))add('solve-not-shown','solve '+job+' ('+(e.target||'?')+') finished but was never shown or used to grade',{job,spot:e.spot});
-   if((e.status==='queued'||e.status==='running')&&t.startedAt&&now-(t.startedAt+(lastAt.get(job)||0))>STUCK_MS)add('solve-stuck','solve '+job+' ('+(e.target||'?')+') still '+e.status+' '+Math.round((now-t.startedAt-(lastAt.get(job)||0))/60000)+' min after its last change',{job,spot:e.spot});
+   if((e.status==='queued'||e.status==='running')&&t.startedAt&&now-(t.startedAt+(lastAt.get(job)||0))>STUCK_MS&&watched(lastAt.get(job)||0))add('solve-stuck','solve '+job+' ('+(e.target||'?')+') still '+e.status+' '+Math.round((now-t.startedAt-(lastAt.get(job)||0))/60000)+' min after its last change',{job,spot:e.spot});
    if(e.status==='failed')add('solve-error','solve '+job+' ('+(e.target||'?')+') failed: '+(e.message||'no message'),{job,spot:e.spot});
    // The Mac and the cloud answer with TexasSolver or the 3-way solver. A failure worded by the app's own exact engines
    // (their node, memory or joint-deal budgets) means the spot fell through to them: the route is wrong, not the spot.
