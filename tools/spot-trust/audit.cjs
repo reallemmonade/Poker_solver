@@ -54,7 +54,7 @@ const POLICY={
  'vs jam':{trust:'trusted',why:'call or fold against an all-in is equity against a known range'},
  'vs open':{trust:'approximate',why:'how often a hand continues is sound, the 3-bet/flat split is not (linear 3-bets): graded fold vs continue only'},
  'vs raise over limp':{trust:'approximate',why:'graded fold vs continue only, like vs open'},
- 'vs limp':{trust:'approximate',why:'limp trees are a realization-model guess (README: the raise rate is likely high); no outside reference'},
+ 'vs limp':{trust:'ungraded',why:'limp trees are a realization-model guess (README: the raise rate is likely high); no outside reference'},
  'limper vs raise':{trust:'approximate',why:'the limper\'s range comes from the limp/raise split; graded fold vs continue only'},
  'vs open + caller':{trust:'wrong framing',why:'no chart has overcalls; the call is borrowed from the flat against the open alone'},
  'cold vs 3-bet+':{trust:'wrong framing',why:'players behind a 3-bet fold in the chart model'},
@@ -66,6 +66,8 @@ const POLICY={
  'limper vs 3-bet+':{trust:'wrong framing',why:'own range came through the limp/raise split twice'},
 };
 const UNTRUSTED=new Set(['ungraded','wrong framing']);
+// PLO preflop charts are hand groups never checked against an outside reference: no PLO chart line is graded.
+const PLO_POLICY={trust:'ungraded',why:'PLO hand-group chart, no outside reference check'};
 const NEUTRAL={NLH:'AsKd',PLO4:'AsKdQhJc'};// a hand no hand-specific rule (connectors, bluff band) touches
 const optionsOf=(node,f=()=>null)=>node.actions.map((a,i)=>({label:a.label||a.kind,f:f(i)}));
 function syntheticGrade(pack,node,hand,choice,freq,options){
@@ -92,7 +94,7 @@ for(const entry of manifest.packs){
  const fiKey=variant+'|'+cfg.mode+'|'+cfg.seats;if(!plo){if(!firstIn.has(fiKey))firstIn.set(fiKey,[]);firstIn.get(fiKey).push({depth:stack,pack,nodes:new Map()});}
  for(const e of index){
   if(!(e.reach>=1e-6))continue;const node=e.node;preflop.nodes++;
-  const cls=lineClass(node,stack),pol=POLICY[cls],key=[cls,variant,cfg.mode==='icm'?'MTT':'cash',sizeBucket(cfg.seats),depthBucket(stack)].join('|');
+  const cls=lineClass(node,stack),pol=plo&&POLICY[cls].trust!=='wrong framing'?PLO_POLICY:POLICY[cls],key=[cls,variant,cfg.mode==='icm'?'MTT':'cash',sizeBucket(cfg.seats),depthBucket(stack)].join('|');
   const row=bump(key,{cls,variant,mode:cfg.mode==='icm'?'MTT':'cash',size:sizeBucket(cfg.seats),depth:depthBucket(stack),...pol});row.charts.add(pack.name);row.nodes++;row.reach+=e.reach;
   // Graded? The neutral hand, choosing the chart's most played continue action.
   const fold=node.actions.findIndex(a=>a.kind==='fold'),cont=node.actions.findIndex((a,i)=>i!==fold),opts=optionsOf(node,()=>.5),g=syntheticGrade(pack,node,NEUTRAL[variant],cont,.5,opts);

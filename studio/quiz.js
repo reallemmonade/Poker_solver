@@ -49,6 +49,8 @@ function quizChartIndex(pack){
   let afterSplit=chartLineSplit(node.history,node.seat)==='after';const raises=node.history.filter(e=>e.kind==='raise'||e.kind==='bet').length;
   // Facing an open and a flat the chart has no overcall (gradeOvercall in hand-db.js), so the spot is not drilled either.
   if(raises===1&&!node.actions.some(a=>a.kind==='call')&&node.history.some((e,i)=>e.kind==='call'&&node.history.slice(0,i).some(x=>x.kind==='raise')))afterSplit=true;
+  // PLO preflop and the big blind facing a limp are not graded (gradeUnreliableChart in hand-db.js), so not drilled either.
+  if(pack.groups||/^PLO/i.test(pack.config.variant)||chartLimped(node.history,node.seat))afterSplit=true;
   index.push({pack,node,hero:node.seat,topics:afterSplit?[]:topics,topic:afterSplit?'other':topics[0]||'other',heroActed:node.history.some(e=>e.seat===node.seat),afterSplit,reach});
  }
  quizCharts.index.set(pack,index);return index;
