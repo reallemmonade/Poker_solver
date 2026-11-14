@@ -46,7 +46,7 @@ function quizChartIndex(pack){
   if(h.done||h.street!==0||h.actor!==node.seat)continue;hands.set(node.key,h);
   const vecs=vecsOf(node.key),reach=vecs?vecs.reduce((p,v)=>{if(!v)return p;let m=0;for(let i=0;i<L;i++)m+=prior[i]*v[i];return p*m;},1):0,topics=quizChartTopics.filter(t=>quizTopicMatches(h,t));
   // A hero whose own range came through the chart's flat-or-3-bet split (gradeSplit in hand-db.js) is not drilled.
-  let raises=0,afterSplit=false;for(const e of node.history){if(e.seat===node.seat&&raises===1&&(e.kind==='call'||e.kind==='raise'))afterSplit=true;if(e.kind==='raise'||e.kind==='bet')raises++;}
+  let afterSplit=chartLineSplit(node.history,node.seat)==='after';const raises=node.history.filter(e=>e.kind==='raise'||e.kind==='bet').length;
   // Facing an open and a flat the chart has no overcall (gradeOvercall in hand-db.js), so the spot is not drilled either.
   if(raises===1&&!node.actions.some(a=>a.kind==='call')&&node.history.some((e,i)=>e.kind==='call'&&node.history.slice(0,i).some(x=>x.kind==='raise')))afterSplit=true;
   index.push({pack,node,hero:node.seat,topics:afterSplit?[]:topics,topic:afterSplit?'other':topics[0]||'other',heroActed:node.history.some(e=>e.seat===node.seat),afterSplit,reach});
