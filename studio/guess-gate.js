@@ -33,7 +33,8 @@ function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
  else if(chart)text=mistake?'Rare · solver plays it '+pc(freq):freq>=top-1e-9?'Best play · '+pc(freq):'Mixed · solver plays it '+pc(freq);
  let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,d={mistake,cost:solved?cost:null,sizeOnly:!solved&&gradeSizeOnly(row),street:row.street};elo=Math.round(PokerRating.delta(d,now,r.n));}catch{}}
  return{text,elo,cls:!(chart||solved)?(offSize?'ok':'none'):!mistake?'good':gradeSizeOnly(row)?'ok':solved&&cost<1?'ok':'bad'};}
-function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
+// Every graded result says why under it (decisionWhy in spot-why.js): pot odds vs their range, how wide the seat plays, or the hand's postflop reason.
+function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+(g.why?'<small class="guess-why">'+esc(g.why)+'</small>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
 // renderPlay asks for the analysis pane's content through this. body() builds the normal content.
 function guessGateHTML(h,solved,q,body){
  if(!guessGateOn()||!h||h.done)return body();
@@ -56,19 +57,19 @@ function guessLive(index){const h=state.hand;if(!h||h.done)return;const at=h.act
 // still your turn. If you act first, chooseAction (app.js) grades the guess through the background assessment instead.
 function guessSettle(h){const g=h.pendingGuess;if(!g||g.at!==h.actionLog.length||h.done)return;const result=guessResult(h);if(!result)return;
  h.pendingGuess=null;let row=null;if(T.matchAction(result.actions,g.action)>=0)try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h});}catch{row=null;}
- if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,guessCounted(h,row));saveLiveSession();}
+ if(h.guessReveal?.at===g.at){h.guessReveal.verdict=guessVerdict(row,guessCounted(h,row));h.guessReveal.why=typeof decisionWhy==='function'?decisionWhy(h,result):'';}saveLiveSession();}
 function guessCounted(h,row){return!!row&&!h.assisted&&!$('reveal').checked&&(studioInterface.area==='study'||!$('controlAll').checked);}
 // A guess graded by a 1/3-only flop library is graded again, in the same row, when the full-size solve sent from there
 // lands while it is still your turn (spot-ui.js deliverSolveJob). Once you act, fullerSolveWait does it instead.
 function guessRegrade(h,result){const at=h?.actionLog.length,g=h?.guessReveal;if(!g?.action||g.at!==at||g.regraded||h.pendingGuess||h.done||!result?.supported||T.matchAction(result.actions,g.action)<0)return;
  const old=state.currentGrades.find(r=>r.source==='guess'&&r.step===at);if(old&&old.referenceSource?.kind!=='postflop-library')return;
- let row=null;try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h,replace:old});}catch{row=null;}if(!row)return;g.regraded=true;g.verdict=guessVerdict(row,guessCounted(h,row));saveLiveSession();if(typeof renderPlay==='function')renderPlay();}
+ let row=null;try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h,replace:old});}catch{row=null;}if(!row)return;g.regraded=true;g.verdict=guessVerdict(row,guessCounted(h,row));g.why=typeof decisionWhy==='function'?decisionWhy(h,result):g.why;saveLiveSession();if(typeof renderPlay==='function')renderPlay();}
 // Hand replay: a finished review analysis waits behind the guess buttons.
 function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?<small>Guess to see the solver</small></div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
 function guessReplay(index){const g=guessGate.replay;if(!g)return;guessGate.replay=null;const box=$('reviewFeedback');
  if(index===null){box.innerHTML=resultHTML(g.result);return;}
  const action=g.result.actions[index],tones=actionTones(g.result.actions,g.hand),row=scoreResult(g.result,{kind:'reviewGuess',action,hand:g.hand});
- box.innerHTML=guessRevealHTML({label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],g.hand).replace(/ · .*/,''),tone:tones[index],verdict:guessVerdict(row,!!row)})+resultHTML(g.result,row);
+ box.innerHTML=guessRevealHTML({label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],g.hand).replace(/ · .*/,''),tone:tones[index],verdict:guessVerdict(row,!!row),why:typeof decisionWhy==='function'?decisionWhy(g.hand,g.result):''})+resultHTML(g.result,row);
  if(typeof renderPerformance==='function')try{renderPerformance()}catch{}}
 function replayGuessFact(){return{assisted:false,at:'',key:'replay-guesses',grades:(state.grades||[]).filter(g=>g.source==='reviewGuess')};}
 {const finish=finishAnalysis;finishAnalysis=function(result,pending){
@@ -92,6 +93,7 @@ function initGuessGate(){
 .guess-reveal{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 12px;padding:11px 14px;border-radius:14px;background:var(--panel2)}
 .guess-reveal b{display:flex;align-items:center;gap:7px;font-size:15px}.guess-reveal b i{width:9px;height:9px;border-radius:3px}
 .guess-reveal span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.guess-reveal small.guess-why{display:block;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}
 .guess-pill{font-style:normal;font-size:14px;font-weight:800;padding:3px 10px;border-radius:10px;white-space:nowrap}
 .guess-good{color:var(--act-passive);background:color-mix(in srgb,var(--act-passive) 16%,transparent)}
 .guess-ok{color:var(--act-bet1);background:color-mix(in srgb,var(--act-bet1) 16%,transparent)}
