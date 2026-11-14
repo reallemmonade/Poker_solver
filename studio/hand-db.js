@@ -17,8 +17,10 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // an open ('vsopen') a chart grades fold against continue only, and a chart spot whose actor's own range came through that
 // split ('after': a flatter facing a squeeze, a 3-bettor facing a 4-bet) is not graded at all. Read from the saved line, so
 // older grades follow the same rule.
-function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;let raises=0,after=false;
- for(const a of g.actions){if(a.seat===g.hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after?'after':raises===1?'vsopen':null;}
+// An opener facing a 3-bet (or later) is 'after' too: the chart's continue range there is far too wide (BTN K5s called a
+// 3-bet to 10bb at 99%) because the 3-bet range it answers is not balanced.
+function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;let raises=0,after=false,opened=false;
+ for(const a of g.actions){if(a.seat===g.hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.seat===g.hero&&raises===0&&a.kind==='raise')opened=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after||opened&&raises>=2?'after':raises===1?'vsopen':null;}
 const gradeFolds=o=>/^fold\b/i.test(o?.label||'');
 // The frequency a chart grade is judged by: the chosen action's, or facing an open, how often the chart continues at all.
 function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsopen'||!Array.isArray(g.options)||!g.options[g.choice]||gradeFolds(g.options[g.choice])||!Number.isFinite(f))return f;
