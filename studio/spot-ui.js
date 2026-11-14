@@ -581,6 +581,7 @@ function ploRangesHTML(result){
  return'<div class="spot-ranges"><h3>Ranges · approximate</h3><div class="range-grids">'+seats.map(r=>'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong> · '+(r.share<.005?'<1':Math.round(r.share*100))+'% of hands</figcaption>'+(r.seat===pr.seat?actionKeyHTML(result.actions,tones,h):RANGE_KEY)+grid(r)+'</figure>').join('')+'</div></div>';
 }
 function spotRangesHTML(result){
+ result=chartContinueView(result);
  if(result?.ploRange?.seats?.length)return ploRangesHTML(result);
  const all=result?.solve?.rangeAssumptions||result?.rangeAssumptions||[],h=state.hand,live=h&&!h.done&&h.n===all.length?new Set(h.living()):null,names=h&&all.every(r=>r.seat<h.n)?G.positions(h.n,h.button):null,nb=live?h.board.length:0,legal=[...Array(h?.rules?.hole||2)].reduce((n,_,i)=>n*(52-nb-i)/(i+1),1);
  const ranges=all.filter(r=>live?live.has(r.seat):!/^All legal hands/.test(r.range));if(!ranges.length)return'';
