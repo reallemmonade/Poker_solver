@@ -39,7 +39,9 @@ function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><
 function guessGateHTML(h,solved,q,body){
  if(!guessGateOn()||!h||h.done)return body();
  const shows=solved?!!solved.supported:displayPolicyReady(q),at=h.actionLog.length;
- if((h.unlocked||[]).includes(at)){guessSettle(h);const g=h.guessReveal?.at===at?h.guessReveal:null;return(g?guessRevealHTML(g):'')+body();}
+ if((h.unlocked||[]).includes(at)){guessSettle(h);const g=h.guessReveal?.at===at?h.guessReveal:null;
+  // A full-size solve on its way replaces the library's grade: show only your pick until it lands (fullerSolveOut, spot-ui.js).
+  const wait=g&&typeof fullerSolveOut==='function'&&fullerSolveOut(solved);return(g?guessRevealHTML(wait?{...g,verdict:{text:'',elo:null,cls:'none'},why:''}:g):'')+body();}
  // No answer yet: guess first, then the solve prompt (the solve grades the guess when it lands). A spot nothing can solve shows its notice.
  if(!shows&&(unsolvableSpot(h)||!q?.actions?.length))return body();
  const actions=solved?.supported?solved.actions:q.actions;
