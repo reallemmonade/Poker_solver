@@ -136,7 +136,23 @@
   return out;
  }
 
- const api={classify,profile,textureWords,rangeFrequencies,reasons};
+ // One short line on why the solver's main play is right for this hand, shown under every graded result.
+ // x: {hand:'K5s', main:'fold'|'call'|'raise'|'bet'|'check', need (equity a call needs), eq (hand vs their range),
+ //     vs:'SB', ip, dominated (share of their range that dominates this hand), blocks, plays (share of hands this seat
+ //     plays here, first in; pos is its seat name), top (hand's rank among all starting hands)}.
+ function decisionLine(x){
+  const P=v=>v>0&&v<.01?'<1%':Math.round(v*100)+'%',dom=x.dominated>=.15?' · '+P(x.dominated)+' of their range dominates it':'';
+  if(x.need>0&&x.eq!=null){
+   const base=(x.main==='call'||x.main==='fold'?'Call needs '+P(x.need)+' · ':'')+x.hand+' has '+P(x.eq)+' vs '+x.vs+'’s range';
+   if(x.main==='call')return base+(x.eq>=x.need-.005?' · enough to call':x.ip?' · position makes up the rest':' · money behind makes up the rest');
+   if(x.main==='fold')return base+(x.eq<x.need?' · not enough':x.ip?' · won’t realize it all':' · out of position, won’t realize it')+dom;
+   if(x.main==='raise'||x.main==='bet')return base+(x.eq>=.5?' · ahead, raise for value':' · raise wins it now'+(x.blocks?', and blocks their best hands':''));
+  }
+  if(x.plays!=null&&x.top!=null){const verb=x.main==='fold'?'folds':x.main==='call'?'calls':x.main==='check'?'checks':'raises';return x.pos+' plays '+P(x.plays)+' here · '+x.hand+(x.top<=.5||x.bottom==null?' is top '+P(x.top):' is bottom '+P(x.bottom))+' · '+verb;}
+  return'';
+ }
+
+ const api={classify,profile,textureWords,rangeFrequencies,reasons,decisionLine};
  root.SpotWhy=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -144,18 +160,59 @@ if(typeof document!=='undefined'){
  const WHY_KEY='guava-why-open';
  // Remember the last open/closed state on this device.
  document.addEventListener('toggle',e=>{const d=e.target;if(d?.classList?.contains('spot-why'))try{localStorage.setItem(WHY_KEY,d.open?'1':'0');}catch{}},true);
+ // The one-line reason under a graded result (guess reveal, Why?): pot odds against their range when facing a bet or
+ // raise, how wide this seat plays first in, else the hand line of the postflop Why?. Works on any hand frame (live or replay).
+ const whyMemo=new WeakMap();
+ globalThis.decisionWhy=function(h,result){
+  try{
+   if(!h||h.done||!result?.supported||h.rules?.hole>2||h.config?.variant!=='NLH')return'';
+   const seat=h.actor,hole=h.holes?.[seat];if(hole?.length!==2)return'';
+   const probs=result.reference||[],A=result.actions||[];if(!A.length||!probs.length)return'';
+   const memoKey=h.actionLog.length+'|'+A.map(a=>a.label).join()+'|'+probs.join(),m=whyMemo.get(result);if(m&&m.k===memoKey)return m.t;
+   const best=probs.indexOf(Math.max(...probs.map(p=>p||0))),main=A[best]?.kind==='bet'||A[best]?.kind==='raise'?'raise':A[best]?.kind,C=G.Core,hand=C.handClass(hole);
+   const l=h.legal(),names=G.positions(h.n,h.button),living=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,ip=living.slice().sort((a,b)=>after(a)-after(b)).pop()===seat;
+   const firstIn=h.street===0&&h.currentBet<=G.units(h.config.bb);let t='';
+   if(firstIn&&result.handMix?.classes){
+    // Share of all starting hands this seat plays (anything but fold) here, and where the hand sits among them.
+    const mix=result.handMix.classes,fold=A.findIndex(a=>a.kind==='fold');let all=0,play=0;
+    for(const [k,p]of Object.entries(mix)){const n=k.length===2?6:k[2]==='s'?4:12;all+=n;play+=n*(1-(fold>=0?(p?.[fold]||0):0));}
+    const order=Array.isArray(G.preflopOrder)?G.preflopOrder:String(G.preflopOrder).split(/[\s,]+/);let cum=0;for(const k of order){cum+=k.length===2?6:k[2]==='s'?4:12;if(k===hand)break;}
+    if(all>0&&order.includes(hand))t=SpotWhy.decisionLine({hand,main,pos:names[seat],plays:play/all,top:cum/1326,bottom:1-(cum-(hand.length===2?6:hand[2]==='s'?4:12))/1326});
+   }else if(l.callCost>0&&typeof icmRange==='function'&&typeof icmEquity==='function'){
+    const v=living.filter(i=>i!==seat).sort((a,b)=>h.streetPaid[b]-h.streetPaid[a])[0],range=v===undefined?null:icmRange(h,v,result),eq=range?icmEquity(h,seat,v,range):null;
+    if(eq!==null){
+     let dominated=0;const r=hole.map(c=>c>>2);
+     if(h.street===0&&r[0]!==r[1]){let rows=[];try{rows=PokerSpot.parseRange(range,{hole:2},[]).filter(x=>x.weight>0&&!x.cards.some(c=>hole.includes(c)));}catch{}
+      let w=0,d=0;for(const x of rows){const q=x.cards.map(c=>c>>2);w+=x.weight;if(q[0]===q[1])continue;const shared=r.find(k=>q.includes(k));if(shared===undefined)continue;const mine=r.find(k=>k!==shared),theirs=q.find(k=>k!==shared);if(theirs>mine)d+=x.weight;}
+      dominated=w>0?d/w:0;}
+     t=SpotWhy.decisionLine({hand,main,need:l.callCost/(h.pot+l.callCost),eq,vs:names[v],ip,dominated,blocks:h.street===0&&hole.some(c=>(c>>2)>=11)});
+    }
+   }
+   if(!t&&h.board.length>=3){const list=spotWhyList(result,h,seat),line=list.find(x=>x.k==='hand');t=line?line.t.replace(/\.$/,''):'';}
+   whyMemo.set(result,{k:memoKey,t});return t;
+  }catch(error){return'';}
+ };
+ // The postflop reasons for a solved spot on hand frame h (hero = the seat whose cards are shown).
+ globalThis.spotWhyList=function(result,h=state.hand,heroSeat=state.hero){
+  if(!h||h.done||!result?.supported||(h.board||[]).length<3||h.rules?.hole>2||h.config?.variant!=='NLH')return[];
+  const all=result.solve?.rangeAssumptions||result.rangeAssumptions||[],live=new Set(h.living()),seat=result.handMix?.seat??h.actor;
+  const parse=r=>{try{return PokerSpot.parseRange(r.range,{hole:2},h.board)||null;}catch{return null;}};
+  const mineR=all.find(r=>r.seat===seat),others=all.filter(r=>r.seat!==seat&&live.has(r.seat)),mine=mineR&&parse(mineR),theirs=others.length===1?parse(others[0]):null;
+  const tones=actionTones(result.actions,h),labels=result.actions.map((a,i)=>toneLabel(a,tones[i],h));
+  const potStart=h.pot-h.streetPaid.reduce((s,x)=>s+x,0),liveSeats=h.living(),stack=Math.min(...liveSeats.map(i=>h.stacks[i]+h.streetPaid[i]));
+  const after=i=>(i-h.button+h.n)%h.n||h.n,ip=liveSeats.slice().sort((a,b)=>after(a)-after(b)).pop();
+  const hero=seat===heroSeat&&h.holes[seat]?.length===2?h.holes[seat]:null,heroClass=hero?G.Core.handClass(hero):null;
+  let heroWeight=null;if(hero&&mine){const key=hero.slice().sort((a,b)=>a-b).join(),peak=Math.max(...mine.map(r=>r.weight)),row=mine.find(r=>r.cards.join()===key);heroWeight=peak>0?(row?row.weight:0)/peak:null;}
+  return SpotWhy.reasons({board:h.board,hero,heroIsIp:seat===ip,spr:potStart>0?stack/potStart:0,actions:result.actions,tones,labels,heroMix:hero?result.reference:null,mine,theirs,mix:result.handMix?.classes||null,heroClass,heroWeight});
+ };
  globalThis.spotWhyHTML=function(result){
   try{
-   const h=state.hand;if(!h||h.done||!result?.supported||(h.board||[]).length<3||h.rules?.hole>2||h.config?.variant!=='NLH')return'';
-   const all=result.solve?.rangeAssumptions||result.rangeAssumptions||[],live=new Set(h.living()),seat=result.handMix?.seat??h.actor;
-   const parse=r=>{try{return PokerSpot.parseRange(r.range,{hole:2},h.board)||null;}catch{return null;}};
-   const mineR=all.find(r=>r.seat===seat),others=all.filter(r=>r.seat!==seat&&live.has(r.seat)),mine=mineR&&parse(mineR),theirs=others.length===1?parse(others[0]):null;
-   const tones=actionTones(result.actions,h),labels=result.actions.map((a,i)=>toneLabel(a,tones[i],h));
-   const potStart=h.pot-h.streetPaid.reduce((s,x)=>s+x,0),liveSeats=h.living(),stack=Math.min(...liveSeats.map(i=>h.stacks[i]+h.streetPaid[i]));
-   const after=i=>(i-h.button+h.n)%h.n||h.n,ip=liveSeats.slice().sort((a,b)=>after(a)-after(b)).pop();
-   const hero=seat===state.hero&&h.holes[seat]?.length===2?h.holes[seat]:null,heroClass=hero?G.Core.handClass(hero):null;
-   let heroWeight=null;if(hero&&mine){const key=hero.slice().sort((a,b)=>a-b).join(),peak=Math.max(...mine.map(r=>r.weight)),row=mine.find(r=>r.cards.join()===key);heroWeight=peak>0?(row?row.weight:0)/peak:null;}
-   const list=SpotWhy.reasons({board:h.board,hero,heroIsIp:seat===ip,spr:potStart>0?stack/potStart:0,actions:result.actions,tones,labels,heroMix:hero?result.reference:null,mine,theirs,mix:result.handMix?.classes||null,heroClass,heroWeight});
+   const h=state.hand;if(!h||h.done||!result?.supported||h.rules?.hole>2||h.config?.variant!=='NLH')return'';
+   const list=h.board.length>=3?spotWhyList(result,h):[];
+   // Your own decision's line (pot odds, or how wide this seat plays first in), unless the guess result above already shows it.
+   const mine=(result.handMix?.seat??h.actor)===state.hero&&h.actor===state.hero,shown=h.guessReveal?.at===h.actionLog.length&&h.guessReveal.why;
+   if(mine&&!shown){const line=decisionWhy(h,result);if(line&&!list.some(x=>x.t.replace(/\.$/,'')===line))list.splice(list[0]?.k==='hand'?1:0,0,{k:'odds',t:line});}
+   else if(shown)for(let i=list.length-1;i>=0;i--)if(list[i].t.replace(/\.$/,'')===shown)list.splice(i,1);
    if(!list.length)return'';let open=false;try{open=localStorage.getItem(WHY_KEY)==='1';}catch{}
    return'<details class="spot-why"'+(open?' open':'')+'><summary>Why?</summary><ul>'+list.map(r=>'<li>'+(r.label?'<strong>'+esc(r.label)+'</strong> ':'')+esc(r.t)+'</li>').join('')+'</ul></details>';
   }catch(error){return'';}

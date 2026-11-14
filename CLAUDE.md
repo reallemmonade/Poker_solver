@@ -41,3 +41,7 @@ FUNKY_REVIEW_TOKEN=<key> node tools/funky-spots.cjs [--hours 72] [--kind duplica
 ```
 
 The server (`GET /api/funky-spots`) answers only to the review key. In project threads it is in `/mnt/project-files/funky-spots/review-key` (`FUNKY_REVIEW_TOKEN=$(cat /mnt/project-files/funky-spots/review-key)`); the server holds only its SHA-256 (`REVIEW_KEY_SHA256` in `accounts.cjs`). `FUNKY_REVIEW_TOKEN` on Render or `--print-key` on the Mac also work. Triage each kind from its traces, fix the cause, and when a new kind of bug turns up, add a detector for it in `studio/funky-spots.js` so it is caught automatically next time.
+
+## Every grade says why
+
+Every graded result in Analysis (the "You: …" card after a guess, in Play, Train and Hand replay) shows one short line under the verdict saying why the solver picks its play, and the same line leads the Why? pill when no guess card shows it. Facing a bet or raise it is pot odds against their range: "Call needs 36% · K5s has 35% vs SB’s range · position makes up the rest" (plus "x% of their range dominates it" when that is 15% or more, and a blocker note on raises). First in preflop it is how wide the seat plays and where the hand ranks ("BTN plays 46% here · K5s is top 29% · raises"); postflop without a bet it is the hand line of the Why? pill. Ungraded results keep their "Not graded · <why>" text. The line comes from `decisionWhy(hand, result)` (wording in `SpotWhy.decisionLine`) in `studio/spot-why.js`; new grading or reveal surfaces must show it, and keep it to one line (no-clutter rule).
