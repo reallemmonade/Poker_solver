@@ -66,6 +66,8 @@
 !/tools/split-libraries.cjs
 !/tools/hand-trace.cjs
 !/tools/funky-spots.cjs
+!/tools/spot-trust/
+!/tools/spot-trust/audit.cjs
 !/tools/solve-flow/
 !/tools/solve-flow/run.cjs
 !/tools/solve-flow/fake-texassolver.cjs

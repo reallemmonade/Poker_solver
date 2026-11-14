@@ -26,7 +26,8 @@
 
  // tools/postflop/balance-check.cjs --mark stores a failed spot (gate.fail) or flop (gate.flops[key]) in the
  // library, or a flop line (gate.lines); those answers are shown but not graded. Returns the reason, or null.
- function gateOf(spot,key,path){const g=spot&&spot.gate;if(!g)return null;if(g.fail||g.flops&&g.flops[key])return g.fail||g.flops[key];
+ // gate.standIns: this spot's stand-in flops are too far off its solved ones (standInError below) to grade a flop it lacks.
+ function gateOf(spot,key,path,standIn=false){const g=spot&&spot.gate;if(!g)return null;if(g.fail||g.flops&&g.flops[key])return g.fail||g.flops[key];if(standIn&&g.standIns)return g.standIns;
   // gate.lines: a first-bet line ('BET' = facing a donk, 'CHECK/BET' = facing a bet after a check) that over-folds; decisions on it or after it.
   for(const [line,why]of Object.entries(g.lines||{}))if(typeof path==='string'&&(path===line||path.startsWith(line+' ')))return why;return null;}
 
@@ -112,10 +113,24 @@
   const zeros=actions.map(()=>0),best=probs.indexOf(Math.max(...probs)),spaced=k=>k.replace(/(..)(?=.)/g,'$1 '),board=hand.board.map(C.cardName).join(' '),source='Imported preflop chart: '+range.name;
   return{supported:true,actions,reference:probs,mean:zeros,se:zeros,loss:zeros,lossSE:zeros,best,samples:0,effectiveSamples:0,units:hand.config.mode==='cash'?'bb':'prize units',ignoredPublicActions:0,coverage:1,evidenceCoverage:1,actionCoverage:actions.map(()=>1),...handMix?{handMix}:{},...found.offTree?{offTree:true}:{},
    solve:{version:1,method:'postflop-library',exact:false,approximate:false,iterations:flop.iterations||0,exploitability:flop.exploitability,seconds:0,rangeAssumptions:[[ip,'ip'],[oop,'oop']].map(([seat,p])=>({seat,range:spot.game==='PLO4'?'Chart range':reachText(reachOf(spot,flop,p,[[new Map(flop.nodes.map(n=>[n.path,n])),found.path]]),C.cards(key)),source})),
-    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,...found.fit?{sizeFit:found.fit}:{},scale,...gateOf(spot,key,found.path)?{ungraded:gateOf(spot,key,found.path)}:{},...spot.game!=='PLO4'&&!fullFlopSizes(spot)?{fewerSizes:true}:{},...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
+    library:{spot:spot.label,flop:key,standIn,line:found.path,sizesMatched:!found.substituted,...found.fit?{sizeFit:found.fit}:{},scale,...gateOf(spot,key,found.path,standIn)?{ungraded:gateOf(spot,key,found.path,standIn)}:{},...spot.game!=='PLO4'&&!fullFlopSizes(spot)?{fewerSizes:true}:{},...similar?{similarCombo:similar,solvedCombos:flop.combos[found.node.player].length}:{}},
     warning:(standIn?'Stand-in flop strategy for '+spot.label+': '+board+' is not in the library, so the nearest solved flop of the same texture, '+spaced(key)+', answers, with your cards moved to match. Treat it as a rough guide. It was':'Precomputed flop strategy for '+spot.label+' on '+spaced(key)+' (the same flop up to suits),')+' solved by '+(spot.game==='PLO4'?'the PLO solver':'TexasSolver')+' for the preflop chart ranges'+(Math.abs(scale-1)>.02?' and scaled to this pot':'')+'.'+(found.substituted?' Your bet sizes differ from the solved sizes, so the nearest solved size stands in.':'')+(similar?' Your hand is not among the '+flop.combos[found.node.player].length+' combos solved for this flop, so the most similar one, '+similar+', answers for it (similar made hand and draws).':'')+(range.rakeFree?' The preflop chart is rake-free, so this table\'s rake is not modelled.':'')+(spot.game==='PLO4'?' Exploitability is measured exactly, in percent of the pot. The library keeps frequencies only, so no decision cost is graded.':' Exploitability is the solver\'s own estimate, in percent of the pot. It reports no action EVs, so no decision cost is graded.')+(gateOf(spot,key,found.path)?' This flop failed the library balance check ('+gateOf(spot,key,found.path)+'), so it is shown but not graded.':'')}};
  }
 
+ // How well this spot's stand-ins stand in, leave-one-out: each solved flop is answered from its nearest other solved flop
+ // (cards moved as in query) at each player's first decision. falseMistake: share of combos where the stand-in plays an
+ // action under 5% that the real flop plays 25%+ (a frequency grade would call it a mistake); mainPlay: the same for the real
+ // flop's main play (50%+). A stand-in in play is at least this close (it has every solved flop to choose from), so this is a
+ // ceiling. NLH only (PLO answers unsolved combos by similarity). tools/postflop/balance-check.cjs gates on it.
+ function standInError(spot){
+  const keys=Object.keys(spot.flops||{});if(keys.length<4||spot.game==='PLO4')return null;let n=0,bad=0,main=0;
+  for(const key of keys){const cards=C.cards(key).sort((x,y)=>y-x),near=standIns({flops:Object.fromEntries(keys.filter(k=>k!==key).map(k=>[k,1]))},cards)[0];if(!near)continue;
+   const real=spot.flops[key],sub=spot.flops[near.key];
+   for(const p of ['','CHECK']){const a=real.nodes.find(x=>x.path===p),b=sub.nodes.find(x=>x.path===p);if(!a||!b||a.actions.length!==b.actions.length)continue;
+    for(let i=0;i<COMBOS.length;i++){const cs=COMBOS[i];if(cards.includes(cs[0])||cards.includes(cs[1]))continue;const ra=row(a,i);if(!ra)continue;const m=cs.map(near.move);if(m[0]==null||m[1]==null||m[0]===m[1])continue;const rb=row(b,comboIndex(m));if(!rb)continue;
+     n++;let b1=0,b2=0;for(let k=0;k<ra.length;k++)if(rb[k]<.05){if(ra[k]>=.25)b1=1;if(ra[k]>=.5)b2=1;}bad+=b1;main+=b2;}}}
+  return n?{combos:n,falseMistake:bad/n,mainPlay:main/n}:null;
+ }
  // Solved flops that can stand in for an unsolved one, nearest first: same suit
  // pattern and pairing, ranked by how far each card and each gap between the
  // cards moves (gaps carry straight draws). cards is a canonical flop, highest
@@ -349,6 +364,6 @@
   if(!apply(chunk.nodes,line.flop.path)||!apply(line.turn.nodes,turn.path))return null;
   return weights;
  }
- const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,readTurn,turnSpot,queryTurn,carry,libraryActions,price};
+ const api={FORMAT,TURN_FORMAT,COMBOS,comboIndex,canonical,encode,row,validate,query,missing,walk,aggregate,standIns,standInError,readTurn,turnSpot,queryTurn,carry,libraryActions,price};
  if(typeof module!=='undefined'&&module.exports)module.exports=api;root.PokerPostflopLibrary=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

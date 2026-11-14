@@ -19,8 +19,11 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // older grades follow the same rule.
 // An opener facing a 3-bet (or later) is 'after' too: the chart's continue range there is far too wide (BTN K5s called a
 // 3-bet to 10bb at 99%) because the 3-bet range it answers is not balanced.
-function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;let raises=0,after=false,opened=false;
- for(const a of g.actions){if(a.seat===g.hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.seat===g.hero&&raises===0&&a.kind==='raise')opened=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after||opened&&raises>=2?'after':raises===1?'vsopen':null;}
+// chartLineSplit reads a preflop line (seat and kind per action) for one seat; Train's chart drills (quiz.js) use it too, so
+// Train never deals a line Play does not grade.
+function chartLineSplit(actions,hero){let raises=0,after=false,opened=false;
+ for(const a of actions){if(a.seat===hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.seat===hero&&raises===0&&a.kind==='raise')opened=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after||opened&&raises>=2?'after':raises===1?'vsopen':null;}
+function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;return chartLineSplit(g.actions,g.hero);}
 const gradeFolds=o=>/^fold\b/i.test(o?.label||'');
 // The frequency a chart grade is judged by: the chosen action's, or facing an open, how often the chart continues at all.
 function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsopen'||!Array.isArray(g.options)||!g.options[g.choice]||gradeFolds(g.options[g.choice])||!Number.isFinite(f))return f;
@@ -38,6 +41,16 @@ function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choic
 // fold J9s while opening T8s (order-check, 2026-11-11).
 function gradeOpenConnector(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||g.actions.some(a=>a.kind==='raise'||a.kind==='bet'))return false;
  const c=comboOf(g.hand||''),R='23456789TJQKA',hi=R.indexOf(c[0]),lo=R.indexOf(c[1]);return c[2]==='s'&&hi-lo>=1&&hi-lo<=2&&hi<=R.indexOf(hi-lo===2?'J':'9');}
+// Kicker order: a hand should not fold (mostly) where the same hand with a lower kicker plays (K8o folds, K7o continues),
+// nor a suited connector or one-gapper where a lower one of the same gap plays (76s folds, 65s continues). Real solvers
+// are close to monotone there; a breach of 50 points or more is noise in the chart's fit, and either hand may be the wrong
+// one, so neither is graded at that node (first in, or facing an open). tools/spot-trust/audit.cjs lists every breach.
+// classes: the node's action mix per hand class (result.handMix.classes), fold: the fold action's index.
+const ORDER_PAIRS=(()=>{const R='AKQJT98765432',out=[];for(let i=0;i<13;i++)for(let j=i+1;j<13;j++)for(const s of ['s','o'])for(let k=j+1;k<13;k++)if(!(i===0&&s==='s'&&k>=9))out.push([R[i]+R[j]+s,R[i]+R[k]+s]);
+ for(const gap of [1,2])for(let i=1;i+gap<13;i++)for(let k=i+1;k+gap<13;k++)out.push([R[i]+R[i+gap]+'s',R[k]+R[k+gap]+'s']);return out;})();
+function chartOrderBreach(classes,cls,fold){if(!classes||!(fold>=0)||!classes[cls])return false;const cont=c=>Array.isArray(classes[c])?1-(classes[c][fold]||0):null;
+ for(const [hi,lo] of ORDER_PAIRS){if(hi!==cls&&lo!==cls)continue;const a=cont(hi),b=cont(lo);if(a!==null&&b!==null&&b-a>=.5)return true;}return false;}
+function gradeOrderBreach(g){return!!g?.orderBreach&&gradeSplit(g)!=='after';}
 // A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
 // Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
 // legal hand (or the bots' learned guess) for each player, so its answer is shown but never graded, rated or a leak.
@@ -54,7 +67,7 @@ function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
 // Neither is graded; older grades, made when the chart offered no call at all, are found from the saved line and options.
 function gradeOvercall(g){if(gradeSplit(g)!=='vsopen')return false;let raised=false,flat=false;for(const a of g.actions){if(a.kind==='raise'||a.kind==='bet')raised=true;else if(raised&&a.kind==='call'&&a.seat!==g.hero)flat=true;}
  return flat&&(!!g.overcall||!(g.options||[]).some(o=>/^call\b/i.test(o?.label||'')));}
-function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeOffChart(g)||gradeOpenConnector(g)||gradeOrderBreach(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
 function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
 // A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
 // the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.

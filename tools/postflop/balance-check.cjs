@@ -20,7 +20,8 @@
 //   node tools/postflop/balance-check.cjs studio/libraries/flops/*.json.gz
 //   node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b [--json report.json] [--md report.md]
 //   node tools/postflop/balance-check.cjs <inputs> --mark      # write the verdicts into the files
-// --mark stores each failing spot's reason (spot.gate) and each failing flop (spot.gate.flops) in the
+// --mark stores each failing spot's reason (spot.gate), each failing flop (spot.gate.flops) and, when its stand-in flops are
+// too far off its solved ones, that reason (spot.gate.standIns: stand-in answers ungraded) in the
 // library file itself; the app then shows those answers but does not grade them (postflop-library.js
 // passes library.ungraded, app.js logs "not graded (flop library failed balance check)").
 // Exits 2 when any spot fails.
@@ -29,7 +30,7 @@ const G=require('../../studio/game.js'),Lib=require('../../studio/postflop-libra
 
 // Thresholds. A spot fails when its weighted mean exploitability is above MEAN_EXPL or more than
 // BAD_SHARE of its flop weight is above FLOP_EXPL; a flop fails on its own above FLOP_EXPL.
-const T={FLOP_EXPL:2,MEAN_EXPL:1.5,SPOT_EXPL:3,BAD_SHARE:.1,OVERFOLD:.1,OVERFOLD_FAIL:.25,FLOP_OVERFOLD:.3,NUT_FOLD:.05,NUT_TOP:.03,ROW_SUM:3,BLUFF_MIN:.03,BLUFF_MAX:.85};
+const T={FLOP_EXPL:2,MEAN_EXPL:1.5,SPOT_EXPL:3,BAD_SHARE:.1,OVERFOLD:.1,OVERFOLD_FAIL:.25,FLOP_OVERFOLD:.3,NUT_FOLD:.05,NUT_TOP:.03,ROW_SUM:3,BLUFF_MIN:.03,BLUFF_MAX:.85,STANDIN_MAIN:.03};
 
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 // Every spot in the inputs: {spot, file, write(spot)} where write saves --mark results back.
@@ -51,8 +52,9 @@ function spots(inputs){
    }
    continue;
   }
+  // The writer drops each node's bytes (the decoded-table cache checkSpot adds), which would make the file 7x bigger.
   const lib=read(input);if(lib.format!==Lib.FORMAT)throw Error(input+' is not a flop library ('+lib.format+').');
-  lib.spots.forEach((spot,i)=>out.push({spot,file:input,write:s=>{lib.spots[i]=s;const text=JSON.stringify(lib);fs.writeFileSync(input,/\.gz$/.test(input)?zlib.gzipSync(text,{level:9}):text);}}));
+  lib.spots.forEach((spot,i)=>out.push({spot,file:input,write:s=>{lib.spots[i]=s;const text=JSON.stringify(lib,(k,v)=>k==='bytes'?undefined:v);fs.writeFileSync(input,/\.gz$/.test(input)?zlib.gzipSync(text,{level:9}):text);}}));
  }
  return out;
 }
@@ -139,6 +141,9 @@ function checkSpot(spot){
   if(!d.allin&&fold>alpha+T.OVERFOLD_FAIL){res.partial.push(why);const line=label.startsWith('IP vs donk')?'BET':'CHECK/BET';res.badLines[line]=(res.badLines[line]?res.badLines[line]+'; ':'')+why;}
   else if(!d.allin&&fold>alpha+T.OVERFOLD)res.warns.push(why);
   if(!d.allin&&fold<.02)res.warns.push(label+': almost never folds ('+(100*fold).toFixed(1)+'%)');}
+ // Stand-in flops (most flops a hand reaches): graded only where the nearest other solved flop rarely calls the main play a mistake.
+ const si=Lib.standInError(spot);if(si){res.stats.standIn={falseMistake:+si.falseMistake.toFixed(3),mainPlay:+si.mainPlay.toFixed(3)};
+  if(si.mainPlay>T.STANDIN_MAIN){res.standIns='stand-in flops too far off: the nearest other solved flop calls the main play a mistake for '+(100*si.mainPlay).toFixed(1)+'% of combos';res.partial.push(res.standIns);}}
  if(nut.all){const f=nut.fold/nut.all;res.stats.nutFold=+f.toFixed(4);if(f>T.NUT_FOLD)res.fails.push('top '+Math.round(T.NUT_TOP*100)+'% hands fold '+(100*f).toFixed(1)+'% to the first bet');}
  if(bluff.all){const b=bluff.air/bluff.all;res.stats.airInBets=+b.toFixed(3);if(b<T.BLUFF_MIN)res.warns.push('first bets have no air ('+(100*b).toFixed(1)+'%)');if(b>T.BLUFF_MAX)res.warns.push('first bets are '+Math.round(100*b)+'% air');}
  return res;
@@ -154,7 +159,7 @@ if(require.main===module){
   const s=r.stats,d=Object.entries(s.defence||{}).map(([k,v])=>k+' '+Math.round(v.fold*100)+'/'+Math.round(v.alpha*100)).join(', ');
   console.log((r.fails.length?'FAIL':r.partial.length?'PART':'ok  ')+' '+r.label+' ['+r.id+'] '+r.flops+' flops, expl mean '+s.meanExpl+' max '+s.maxExpl+'% pot'+(s.airInBets!=null?', air '+Math.round(s.airInBets*100)+'%':'')+(s.nutFold!=null?', nut folds '+(s.nutFold*100).toFixed(1)+'%':'')+(d?'\n       fold/alpha %: '+d:'')+(r.fails.length?'\n       -- '+r.fails.join('; '):'')+(r.partial.length?'\n       -- partial (only flagged flops/lines ungraded): '+r.partial.join('; '):'')+(r.warns.length?'\n       warn: '+r.warns.join('; '):'')+(Object.keys(r.overfolds).length?'\n       '+Object.keys(r.overfolds).length+' flops fold 30+ points over alpha (warning): '+Object.entries(r.overfolds).slice(0,3).map(([k,v])=>k+' '+v).join('; '):'')+(Object.keys(r.badFlops).length?'\n       '+Object.keys(r.badFlops).length+' flops flagged: '+Object.entries(r.badFlops).slice(0,4).map(([k,v])=>k+' '+v).join('; ')+(Object.keys(r.badFlops).length>4?' ...':''):''));
   if(args.includes('--mark')){
-   const gate=r.fails.length||Object.keys(r.badFlops).length||Object.keys(r.badLines).length?{checked:new Date().toISOString().slice(0,10),...r.fails.length?{fail:r.fails.join('; ')}:{},flops:r.badFlops,...Object.keys(r.badLines).length?{lines:r.badLines}:{}}:null;
+   const gate=r.fails.length||Object.keys(r.badFlops).length||Object.keys(r.badLines).length||r.standIns?{checked:new Date().toISOString().slice(0,10),...r.fails.length?{fail:r.fails.join('; ')}:{},flops:r.badFlops,...Object.keys(r.badLines).length?{lines:r.badLines}:{},...r.standIns?{standIns:r.standIns}:{}}:null;
    if(gate)spot.gate=gate;else delete spot.gate;delete spot.broken;write(spot);
   }
  }
