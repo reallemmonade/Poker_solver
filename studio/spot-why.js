@@ -166,6 +166,7 @@ if(typeof document!=='undefined'){
  globalThis.decisionWhy=function(h,result){
   try{
    if(!h||h.done||!result?.supported||h.rules?.hole>2||h.config?.variant!=='NLH')return'';
+   result=chartContinueView(result,h);
    const seat=h.actor,hole=h.holes?.[seat];if(hole?.length!==2)return'';
    const probs=result.reference||[],A=result.actions||[];if(!A.length||!probs.length)return'';
    const memoKey=h.actionLog.length+'|'+A.map(a=>a.label).join()+'|'+probs.join(),m=whyMemo.get(result);if(m&&m.k===memoKey)return m.t;
