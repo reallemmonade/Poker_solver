@@ -23,8 +23,9 @@ function actionTones(actions,hand=null){
  return tones;
 }
 // An action's short label. Postflop bets and raises name their size as a share of the pot after calling, as the solver
-// tree and the bet bar do ("Bet 1/3", "Raise 2/3", "Bet 1.5x"); anything all-in reads All-in. Elsewhere sizes stay in bb, to one decimal.
-function potShareLabel(f){const named=[[1/4,'1/4'],[1/3,'1/3'],[1/2,'1/2'],[2/3,'2/3'],[3/4,'3/4'],[1,'Pot'],[1.5,'1.5x'],[2,'2x']].find(([x])=>Math.abs(f-x)<=Math.max(.02,x*.05));return named?named[1]:Math.round(f*100)+'%';}
+// tree and the bet bar do, as whole percents ("Bet 33%", "Raise 67%", "Bet 150%"); anything all-in reads All-in. Elsewhere sizes stay in bb, to one decimal.
+// Sizes near a standard one (a rounded 1/3 pot reads 34%) snap to it, so a size reads the same in every source.
+function potShareLabel(f){const named=[1/4,1/3,1/2,2/3,3/4,1,1.25,1.5,2].find(x=>Math.abs(f-x)<=Math.max(.02,x*.05));return Math.round((named??f)*100)+'%';}
 // Every solver source goes through here, so the rules hold app-wide: a bet or raise that covers every opponent (or is
 // marked all-in, effective all-in, within 3% of all-in or "puts the opponent all-in") reads All-in, and postflop one at the legal minimum
 // whose pot share is bigger than the tree's smallest size (a 1bb bet into a 2bb limped pot, where 1/3 pot would be under

@@ -591,15 +591,16 @@ function spotRangesHTML(result){
  ranges.sort((p,q)=>(mix&&q.seat===mix.seat)-(mix&&p.seat===mix.seat));
  return'<div class="spot-ranges"><h3>Ranges</h3><div class="range-grids">'+ranges.map(r=>{const mine=mix&&r.seat===mix.seat;return'<figure><figcaption><strong>'+esc(names?names[r.seat]:'Seat '+(r.seat+1))+(h&&r.seat===state.hero?' · you':'')+'</strong>'+(share(r)>0?' · '+(share(r)<.5?'<1':Math.round(share(r)))+'% of hands':'')+'</figcaption>'+(mine?actionKeyHTML(result.actions,tones,state.hand):rangeClassWeights(r.range).size?RANGE_KEY:'')+(/^All legal hands/.test(r.range)?'<p class="help">Any '+(h?.rules?.hole>2?'hand':'two cards')+'</p>':rangeClassWeights(r.range).size?rangeGridHTML(r.range,mine?mix.classes:null,tones,h&&r.seat===state.hero&&h.holes[r.seat]?.length===2?G.Core.handClass(h.holes[r.seat]):null,mine?comboPick(r,mix,tones):null):'<p class="help">'+esc(r.range)+'</p>')+'</figure>';}).join('')+'</div></div>';
 }
-// The v4 flop library bets only 1/3 pot on the flop. On a live flop it offers a solve with 1/3, 2/3 and 1.5x pot,
+// The v4 flop library bets only 33% pot on the flop. On a live flop it offers a solve with 33%, 67% and 150% pot,
 // on your Mac or in the cloud, which then answers this flop instead.
 function fewerSizesHTML(result){const h=state.hand;if(!result?.solve?.library?.fewerSizes||!h||h.done||h.street!==1||activeSpotResult(h)!==result)return'';
  // The full-size solve sent from here: its progress shows in the prompt's place, and its answer replaces the library's once it lands.
  const job=spotJob(h);if(job&&jobPending(job))return'<div class="fewer-sizes">'+jobNoticeHTML(job)+'</div>';
- if(job?.status==='done'){setTimeout(()=>deliverSolveJob(true),0);return'';}
+ // Once (an answer that is itself a 33%-only library answer, from an older Mac bridge, must not show itself again in a loop).
+ if(job?.status==='done'){if(spotUI.delivered!==job.rowId)setTimeout(()=>deliverSolveJob(true),0);return'';}
  const failed=job?.status==='failed'?'<p class="small error">'+esc(jobText(job))+'</p>':'';
  const plan=spotPlan(h);if(!plan||plan.route==='none')return failed;
- const note='<p class="small muted">Only 1/3 pot is solved here.'+(plan.blocked?' '+esc(plan.blocked)+(plan.jump?' <button type="button" class="ui-jump" data-jump="'+plan.jump.to+'">'+esc(plan.jump.label)+'</button>':''):' Solve with 1/3, 2/3 and 1.5x:')+'</p>';
+ const note='<p class="small muted">Only 33% pot is solved here.'+(plan.blocked?' '+esc(plan.blocked)+(plan.jump?' <button type="button" class="ui-jump" data-jump="'+plan.jump.to+'">'+esc(plan.jump.label)+'</button>':''):' Solve with 33%, 67% and 150%:')+'</p>';
  return'<div class="fewer-sizes">'+failed+note+(plan.blocked?'':solvePromptHTML(plan,true))+'</div>';}
 function spotResultHTML(result,grade=null){
  if(PokerPreflop.isResult(result))return preflopResultHTML(result,grade);

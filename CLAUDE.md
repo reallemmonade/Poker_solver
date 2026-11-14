@@ -11,6 +11,10 @@ This repo is previewed on a phone through Telescope, which syncs the newest `cla
 
 Any bet or raise that puts a player all-in reads **"All-in"** everywhere in the app (Analysis rows, Why? reasons, range legends, the action bar, History, grading and hand reports), never a pot share like "Bet 828%" or a bb size. Solver answers that jam at a shallower stack than the real hand (the 3-way solver plays everyone at the shortest stack, libraries are solved at fixed depths) still count as the all-in. Labels go through `isAllInAction` / `toneLabel` in `studio/references-ui.js`; new label code must use them, and new solver mappers should mark their jam with `allIn: true` and target the effective all-in, as the action bar's All-in does.
 
+## Bet size labels
+
+Postflop bets and raises read as a whole percent of the pot everywhere in the app: **33%, 67%, 150%** (and 50%, 75%, 100% and so on), never 1/3, 2/3, 1.5x or "Pot". That covers Analysis rows, Why? reasons, range legends, the action bar presets, the hand builder, flop libraries and Mac or cloud solves. Sizes within a few percent of a standard one snap to it, so a library's 33% and a solve's 34% read the same. Labels go through `potShareLabel` in `studio/references-ui.js` (the action bar keeps the same rule in `share` in `studio/action-bar.js`). Preflop sizes stay as multiples (2.5x, 3x) and history amounts stay in bb.
+
 ## Debugging a solve or grading bug: read the hand trace
 
 Every hand the app plays keeps an invisible trace (`studio/hand-trace.js`): which answer each decision used and where it came from (chart, flop/turn library, saved solve, street tree, this device, Mac, server or cloud), why each solve started, every solve job's status change and cancellation (with the reason), finished solves that were not shown (with the reason), and what each decision was graded against. Traces sync with the account as `meta` rows `trace-<device>-<slot>` (a ring of the last 80 hands on each device), so nothing new is shown on screen.
