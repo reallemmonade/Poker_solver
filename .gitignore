@@ -64,6 +64,7 @@
 !/tools/calibration/level2.sh
 !/tools/calibration/level2-sync.sh
 !/tools/split-libraries.cjs
+!/tools/update-flop-libraries.cjs
 !/tools/hand-trace.cjs
 !/tools/funky-spots.cjs
 !/tools/spot-trust/
