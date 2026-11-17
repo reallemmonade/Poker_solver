@@ -202,6 +202,8 @@ function classEvs(tree){
  return{ip:mean(tree.evs[ip]),oop:mean(tree.evs[oop])};
 }
 
+// A flop key's board classes: 'monotone' (one suit), 'trips' (one rank three times).
+function boardClasses(key){const r=[key[0],key[2],key[4]],u=[key[1],key[3],key[5]],c=[];if(u[0]===u[1]&&u[1]===u[2])c.push('monotone');if(r[0]===r[1]&&r[1]===r[2])c.push('trips');return c;}
 async function solve(){
  const treeFile=args.tree||path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
  const packs=loadCharts(args.charts),alias={'per-spot':PER_SPOT,'per-spot-6max':PER_SPOT_6MAX},auto=new Set(args.spots.split(',').flatMap(id=>alias[id]||[])),except=new Set((args.except||'').split(',')),ids=args.spots.split(',').flatMap(id=>alias[id]||[id]).filter(id=>!except.has(id)),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
@@ -211,7 +213,13 @@ async function solve(){
   const dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
   fs.writeFileSync(path.join(dir,'spot.json'),JSON.stringify({id,label:spot.label,chart:{name:spot.pack.name,key:spot.range.key},pot:spot.pot,stack:spot.stack,tree:TREE,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop},null,1));
   console.log(spot.label+': pot '+G.bb(spot.pot)+' bb, stack '+G.bb(spot.stack)+' bb, '+flops.length+' flops');
-  for(const f of flops){
+  // --redo-boards monotone,trips re-solves only this spot's already solved flops of those board
+  // classes (e.g. after a solver fix that touched them), whatever --flops says, keeping their weights.
+  const boards=args['redo-boards']?new Set(args['redo-boards'].split(',')):null;
+  const list=boards?F.all().filter(f=>fs.existsSync(path.join(dir,f.key+'.json'))&&boardClasses(f.key).some(c=>boards.has(c))):flops;
+  if(boards)console.log(id+': '+list.length+' '+[...boards].join('/')+' flops to re-solve');
+  for(const f of list){
+   if(boards){let old=null;try{old=JSON.parse(fs.readFileSync(path.join(dir,f.key+'.json'),'utf8'));}catch{}tasks.push({id,spot,f,file:path.join(dir,f.key+'.json'),weight:old&&old.weight,redo:true,index:tasks.length});continue;}
    // Solved flops are skipped, unless --redo-above asks to re-solve those that
    // stopped above that exploitability (% of pot), for example with more iterations,
    // or --need-evs 1 asks for those saved without per-class EVs.
@@ -219,13 +227,13 @@ async function solve(){
    tasks.push({id,spot,f,file,index:ids.indexOf(id)*flops.length+flops.indexOf(f)});
   }
  }
- const one=async({id,spot,f,file})=>{
+ const one=async({id,spot,f,file,weight,redo})=>{
    // Another run writing to the same folder may have solved it meanwhile.
-   if(fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json.gz'))))return;
+   if(!redo&&fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json.gz'))))return;
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
-    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
+    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:weight||f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
     if(args.turn==='1'){const t=path.join(path.dirname(file),f.key+'.turn.json.gz');fs.writeFileSync(t+'.tmp',zlib.gzipSync(JSON.stringify({key:f.key,nodes:turnNodes(tree)})));fs.renameSync(t+'.tmp',t);}
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
@@ -270,5 +278,5 @@ if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x]');}
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--redo-boards monotone,trips] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x]');}
 module.exports={SPOTS,TREE,PER_SPOT,PER_SPOT_6MAX,prepare,spec,nodes,turnNodes,args};
