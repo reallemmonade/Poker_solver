@@ -83,10 +83,27 @@ index 0cf7fc4..c48a1a7 100644
      fileWriter.open(dump_file);
      fileWriter << dump_json;
 diff --git a/src/solver/BestResponse.cpp b/src/solver/BestResponse.cpp
-index 49e2560..690b892 100644
+index 49e2560..3c4334b 100644
 --- a/src/solver/BestResponse.cpp
 +++ b/src/solver/BestResponse.cpp
-@@ -231,6 +231,47 @@ BestResponse::actionBestResponse(shared_ptr<ActionNode> node, int player, const
+@@ -205,8 +205,14 @@ BestResponse::chanceBestReponse(shared_ptr<ChanceNode> node, int player,const ve
+             if(rank2 < 0) throw runtime_error("rank error");
+ #endif
+             // TODO 这里需要调换一下颜色,根据offset
+-            child_utility = results[one_card->getNumberInDeckInt() + offset];
+-            exchange_color(child_utility,private_combos[player],rank1,rank2);
++            // Three or four equivalent suits chain: the second maps to the first, the third to the second, and only the
++            // first was solved. Follow the chain to the suit that holds the result, then swap the suits back one link
++            // at a time (a single swap of the first and last suit is not the same relabelling).
++            vector<pair<int,int>> links;
++            int target = one_card->getNumberInDeckInt(),cur = rank1;
++            while(cur > 0 && this->color_iso_offset[deal][cur] < 0){ int next = cur + this->color_iso_offset[deal][cur]; links.push_back({cur,next}); target += next - cur; cur = next; }
++            child_utility = results[target];
++            for(int k = (int)links.size() - 1;k >= 0;k --) exchange_color(child_utility,private_combos[player],links[k].first,links[k].second);
+         }else{
+             child_utility = results[one_card->getNumberInDeckInt()];
+         }
+@@ -231,6 +237,47 @@ BestResponse::actionBestResponse(shared_ptr<ActionNode> node, int player, const
          // 这里可以当成"player"做决定的时候，action prob是0-1分布，因为需要使用最好的策略去expliot对方，最好的策略一定是ont-hot的
          vector<float> my_exploitability = vector<float>(reach_probs[player].size());
  
@@ -134,7 +151,7 @@ index 49e2560..690b892 100644
          bool first_action_flag = true;
          for(shared_ptr<GameTreeNode> one_node:node->getChildrens()){
              const vector<float>& node_ev = this->bestResponse(one_node,player,reach_probs,board,deal);
-@@ -458,3 +499,33 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
+@@ -458,3 +505,33 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
      return payoffs;
  }
  
@@ -169,7 +186,7 @@ index 49e2560..690b892 100644
 +    this->action_ev_out = nullptr;
 +}
 diff --git a/src/solver/PCfrSolver.cpp b/src/solver/PCfrSolver.cpp
-index f0e022b..d1db921 100644
+index f0e022b..5b3c3b3 100644
 --- a/src/solver/PCfrSolver.cpp
 +++ b/src/solver/PCfrSolver.cpp
 @@ -4,6 +4,10 @@
@@ -183,7 +200,22 @@ index f0e022b..d1db921 100644
  
  //#define DEBUG;
  
-@@ -732,8 +736,15 @@ void PCfrSolver::train() {
+@@ -365,8 +369,12 @@ PCfrSolver::chanceUtility(int player, shared_ptr<ChanceNode> node, const vector<
+ #ifdef DEBUG
+             if(rank2 < 0) throw runtime_error("rank error");
+ #endif
+-            child_utility = results[one_card->getNumberInDeckInt() + offset];
+-            exchange_color(child_utility,this->pcm.getPreflopCards(player),rank1,rank2);
++            // Chained equivalent suits (three or four): follow the chain to the suit that was solved, then swap back one link at a time.
++            vector<pair<int,int>> links;
++            int target = one_card->getNumberInDeckInt(),cur = rank1;
++            while(cur > 0 && this->color_iso_offset[deal][cur] < 0){ int next = cur + this->color_iso_offset[deal][cur]; links.push_back({cur,next}); target += next - cur; cur = next; }
++            child_utility = results[target];
++            for(int k = (int)links.size() - 1;k >= 0;k --) exchange_color(child_utility,this->pcm.getPreflopCards(player),links[k].first,links[k].second);
+         }else{
+             child_utility = results[one_card->getNumberInDeckInt()];
+         }
+@@ -732,8 +740,15 @@ void PCfrSolver::train() {
  
      uint64_t begintime = timeSinceEpochMillisec();
      uint64_t endtime = timeSinceEpochMillisec();
@@ -199,7 +231,7 @@ index f0e022b..d1db921 100644
          for(int player_id = 0;player_id < this->player_number;player_id ++) {
              this->round_deal = vector<int>{-1,-1,-1,-1};
              //#pragma omp parallel
-@@ -859,6 +870,21 @@ void PCfrSolver::reConvertJson(const shared_ptr<GameTreeNode>& node,json& strate
+@@ -859,6 +874,21 @@ void PCfrSolver::reConvertJson(const shared_ptr<GameTreeNode>& node,json& strate
  
              }
              PCfrSolver::filterColliding((*retval)["strategy"],current_board_long);
@@ -221,7 +253,7 @@ index f0e022b..d1db921 100644
          }
          (*retval)["node_type"] = "action_node";
  
-@@ -962,7 +988,46 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+@@ -962,7 +992,46 @@ json PCfrSolver::dumps(bool with_status,int depth) {
          throw runtime_error("");
      }
      json retjson;
