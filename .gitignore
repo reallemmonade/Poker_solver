@@ -6,6 +6,7 @@
 !/.github/
 !/.github/workflows/
 !/.github/workflows/cloud-solver.yml
+!/.github/workflows/flop-library.yml
 !/server.cjs
 !/accounts.cjs
 !/package.json
@@ -96,6 +97,8 @@
 !/tools/postflop/run-plo-library.command
 !/tools/postflop/run-library.command
 !/tools/postflop/charts-100bb.json.gz
+!/tools/postflop/trees/
+!/tools/postflop/trees/*.json
 !/studio/
 !/studio/app.js
 !/studio/hand-trace.js
