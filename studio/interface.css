@@ -46,6 +46,27 @@ html[data-look] .ui-dialog-error{background:color-mix(in srgb,var(--red) 14%,var
 /* Table screens (interface.js): history and session | table | analysis. Three columns on wide screens, table plus
    analysis with history underneath in between, and on phones one screen at a time that you swipe between. */
 .ui-pane-dots{display:none}
+/* Desktop Play (interface.js): the table takes the full width; the edge arrows, or the left and right keys, open
+   Earlier hands or This decision beside it, one at a time. Phones keep the swipe screens below. */
+.ui-side-arrow{display:none}
+@media(min-width:1001px),(min-width:801px) and (pointer:fine){
+ .ui-app[data-area=play] .ui-live-grid{position:relative;grid-template-columns:minmax(0,1fr)!important;gap:22px;padding:0 52px}
+ .ui-app[data-area=play] .ui-live-grid>.ui-history-pane,.ui-app[data-area=play] .ui-live-grid>.ui-analysis{display:none}
+ .ui-app[data-area=play] .ui-live-grid>.ui-table-pane{grid-column:1!important;grid-row:1!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=history]{grid-template-columns:minmax(0,520px) minmax(0,1fr)!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=history]>.ui-history-pane{display:block;grid-column:1!important;grid-row:1!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=history]>.ui-table-pane{grid-column:2!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=decision]{grid-template-columns:minmax(0,1fr) minmax(0,520px)!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=decision]>.ui-analysis{display:block;grid-column:2!important;grid-row:1!important}
+ .ui-app[data-area=play] .ui-live-grid[data-side=decision]>.ui-table-pane{grid-column:1!important}
+ .ui-app[data-area=play] .ui-side-arrow{display:flex;position:absolute;top:40%;transform:translateY(-50%);z-index:5;width:34px;height:76px;padding:0;align-items:center;justify-content:center;border-radius:17px;border:1px solid var(--line);background:var(--panel);color:var(--ink);box-shadow:0 4px 14px rgba(60,20,20,.12);cursor:pointer}
+ .ui-app[data-area=play] .ui-side-arrow svg{width:20px;height:20px}
+ .ui-app[data-area=play] .ui-side-left{left:4px}.ui-app[data-area=play] .ui-side-right{right:4px}
+ .ui-app[data-area=play] .ui-side-arrow[aria-pressed=true]{background:#233b31;color:#9fe0b4;border-color:#43634e}
+ .ui-app[data-area=play] .ui-side-arrow[aria-pressed=true] svg{transform:rotate(180deg)}
+ .ui-app[data-area=play] .ui-side-right svg{transform:rotate(180deg)}
+ .ui-app[data-area=play] .ui-side-right[aria-pressed=true] svg{transform:none}
+}
 .ui-history-pane{padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:var(--ui-radius);min-width:0;font-size:13px}
 .ui-history-pane h2{margin:16px 0 8px;font-size:15px}.ui-history-pane h2:first-of-type{margin-top:14px}
 .ui-history-pane #handLog{line-height:1.6;max-height:none}.ui-history-pane .ui-pane-hands .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
