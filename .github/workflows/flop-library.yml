@@ -3,12 +3,14 @@
 # The merge job joins every shard (and an earlier run's flops, with resume_run), uploads them as "flops-merged",
 # bundles one library per group and pushes the bundles to the branch flop-runs/<name>. Run again with
 # resume_run=<this run's id> to finish flops a shard ran out of time for.
+# Single-raised and limped 100bb pots use v6b-srp-lite (turn 33/67%, river 67%, about 8 GB): the full v6b-srp tree needs 14 GB and
+# crashes a 16 GB runner. The library stores only flop decisions, which keep 33/67/150%.
 name: Flop library
 on:
   workflow_dispatch:
     inputs:
       name: {description: 'Run name (results branch flop-runs/<name>)', default: '100bb-v6b'}
-      groups: {description: 'Groups: spots|tree|flops; ...', default: 'btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hu-3bet|tools/postflop/trees/v6b-3bet.json|48;btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp,sb-bb-limp,hu-limp|tools/postflop/trees/v6b-srp.json|40'}
+      groups: {description: 'Groups: spots|tree|flops; ...', default: 'btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hu-3bet|tools/postflop/trees/v6b-3bet.json|48;btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp,sb-bb-limp,hu-limp|tools/postflop/trees/v6b-srp-lite.json|40'}
       charts: {description: 'Chart packs (studio/libraries/packs)', default: 'nlh-cash-6-handed-100bb-range-lab-cfr-model,nlh-cash-2-handed-100bb-range-lab-cfr-model'}
       shards: {description: 'Parallel jobs', default: '160'}
       minutes: {description: 'Solve minutes per job', default: '320'}
