@@ -15,8 +15,8 @@ index 9e36411..bda6ea0 100644
      float printExploitability(shared_ptr<GameTreeNode> root, int iterationCount, float initial_pot, uint64_t initialBoard);
      float getBestReponseEv(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard,int deal);
 +    // Per-hand EV (chips, net of half the starting pot) of a best response to the
-+    // opponent's average strategy; -1e30 for hands that collide with the board.
-+    vector<float> handEvs(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard);
++    // opponent's average strategy, or with average, of both players on the average strategy; -1e30 for hands that collide with the board.
++    vector<float> handEvs(shared_ptr<GameTreeNode> node, int player,vector<vector<float>> reach_probs, uint64_t initialBoard, bool average = false);
 +    // Per-hand EV of each action at every decision of `player` before the next card is dealt: the EV (chips, net of
 +    // half the starting pot) of taking the action and then both players following the solved average strategy, given
 +    // the opponent's range at that node. With best_after the player instead plays its best response after the action
@@ -151,14 +151,16 @@ index 49e2560..3c4334b 100644
          bool first_action_flag = true;
          for(shared_ptr<GameTreeNode> one_node:node->getChildrens()){
              const vector<float>& node_ev = this->bestResponse(one_node,player,reach_probs,board,deal);
-@@ -458,3 +505,33 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
+@@ -458,3 +505,35 @@ BestResponse::showdownBestResponse(shared_ptr<ShowdownNode> node, int player,con
      return payoffs;
  }
  
 +
 +vector<float> BestResponse::handEvs(shared_ptr<GameTreeNode> node, int player, vector<vector<float>> reach_probs,
-+                                    uint64_t initialBoard) {
++                                    uint64_t initialBoard, bool average) {
++    this->average_mode = average; this->best_after = false;
 +    const vector<float> private_cards_evs = bestResponse(node, player, reach_probs, initialBoard, 0);
++    this->average_mode = false;
 +    vector<PrivateCards>& player_combo = this->private_combos[player];
 +    vector<PrivateCards>& oppo_combo = this->private_combos[1 - player];
 +    vector<float> out(player_combo.size(), -1e30f);
@@ -253,7 +255,7 @@ index f0e022b..5b3c3b3 100644
          }
          (*retval)["node_type"] = "action_node";
  
-@@ -962,7 +992,46 @@ json PCfrSolver::dumps(bool with_status,int depth) {
+@@ -962,7 +992,51 @@ json PCfrSolver::dumps(bool with_status,int depth) {
          throw runtime_error("");
      }
      json retjson;
@@ -274,9 +276,14 @@ index f0e022b..5b3c3b3 100644
 +        reach_probs[p] = vector<float>(player_privates[p].size());
 +        for(int i = 0;i < player_privates[p].size();i ++) reach_probs[p][i] = player_privates[p][i].weight;
 +    }
++    // TEXASSOLVER_EVS=average: both players on the solved average strategy, so the two sides add up to the pot
++    // (tools/preflop/level2.cjs); otherwise each side's best response to the other's average strategy.
++    const char* evs_kind = getenv("TEXASSOLVER_EVS");
++    bool average = evs_kind != nullptr && string(evs_kind) == "average";
 +    json out;
++    out["kind"] = average ? "average" : "best";
 +    for(int p = 0;p < this->player_number;p ++){
-+        vector<float> evs = br.handEvs(this->tree->getRoot(), p, reach_probs, this->initial_board_long);
++        vector<float> evs = br.handEvs(this->tree->getRoot(), p, reach_probs, this->initial_board_long, average);
 +        json one;
 +        for(int i = 0;i < player_privates[p].size();i ++) if(evs[i] > -1e29f) one[player_privates[p][i].toString()] = evs[i];
 +        out[std::to_string(p)] = one;
