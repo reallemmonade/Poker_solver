@@ -8,7 +8,7 @@
 // Solving again on the new charts and refitting converges the ranges and the shares together
 // (tools/calibration/level2.sh runs the rounds).
 //   node tools/preflop/level2.cjs extract --work dir[,dir] --out m.json.gz [--chart "NLH cash 6-handed 100bb"] [--live 0 for the old flop-only weighting]
-//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json] [--probe-cap 1.2] [--probe-discount 1.25]
+//   node tools/preflop/level2.cjs fit --measure m0.json.gz,dir1[,...] --base set2.json --out cal.json [--keep 2] [--step .4 --prior cal-previous.json] [--probe-cap 1.2] [--probe-discount 1.25] [--zero-sum 1]
 //   node tools/preflop/level2.cjs settle --old charts.json.gz --new charts.json.gz [--threshold .03]
 //   node tools/preflop/level2.cjs moved --old charts.json.gz --new charts.json.gz --spots per-spot-6max [--threshold .05]
 //   node tools/preflop/level2.cjs compare --a m0.json.gz --b dir|m.json.gz
@@ -21,13 +21,15 @@
 // factor moves only a of the way (in logs) from the previous round's (--prior, that round's
 // calibration; none = the formula) to the measured one, so ranges and shares settle together instead
 // of overshooting (undamped, the pilot's round 1 jumped to the new values and 3-bets exploded).
+// --zero-sum 1 (with a large --keep and no --step) fits every kept measurement of a line at once, with equal
+// weight, in one model where each hand pair's two shares add up to the pot (solve.cjs measuredZeroSum).
 // settle prints how far the chart's preflop strategy moved between two rounds (largest and mean
 // change in any action's frequency, by combos, over nodes reached 1% or more) and exits 0 once the
 // largest node change is under --threshold. moved prints the flop lines
 // whose ranges moved more than --threshold (total variation over combos, either player) between
 // two chart bundles, so a round re-solves only those.
 const fs=require('fs'),path=require('path'),zlib=require('zlib');
-const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',probecap:'',probediscount:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
+const args={cmd:process.argv[2]||'help',a:'',b:'',live:'',step:'',prior:'',probecap:'',probediscount:'',zerosum:'',work:'',out:'',chart:'NLH cash 6-handed 100bb',measure:'',base:'',keep:'2',old:'',new:'',spots:'per-spot-6max',threshold:'.05'};
 for(let i=3;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,'').replace(/-/g,'');if(!(k in args))throw Error('Unknown option '+process.argv[i]);args[k]=process.argv[i+1];}
 const read=f=>{const raw=fs.readFileSync(f);return JSON.parse(/\.gz$/.test(f)?zlib.gunzipSync(raw):raw);};
 const round=x=>Math.round(x*1e4)/1e4;
@@ -73,7 +75,7 @@ function fit(){
  for(const [k,list]of lines){
   // A set keeps one fit per depth; the line goes into its own depth's bucket.
   const target=bucket(cal,k);if(!target){console.log(`${k}: no ${depth(k)}bb fit in ${args.base}, skipped`);continue;}
-  target.spots=target.spots||{};const e={...target.spots[k],measured:list.slice(-keep)};delete e.step;delete e.prior;delete e.probeCap;delete e.probeDiscount;if(Number(args.probediscount)>1)e.probeDiscount=Number(args.probediscount);if(Number(args.probecap)>1)e.probeCap=Number(args.probecap);
+  target.spots=target.spots||{};const e={...target.spots[k],measured:list.slice(-keep)};delete e.step;delete e.prior;delete e.probeCap;delete e.probeDiscount;delete e.zeroSum;if(args.zerosum==='1')e.zeroSum=true;if(Number(args.probediscount)>1)e.probeDiscount=Number(args.probediscount);if(Number(args.probecap)>1)e.probeCap=Number(args.probecap);
   if(step!==null&&step<1){e.step=step;const p=before(k);if(p)e.prior=p;}
   target.spots[k]=e;
  }

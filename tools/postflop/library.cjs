@@ -110,6 +110,11 @@ for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=p
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}
 
+// Kicker chains (same high card and suitedness, kicker falling; suited wheel aces apart) and suited connector and
+// one-gapper chains, as in tools/preflop/solve.cjs.
+const RANKS='AKQJT98765432',CHAINS=[];
+for(let i=0;i<12;i++)for(const s of ['s','o']){const hands=[...RANKS.slice(i+1)].map(k=>RANKS[i]+k+s);if(i===0&&s==='s')CHAINS.push(hands.slice(0,8),hands.slice(8));else CHAINS.push(hands);}
+for(const gap of [1,2])CHAINS.push([...RANKS].slice(1,13-gap).map((_,i)=>RANKS[i+1]+RANKS[i+1+gap]+'s'));
 // Replays the spot's line in its chart and returns the ranges, pot and stack at the flop.
 function prepare(id,packs){
  const def=SPOTS[id];if(!def)throw Error('Unknown spot '+id+'. Known: '+Object.keys(SPOTS).join(', '));
@@ -131,8 +136,14 @@ function prepare(id,packs){
  // all, and the calibration then keeps the formula's guess for them (the cutoff folding 76s while
  // opening 87s and 65s). A 1% probe barely moves the strategies but prices every hand in both roles;
  // calibrate.cjs --probe-weight counts those measurements.
- const floor=Number(args.floor)||0,probe=Number(args.probe)||0,seen=floor?plays(packs,def.chart):null;
- const classes=(w,seat)=>{const o={};P.classes.forEach((c,i)=>{let x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];x=Math.max(x,probe);if(x>=.005)o[c]=seen||probe?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
+ // --border x gives a class outside a range (under 5% of its combos) at least x of its combos when the next
+ // stronger hand in its kicker or suited-connector chain is in the range (K8s next to K9s, 65s next to 76s).
+ // A 1% probe plays like a hidden hand and measures about 1.2-1.3 times better than the same hand really played
+ // there, so the hands at the edge of a range, the ones a refit could add, are measured at a weight the
+ // opponent has to respect.
+ const floor=Number(args.floor)||0,probe=Number(args.probe)||0,border=Number(args.border)||0,seen=floor?plays(packs,def.chart):null;
+ const edge=w=>{const out=new Set();if(!border)return out;const at=c=>w[P.classes.indexOf(c)]||0;for(const chain of CHAINS)for(let k=1;k<chain.length;k++)if(at(chain[k])<.05&&at(chain[k-1])>=.05)out.add(chain[k]);return out;};
+ const classes=(w,seat)=>{const o={},e=edge(w);P.classes.forEach((c,i)=>{let x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];x=Math.max(x,probe);if(e.has(c))x=Math.max(x,border);if(x>=.005)o[c]=seen||probe?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));
  return{id,label:def.label,pack,range,pot:h.pot,stack:Math.min(h.stacks[ip],h.stacks[oop]),ip,oop,rangeIp:classes(range.seats[ip],ip),rangeOop:classes(range.seats[oop],oop)};
 }
@@ -154,7 +165,7 @@ function spec(spot,board){
 function run(input,dir){
  return new Promise((resolve,reject)=>{
   const file=path.join(dir,'input.txt');fs.writeFileSync(file,input);let iterations=0,exploitability=null,tail='';const started=Date.now();
-  const child=spawn(args.solver,['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir}),timer=setTimeout(()=>child.kill('SIGKILL'),Number(args.timeout)*1000);
+  const child=spawn(args.solver,['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,...args.evs?{TEXASSOLVER_EVS:args.evs}:{}}}),timer=setTimeout(()=>child.kill('SIGKILL'),Number(args.timeout)*1000);
   child.stdout.on('data',d=>{for(const l of String(d).split(/[\r\n]+/)){let m=l.match(/^Iter: (\d+)/);if(m)iterations=+m[1];m=l.match(/Total exploitability (-?[\d.]+)/);if(m)exploitability=+m[1];}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
   child.on('error',reject);
@@ -233,7 +244,7 @@ async function solve(){
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
-    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:weight||f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
+    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:weight||f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs,evsKind:tree.evs.kind||'best'}:{}};
     if(args.turn==='1'){const t=path.join(path.dirname(file),f.key+'.turn.json.gz');fs.writeFileSync(t+'.tmp',zlib.gzipSync(JSON.stringify({key:f.key,nodes:turnNodes(tree)})));fs.renameSync(t+'.tmp',t);}
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
@@ -278,5 +289,5 @@ if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--redo-boards monotone,trips] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x]');}
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--redo-boards monotone,trips] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x] [--border x] [--evs average]');}
 module.exports={SPOTS,TREE,PER_SPOT,PER_SPOT_6MAX,prepare,spec,nodes,turnNodes,args};

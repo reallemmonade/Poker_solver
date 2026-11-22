@@ -1,0 +1,135 @@
+# Level 2 of the 6-max 100bb preflop chart on GitHub's free runners (public repo: 4 cores, 16 GB, 6 h per job). One run is
+# one round (tools/preflop/level2.cjs, README "Level 2"):
+#  1. prep: the round's input chart. Round 1 builds it from tools/calibration/set2-100bb.json alone; later rounds take
+#     charts-r<round-1>.json.gz from the results branch level2-runs/<name>.
+#  2. solve: every 6-max 100bb flop line on that chart, FLOPS boards each (subset 120 = 124 boards), split over SHARDS jobs,
+#     each solving its share until its time budget. Flops carry per-class EVs with both players on the solved average
+#     strategy (--evs average, so the two sides add up to the pot), every class at 1% (--probe), the hands at the edge of
+#     each range at 25% (--border), the seat's other per-spot classes at 0.6% (--floor).
+#  3. merge: joins the shards (and an earlier run's, with resume_run). Once 95% or more of the flops are in, it extracts
+#     this round's measurements, fits every round's measurements so far at once with equal weight in the zero-sum model
+#     (level2.cjs fit --zero-sum 1), builds the chart, runs the balance, order and settle checks, and pushes
+#     m-r<round>.json.gz, cal-r<round>.json, charts-r<round>.json.gz and checks-r<round>.txt to level2-runs/<name>.
+#     Below 95% it uploads the merged flops only: run the same round again with resume_run=<this run's id>.
+# Nothing here ships a chart: a chart is copied into studio/libraries only by a pull request, after both checks pass.
+name: Level 2 preflop round
+on:
+  workflow_dispatch:
+    inputs:
+      name: {description: 'Run name (results branch level2-runs/<name>)', default: 'zs1'}
+      round: {description: 'Round (1, 2, ...)', default: '1'}
+      shards: {description: 'Parallel jobs', default: '140'}
+      minutes: {description: 'Solve minutes per job', default: '320'}
+      flops: {description: 'Boards per line (tools/postflop/flops.cjs subset)', default: '120'}
+      iterations: {default: '150'}
+      border: {default: '0.25'}
+      resume_run: {description: 'Run id of this round whose flops-merged artifact to continue from', default: ''}
+permissions:
+  contents: write
+  actions: read
+env:
+  CHART: NLH cash 6-handed 100bb
+  BRANCH: level2-runs/${{ inputs.name }}
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      shards: ${{ steps.p.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        run: echo "shards=$(node -e 'console.log(JSON.stringify(Array.from({length:+process.argv[1]},(_,i)=>i+1)))' '${{ inputs.shards }}')" >> "$GITHUB_OUTPUT"
+      - name: Input chart
+        env: {ROUND: '${{ inputs.round }}'}
+        run: |
+          mkdir -p in
+          if [ "$ROUND" = 1 ]; then
+            node tools/preflop/library.cjs --out build --games nlh --limp 1 --seats 6 --formats cash --depths 100 --calibration tools/calibration/set2-100bb.json --iterations 2000 --jobs 1
+            cp build/preflop-library.json.gz in/charts.json.gz
+          else
+            git fetch --depth 1 origin "$BRANCH"
+            git show "FETCH_HEAD:charts-r$((ROUND-1)).json.gz" > in/charts.json.gz
+          fi
+      - uses: actions/upload-artifact@v4
+        with: {name: charts-in, path: in, retention-days: 30}
+  solve:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJson(needs.prep.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: tools/local-solver/TexasSolver/install
+          key: texassolver-${{ runner.os }}-${{ hashFiles('tools/local-solver/install-mac.sh', 'tools/local-solver/*.patch') }}
+      - name: Build TexasSolver
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/local-solver/install-linux.sh
+      - uses: actions/download-artifact@v4
+        with: {name: charts-in, path: in}
+      - name: Earlier flops
+        if: inputs.resume_run != ''
+        uses: actions/download-artifact@v4
+        with: {name: flops-merged, path: out, run-id: '${{ inputs.resume_run }}', github-token: '${{ github.token }}'}
+      - name: Solve
+        env: {K: '${{ matrix.shard }}', N: '${{ inputs.shards }}', MIN: '${{ inputs.minutes }}', FLOPS: '${{ inputs.flops }}', IT: '${{ inputs.iterations }}', BORDER: '${{ inputs.border }}'}
+        run: |
+          timeout $((MIN*60)) node tools/postflop/library.cjs solve --charts in/charts.json.gz --out out --spots per-spot-6max --flops "$FLOPS" \
+            --floor 0.006 --probe 0.01 --border "$BORDER" --evs average --accuracy 1 --iterations "$IT" --threads 4 --timeout 9000 --shard "$K/$N" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: 'flops-shard-${{ matrix.shard }}', path: out, if-no-files-found: ignore, retention-days: 30}
+  merge:
+    needs: solve
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {name: charts-in, path: in}
+      - name: Earlier flops
+        if: inputs.resume_run != ''
+        uses: actions/download-artifact@v4
+        with: {name: flops-merged, path: out, run-id: '${{ inputs.resume_run }}', github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'flops-shard-*', path: out, merge-multiple: true}
+      - uses: actions/upload-artifact@v4
+        with: {name: flops-merged, path: out, retention-days: 90}
+      - name: Fit, build and check
+        env: {ROUND: '${{ inputs.round }}', FLOPS: '${{ inputs.flops }}'}
+        run: |
+          set -o pipefail
+          done=$(ls out/*/ 2>/dev/null | grep -cE '^([2-9TJQKA][cdhs]){3}\.json$' || true)
+          want=$(( $(ls -d out/*/ | wc -l) * $(node tools/postflop/flops.cjs "$FLOPS" | head -1 | cut -d' ' -f1) ))
+          echo "Solved $done of $want flops" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ $((done*100)) -lt $((want*95)) ]; then echo "Under 95%: run round $ROUND again with resume_run=${{ github.run_id }}" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          mkdir -p res
+          if [ "$ROUND" != 1 ]; then git fetch --depth 1 origin "$BRANCH" && for r in $(seq 1 $((ROUND-1))); do git show "FETCH_HEAD:m-r$r.json.gz" > res/m-r$r.json.gz; done; fi
+          node tools/preflop/level2.cjs extract --work out --chart "$CHART" --out res/m-r$ROUND.json.gz
+          m=$(ls res/m-r*.json.gz | sort -V | paste -sd, -)
+          node tools/preflop/level2.cjs fit --measure "$m" --base tools/calibration/set2-100bb.json --keep 99 --zero-sum 1 --out res/cal-r$ROUND.json
+          node tools/preflop/library.cjs --out build --games nlh --limp 1 --seats 6 --formats cash --depths 100 --calibration res/cal-r$ROUND.json --iterations 2000 --jobs 1
+          cp build/preflop-library.json.gz res/charts-r$ROUND.json.gz
+          { echo "== measurements: $m"; node tools/preflop/level2.cjs compare --a res/m-r$ROUND.json.gz --b res/m-r$ROUND.json.gz | tail -12
+            echo "== balance"; node tools/preflop/balance-check.cjs res/charts-r$ROUND.json.gz || true
+            echo "== order"; node tools/preflop/order-check.cjs res/charts-r$ROUND.json.gz || true
+            echo "== settle vs input chart"; node tools/preflop/level2.cjs settle --old in/charts.json.gz --new res/charts-r$ROUND.json.gz || true; } | tee res/checks-r$ROUND.txt
+          { echo '```'; cat res/checks-r$ROUND.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Push results
+        env: {ROUND: '${{ inputs.round }}'}
+        run: |
+          [ -f res/charts-r$ROUND.json.gz ] || exit 0
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          if git fetch --depth 1 origin "$BRANCH" 2>/dev/null; then git checkout -q -B "$BRANCH" FETCH_HEAD; else git checkout -q --orphan "$BRANCH" && git rm -rq --cached . && git clean -fdq -e res; fi
+          cp res/m-r$ROUND.json.gz res/cal-r$ROUND.json res/charts-r$ROUND.json.gz res/checks-r$ROUND.txt .
+          git add m-r$ROUND.json.gz cal-r$ROUND.json charts-r$ROUND.json.gz checks-r$ROUND.txt
+          git commit -qm "Level 2 round $ROUND (run ${{ github.run_id }})" && git push origin "$BRANCH"
