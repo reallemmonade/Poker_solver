@@ -8,22 +8,42 @@
 // Live-hand guesses join that hand's grades (so the rating, leaks and the hand report pick them up when it is saved);
 // Hand replay guesses are kept with the other grades and join the rating as one extra group (replayGuessFact).
 const guessGate={key:'guava-guess-gate',replay:null};
-function guessGateOn(){try{return localStorage.getItem(guessGate.key)!=='0'}catch{return true}}
+function guessGateOn(){if(typeof studioInterface!=='undefined'&&studioInterface.tab==='solve')return false;try{return localStorage.getItem(guessGate.key)!=='0'}catch{return true}}
 const GUESS_LOCK='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
 function guessButtonsHTML(actions,hand,attr){const tones=actionTones(actions,hand);
  return'<div class="guess-btns">'+actions.map((a,i)=>'<button type="button" class="guess-btn" '+attr+'="'+i+'"><i style="background:var(--act-'+tones[i]+')"></i>'+esc(tones[i]==='allin'?'All-in':toneLabel(a,tones[i],hand).replace(/ · .*/,''))+'</button>').join('')+'<button type="button" class="guess-btn guess-skip" '+attr+'-skip>Skip</button></div>';}
 // The grade's cost line and the rating change it makes now (only when it counts toward the rating).
+// Same rules as the rating (leakDecisions + gradeMistake): solves with EVs grade by bb lost vs the best action; frequency
+// answers grade the exact action, correct when the solver plays it at least 5% of the time. A size the chart doesn't have
+// (an approximate grade) and chip-EV charts don't count, so they show no rating change.
 function guessVerdict(row,counted){if(!row)return{text:'',elo:null,cls:'none'};
- const chart=!!row.referenceSource&&Number.isFinite(row.referenceFrequency),solved=!!row.rated&&Number.isFinite(row.loss),mistake=gradeMistake(row),cost=gradeCost(row);
- const text=solved?(cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play'):chart?fmt(row.referenceFrequency*100,0)+'% in chart':'Not graded';
- let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,s=PokerRating.score({mistake,cost:solved?cost:null});elo=Math.round((r.n<PokerRating.PROVISIONAL?40:16)*(s-PokerRating.expected(now,PokerRating.SPOT[row.street]??1500)));}catch{}}
- return{text,elo,cls:!(chart||solved)?'none':!mistake?'good':solved&&cost<1?'ok':'bad'};}
-function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
+ const freq=Number.isFinite(row.referenceFrequency)?row.referenceFrequency:null,solved=gradeSolved(row),offSize=!!row.referenceSource&&freq!==null&&gradeApprox(row)&&gradeSplit(row)!=='after'&&!gradeOffChart(row)&&!gradeOpenConnector(row)&&!gradeOrderBreach(row)&&!gradeOvercall(row)&&!gradeUnreliableChart(row),
+  chart=gradeChart(row),mistake=gradeMistake(row),cost=gradeCost(row);
+ const opts=(row.options||[]).filter(o=>Number.isFinite(o.f)),top=Math.max(0,...opts.map(o=>o.f)),pc=x=>fmt(x*100,x<.1?1:0)+'%',word=l=>String(l||'').split(' ')[0].toLowerCase();
+ let text='Not graded';const split=gradeSplit(row),continues=split==='vsopen'&&!gradeFolds(row.options?.[row.choice]);
+ if(gradeGuessedRanges(row))text='Not graded · no chart for how this hand got here';
+ else if(solved)text=cost>0?'−'+fmt(cost,cost<1?2:1)+' bb vs best':'Best play';
+ else if(freq!==null&&gradeUnreliableChart(row))text='Not graded · chart unreliable';
+ else if(split==='after'&&freq!==null)text='Not graded · chart unreliable after a flat or 3-bet';
+ else if(freq!==null&&gradeOvercall(row))text='Not graded · chart has no overcalls';
+ else if(freq!==null&&gradeOffChart(row))text='Not graded · chart has no 3-bet bluffs';
+ else if(freq!==null&&gradeOpenConnector(row))text='Not graded · chart unreliable for suited connectors';
+ else if(freq!==null&&gradeOrderBreach(row))text='Not graded · chart out of kicker order here';
+ else if(offSize){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text=same&&same.f>=chartMistakeFrequency?'Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')':'Size not in the chart · not graded';}
+ else if(chart&&gradeSizeOnly(row)){const same=opts.filter(o=>o.label!==row.label&&word(o.label)===word(row.label)).sort((a,b)=>b.f-a.f)[0];text='Right action, off size · solver uses '+same.label.replace(/^\S+ (to )?/,'')+' ('+pc(same.f)+')';}
+ else if(chart&&continues&&!mistake&&freq<top-1e-9)text='Right to continue · call vs 3-bet not graded';
+ else if(chart)text=mistake?'Rare · solver plays it '+pc(freq):freq>=top-1e-9?'Best play · '+pc(freq):'Mixed · solver plays it '+pc(freq);
+ let elo=null;if(counted&&(chart||solved)&&typeof leakDecisions==='function'){try{const r=PokerRating.rate(leakDecisions()),now=r.rating??PokerRating.START,d={mistake,cost:solved?cost:null,sizeOnly:!solved&&gradeSizeOnly(row),street:row.street};elo=Math.round(PokerRating.delta(d,now,r.n));}catch{}}
+ return{text,elo,cls:!(chart||solved)?(offSize?'ok':'none'):!mistake?'good':gradeSizeOnly(row)?'ok':solved&&cost<1?'ok':'bad'};}
+// Every graded result says why under it (decisionWhy in spot-why.js): pot odds vs their range, how wide the seat plays, or the hand's postflop reason.
+function guessRevealHTML(g){const v=g.verdict;return'<div class="guess-reveal"><div><b><i style="background:var(--act-'+g.tone+')"></i>You: '+esc(g.label)+'</b>'+(v.text?'<span>'+esc(v.text)+'</span>':'')+(g.why?'<small class="guess-why">'+esc(g.why)+'</small>':'')+'</div>'+(v.elo!==null?'<em class="guess-pill guess-'+v.cls+'">'+(v.elo>=0?'+':'−')+Math.abs(v.elo)+' Elo</em>':'')+'</div>';}
 // renderPlay asks for the analysis pane's content through this. body() builds the normal content.
 function guessGateHTML(h,solved,q,body){
  if(!guessGateOn()||!h||h.done)return body();
  const shows=solved?!!solved.supported:displayPolicyReady(q),at=h.actionLog.length;
- if((h.unlocked||[]).includes(at)){guessSettle(h);const g=h.guessReveal?.at===at?h.guessReveal:null;return(g?guessRevealHTML(g):'')+body();}
+ if((h.unlocked||[]).includes(at)){guessSettle(h);const g=h.guessReveal?.at===at?h.guessReveal:null;
+  // A full-size solve on its way replaces the library's grade: show only your pick until it lands (fullerSolveOut, spot-ui.js).
+  const wait=g&&typeof fullerSolveOut==='function'&&fullerSolveOut(solved);return(g?guessRevealHTML(wait?{...g,verdict:{text:'',elo:null,cls:'none'},why:''}:g):'')+body();}
  // No answer yet: guess first, then the solve prompt (the solve grades the guess when it lands). A spot nothing can solve shows its notice.
  if(!shows&&(unsolvableSpot(h)||!q?.actions?.length))return body();
  const actions=solved?.supported?solved.actions:q.actions;
@@ -34,21 +54,26 @@ function guessResult(h){let r=activeSpotResult(h);if(r?.supported)return r;try{r
 function guessLive(index){const h=state.hand;if(!h||h.done)return;const at=h.actionLog.length,solved=activeSpotResult(h),q=solved?.supported?null:studyReferenceQuery(h),actions=solved?.supported?solved.actions:q.actions,action=actions[index];if(!action)return;
  const tones=actionTones(actions,h);
  h.guessed=[...(h.guessed||[]),at];guessUnlock(h,at);
- h.guessReveal={at,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:{text:'Solve to grade',elo:null,cls:'none'}};
+ h.guessReveal={at,action,label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],h).replace(/ · .*/,''),tone:tones[index],verdict:{text:'Solve to grade',elo:null,cls:'none'}};
  h.pendingGuess={at,action};guessSettle(h);
  saveLiveSession();renderPlay();}
 // Grades a guess as soon as its spot has an answer: at once when one is on hand, else when the solve lands while it is
 // still your turn. If you act first, chooseAction (app.js) grades the guess through the background assessment instead.
 function guessSettle(h){const g=h.pendingGuess;if(!g||g.at!==h.actionLog.length||h.done)return;const result=guessResult(h);if(!result)return;
  h.pendingGuess=null;let row=null;if(T.matchAction(result.actions,g.action)>=0)try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h});}catch{row=null;}
- const study=studioInterface.area==='study',counted=!!row&&!h.assisted&&!$('reveal').checked&&(study||!$('controlAll').checked);
- if(h.guessReveal?.at===g.at)h.guessReveal.verdict=guessVerdict(row,counted);saveLiveSession();}
+ if(h.guessReveal?.at===g.at){h.guessReveal.verdict=guessVerdict(row,guessCounted(h,row));h.guessReveal.why=typeof decisionWhy==='function'?decisionWhy(h,result):'';}saveLiveSession();}
+function guessCounted(h,row){return!!row&&!h.assisted&&!$('reveal').checked&&(studioInterface.area==='study'||!$('controlAll').checked);}
+// A guess graded by a 1/3-only flop library is graded again, in the same row, when the full-size solve sent from there
+// lands while it is still your turn (spot-ui.js deliverSolveJob). Once you act, fullerSolveWait does it instead.
+function guessRegrade(h,result){const at=h?.actionLog.length,g=h?.guessReveal;if(!g?.action||g.at!==at||g.regraded||h.pendingGuess||h.done||!result?.supported||T.matchAction(result.actions,g.action)<0)return;
+ const old=state.currentGrades.find(r=>r.source==='guess'&&r.step===at);if(old&&old.referenceSource?.kind!=='postflop-library')return;
+ let row=null;try{row=scoreResult(result,{kind:'guess',action:g.action,hand:h.clone(),live:h,replace:old});}catch{row=null;}if(!row)return;g.regraded=true;g.verdict=guessVerdict(row,guessCounted(h,row));g.why=typeof decisionWhy==='function'?decisionWhy(h,result):g.why;saveLiveSession();if(typeof renderPlay==='function')renderPlay();}
 // Hand replay: a finished review analysis waits behind the guess buttons.
 function guessReplayHTML(){const g=guessGate.replay;return'<div class="guess-lock guess-replay"><div class="guess-q">'+GUESS_LOCK+' Your play?<small>Guess to see the solver</small></div>'+guessButtonsHTML(g.result.actions,g.hand,'data-guess-replay')+'</div>';}
 function guessReplay(index){const g=guessGate.replay;if(!g)return;guessGate.replay=null;const box=$('reviewFeedback');
  if(index===null){box.innerHTML=resultHTML(g.result);return;}
  const action=g.result.actions[index],tones=actionTones(g.result.actions,g.hand),row=scoreResult(g.result,{kind:'reviewGuess',action,hand:g.hand});
- box.innerHTML=guessRevealHTML({label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],g.hand).replace(/ · .*/,''),tone:tones[index],verdict:guessVerdict(row,!!row)})+resultHTML(g.result,row);
+ box.innerHTML=guessRevealHTML({label:tones[index]==='allin'?'All-in':toneLabel(action,tones[index],g.hand).replace(/ · .*/,''),tone:tones[index],verdict:guessVerdict(row,!!row),why:typeof decisionWhy==='function'?decisionWhy(g.hand,g.result):''})+resultHTML(g.result,row);
  if(typeof renderPerformance==='function')try{renderPerformance()}catch{}}
 function replayGuessFact(){return{assisted:false,at:'',key:'replay-guesses',grades:(state.grades||[]).filter(g=>g.source==='reviewGuess')};}
 {const finish=finishAnalysis;finishAnalysis=function(result,pending){
@@ -72,6 +97,7 @@ function initGuessGate(){
 .guess-reveal{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 12px;padding:11px 14px;border-radius:14px;background:var(--panel2)}
 .guess-reveal b{display:flex;align-items:center;gap:7px;font-size:15px}.guess-reveal b i{width:9px;height:9px;border-radius:3px}
 .guess-reveal span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.guess-reveal small.guess-why{display:block;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}
 .guess-pill{font-style:normal;font-size:14px;font-weight:800;padding:3px 10px;border-radius:10px;white-space:nowrap}
 .guess-good{color:var(--act-passive);background:color-mix(in srgb,var(--act-passive) 16%,transparent)}
 .guess-ok{color:var(--act-bet1);background:color-mix(in srgb,var(--act-bet1) 16%,transparent)}

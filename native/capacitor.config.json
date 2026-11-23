@@ -1,0 +1,25 @@
+{
+  "appId": "poker.guava.app",
+  "appName": "Guava Poker",
+  "webDir": "www",
+  "backgroundColor": "#14120f",
+  "server": {
+    "url": "https://guava.poker",
+    "allowNavigation": [
+      "guava.poker",
+      "www.guava.poker"
+    ]
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#14120f",
+    "scheme": "Guava Poker",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "overlaysWebView": true
+    }
+  }
+}

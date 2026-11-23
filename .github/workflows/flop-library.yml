@@ -1,0 +1,97 @@
+# Solves flop libraries on GitHub's free runners (public repo: 4 cores, 16 GB, 6 h per job), in parallel shards.
+# Each shard solves its share of the flops (library.cjs --shard K/N) until the time budget, then uploads what it finished.
+# The merge job joins every shard (and an earlier run's flops, with resume_run), uploads them as "flops-merged",
+# bundles one library per group and pushes the bundles to the branch flop-runs/<name>. Run again with
+# resume_run=<this run's id> to finish flops a shard ran out of time for.
+# Single-raised and limped 100bb pots use v6b-srp-lite (turn 33/67%, river 67%, about 8 GB): the full v6b-srp tree needs 14 GB and
+# crashes a 16 GB runner. The library stores only flop decisions, which keep 33/67/150%.
+name: Flop library
+on:
+  workflow_dispatch:
+    inputs:
+      name: {description: 'Run name (results branch flop-runs/<name>)', default: '100bb-v6b'}
+      groups: {description: 'Groups: spots|tree|flops; ...', default: 'btn-bb-3bet,co-bb-3bet,btn-sb-3bet,sb-bb-3bet,hu-3bet|tools/postflop/trees/v6b-3bet.json|48;btn-bb,co-bb,utg-bb,sb-bb,co-btn,hj-btn,utg-btn,hu-srp,sb-bb-limp,hu-limp|tools/postflop/trees/v6b-srp-lite.json|40'}
+      charts: {description: 'Chart packs (studio/libraries/packs)', default: 'nlh-cash-6-handed-100bb-range-lab-cfr-model,nlh-cash-2-handed-100bb-range-lab-cfr-model'}
+      shards: {description: 'Parallel jobs', default: '160'}
+      minutes: {description: 'Solve minutes per job', default: '320'}
+      iterations: {default: '400'}
+      resume_run: {description: 'Run id whose flops-merged artifact to continue from', default: ''}
+permissions:
+  contents: write
+  actions: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.p.outputs.shards }}
+    steps:
+      - id: p
+        run: echo "shards=$(node -e 'console.log(JSON.stringify(Array.from({length:+process.argv[1]},(_,i)=>i+1)))' '${{ inputs.shards }}')" >> "$GITHUB_OUTPUT"
+  solve:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: tools/local-solver/TexasSolver/install
+          key: texassolver-${{ runner.os }}-${{ hashFiles('tools/local-solver/install-mac.sh', 'tools/local-solver/*.patch') }}
+      - name: Build TexasSolver
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/local-solver/install-linux.sh
+      - name: Earlier flops
+        if: inputs.resume_run != ''
+        uses: actions/download-artifact@v4
+        with: {name: flops-merged, path: out, run-id: '${{ inputs.resume_run }}', github-token: '${{ github.token }}'}
+      - name: Solve
+        env: {GROUPS_IN: '${{ inputs.groups }}', CHARTS_IN: '${{ inputs.charts }}', K: '${{ matrix.shard }}', N: '${{ inputs.shards }}', MIN: '${{ inputs.minutes }}', IT: '${{ inputs.iterations }}'}
+        run: |
+          node -e 'const fs=require("fs"),z=require("zlib");const packs=process.env.CHARTS_IN.split(",").map(n=>JSON.parse(z.gunzipSync(fs.readFileSync("studio/libraries/packs/"+n+".json.gz"))));fs.writeFileSync("charts.json",JSON.stringify({format:"range-lab-preflop-bundle-v1",packs}))'
+          end=$(( $(date +%s) + MIN*60 ))
+          IFS=';' read -ra groups <<< "$GROUPS_IN"
+          for g in "${groups[@]}"; do
+            IFS='|' read -r spots tree flops <<< "$g"
+            left=$(( end - $(date +%s) )); [ "$left" -gt 60 ] || break
+            timeout "$left" node tools/postflop/library.cjs solve --charts charts.json --spots "$spots" --tree "$tree" --flops "$flops" --out out --iterations "$IT" --accuracy 1 --threads 4 --timeout 9000 --shard "$K/$N" || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: 'flops-shard-${{ matrix.shard }}', path: out, if-no-files-found: ignore, retention-days: 30}
+  merge:
+    needs: solve
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Earlier flops
+        if: inputs.resume_run != ''
+        uses: actions/download-artifact@v4
+        with: {name: flops-merged, path: out, run-id: '${{ inputs.resume_run }}', github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'flops-shard-*', path: out, merge-multiple: true}
+      - uses: actions/upload-artifact@v4
+        with: {name: flops-merged, path: out, retention-days: 90}
+      - name: Bundle and push
+        env: {GROUPS_IN: '${{ inputs.groups }}', NAME: '${{ inputs.name }}'}
+        run: |
+          node -e '
+            const fs=require("fs"),path=require("path"),F=require("./tools/postflop/flops.cjs");let todo=0,done=0;
+            for(const g of process.env.GROUPS_IN.split(";")){const [spots,,n]=g.split("|");const want=F.subset(+n).length;
+              for(const id of spots.split(",")){const d=path.join("out",id),have=fs.existsSync(d)?fs.readdirSync(d).filter(f=>/^([2-9TJQKA][cdhs]){3}\.json$/.test(f)).length:0;done+=have;todo+=want;console.log(id+": "+have+"/"+want);}}
+            console.log("total "+done+"/"+todo);fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Solved "+done+" of "+todo+" flops\n");'
+          node tools/postflop/library.cjs bundle --out out --name "Guava postflop library v6b"
+          mkdir -p /tmp/pub && cp out/postflop-library.json.gz /tmp/pub/
+          git config user.name github-actions && git config user.email github-actions@users.noreply.github.com
+          git checkout --orphan "flop-runs/$NAME" && git rm -rq --cached . && git clean -fdq -e out
+          cp /tmp/pub/postflop-library.json.gz "library-$NAME.json.gz"
+          echo "run ${{ github.run_id }}" > RUN.txt
+          git add "library-$NAME.json.gz" RUN.txt && git commit -qm "Flop library $NAME (run ${{ github.run_id }})"
+          git push -f origin "flop-runs/$NAME"

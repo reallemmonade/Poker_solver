@@ -20,7 +20,7 @@
 // the log multiplier is scaled by n/(n + shrink x the median n of the fitted classes), where n is
 // its combos times flops. With a few dozen flops per spot the raw per-class fit is mostly noise
 // (fits on two halves of 120 3-bet-pot flops agreed at r=0.39). --shrink 0 turns it off.
-// Fitted playability is kept in kicker order (see monotone below); --monotone 0 turns it off.
+// Fitted playability is kept in kicker and connector order (see monotone below); --monotone 0 turns it off.
 // --check dir reports the fitted model's pot-share error on flops solved elsewhere (held out).
 // --per-spot 1 also fits every spot with at least --spot-flops solved flops on its own, shrunk
 // toward its pot type's fit instead of the shape rule, and writes them as `spots` keyed by
@@ -30,9 +30,9 @@ const {playability,PLAY}=require('./solve.cjs');
 const table=JSON.parse(fs.readFileSync(path.join(__dirname,'equity-table.json'),'utf8'));
 const classes=table.classes,K=classes.length,index=new Map(classes.map((c,i)=>[c,i])),combos=classes.map(c=>c.length===2?6:c[2]==='s'?4:12);
 
-const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',monotone:'1',check:'','per-spot':'','spot-flops':'20'};
+const args={work:'',out:'calibration.json',min:'0.5',depths:'',split:'',shrink:'1',monotone:'1',check:'','per-spot':'','spot-flops':'20','probe-weight':'0'};
 for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
-if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--monotone 0] [--check dir] [--per-spot 1 [--spot-flops 20]]');process.exit(1);}
+if(!args.work){console.log('Usage: calibrate.cjs --work dir[,dir] [--out calibration.json] [--min 0.5] [--depths 20,50,100,200] [--split 1] [--shrink 1] [--monotone 0] [--check dir] [--per-spot 1 [--spot-flops 20]] [--probe-weight 0.25]');process.exit(1);}
 
 // The two players at the flop, from the chart line "seat:kind:target/...": out of position is
 // first after the button (seat 0), and the aggressor is the last raiser (none in a limped pot).
@@ -57,7 +57,10 @@ for(const dir of dirs.split(','))for(const id of fs.readdirSync(dir)){
  if(!used)continue;flopCount+=used;
  for(const side of ['ip','oop']){
   const own=side==='ip'?spot.rangeIp:spot.rangeOop,opp=side==='ip'?spot.rangeOop:spot.rangeIp,target=new Float64Array(K),weight=new Float64Array(K),oppMass=new Float64Array(K);
-  for(let i=0;i<K;i++){oppMass[i]=(opp[classes[i]]||0)*combos[i];if(mass[side][i]>0){target[i]=sum[side][i]/mass[side][i];weight[i]=(own[classes[i]]||0)*combos[i]*used;}}
+  // --probe-weight w: a class solved at a probe weight (library.cjs --probe) counts as if it held w of
+  // its combos, so a hand the chart rarely plays in this role still informs its playability.
+  const pw=Number(args['probe-weight'])||0;
+  for(let i=0;i<K;i++){oppMass[i]=(opp[classes[i]]||0)*combos[i];if(mass[side][i]>0){target[i]=sum[side][i]/mass[side][i];weight[i]=Math.max(own[classes[i]]||0,pw)*combos[i]*used;}}
   // Matrix roles as in solve.cjs: a caller in position facing an out-of-position raiser uses
   // ipCaller/oopRaiser (initiative goes to the raiser); otherwise the player in position has it.
   const ini=r.aggressorIsOop?(side==='oop'?'self':'opp'):(side==='ip'?'self':'opp');
@@ -83,16 +86,27 @@ const base=classes.map(c=>playability(c,PLAY));
 // aces (A5s-A2s) form a chain of their own, since their straights make them more playable than A9s-A6s.
 const R='AKQJT98765432',chains=[];
 for(let i=0;i<12;i++)for(const s of ['s','o']){const hands=[...R.slice(i+1)].map(k=>R[i]+k+s);if(i===0&&s==='s')chains.push(hands.slice(0,8),hands.slice(8));else chains.push(hands);}
+// Suited connector and one-gapper chains: the same gap, both cards falling (KQs, QJs, ... 32s and
+// KJs, QTs, ... 42s). Higher connectors make higher straights and flushes, so in real solvers they play
+// at least as well. Without these the per-class fit, from a few dozen flops per spot, left the 6-max
+// cutoff opening 87s, 86s and 65s but folding 76s, 75s and 97s.
+for(const gap of [1,2])chains.push([...R].slice(1,13-gap).map((_,i)=>R[i+1]+R[i+1+gap]+'s'));
 // Fitted playability is kept non-increasing down each chain (weighted pool-adjacent-violators on the log
 // scale). Without it the classes at the bottom of the solved ranges, which realize worst, fall below the
 // next-lower kickers that sit just outside those ranges and keep the shape rule's value, so the charts
 // open K8s but fold K9s (tools/preflop/order-check.cjs). Unfitted classes get almost no weight.
+// A class sits in a kicker chain and possibly a connector chain, so the passes repeat until every
+// chain holds (each pass only pools violators, so this settles in a few rounds).
 function monotone(play,weight){
- for(const chain of chains){
-  const blocks=[];
-  for(const c of chain){const i=index.get(c),w=Math.max(weight[i],1e-9);blocks.push({v:Math.log(play[i]),w,n:[i]});
-   while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
-  for(const b of blocks)for(const i of b.n)play[i]=Math.exp(b.v);
+ for(let round=0;round<50;round++){
+  let moved=false;
+  for(const chain of chains){
+   const blocks=[];
+   for(const c of chain){const i=index.get(c),w=Math.max(weight[i],1e-9);blocks.push({v:Math.log(play[i]),w,n:[i]});
+    while(blocks.length>1&&blocks[blocks.length-2].v<blocks[blocks.length-1].v){const b=blocks.pop(),a=blocks[blocks.length-1];a.v=(a.v*a.w+b.v*b.w)/(a.w+b.w);a.w+=b.w;a.n.push(...b.n);}}
+   for(const b of blocks)for(const i of b.n){const v=Math.exp(b.v);if(Math.abs(Math.log(v/play[i]))>1e-9)moved=true;play[i]=v;}
+  }
+  if(!moved)break;
  }
  return play;
 }

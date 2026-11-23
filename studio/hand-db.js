@@ -10,8 +10,77 @@ function handGroup(combo){if(combo.length<2||combo.length>3)return'Other';const 
 // A chip-EV chart standing in for an ICM table does not model the payouts, and an approximate (off-tree size) answer is not
 // the chart's own, so their choices are shown but never counted as mistakes. A decision made after looking at the analysis
 // (peeked) always counts, at no measured cost: needing to look means the spot isn't known yet.
-function gradeMistake(g){return g.peeked?true:g.referenceSource?!g.approximate&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&g.referenceFrequency<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(g.rated&&g.loss>(g.units==='bb'?.05:0));}
-function gradeCost(g){return!g.peeked&&g.rated&&g.units==='bb'&&Number.isFinite(g.loss)&&g.loss>0?g.loss:0;}
+// A flop-library answer from a stand-in flop (the nearest solved flop of the same texture, your cards moved to match) grades
+// like the library itself; only a size the library lacks (sizesMatched false) or an off-tree size is approximate.
+// Older grades marked stand-ins approximate, so this reads the stored solve instead of trusting the flag.
+// The preflop charts' split between flatting and 3-betting an open is not trustworthy yet: 3-bets come out linear and the
+// flat ranges full of holes (tools/preflop/balance-check.cjs still fails), while how often a hand continues is sound. So facing
+// an open ('vsopen') a chart grades fold against continue only, and a chart spot whose actor's own range came through that
+// split ('after': a flatter facing a squeeze, a 3-bettor facing a 4-bet) is not graded at all. Read from the saved line, so
+// older grades follow the same rule.
+// An opener facing a 3-bet (or later) is 'after' too: the chart's continue range there is far too wide (BTN K5s called a
+// 3-bet to 10bb at 99%) because the 3-bet range it answers is not balanced.
+// chartLineSplit reads a preflop line (seat and kind per action) for one seat; Train's chart drills (quiz.js) use it too, so
+// Train never deals a line Play does not grade.
+function chartLineSplit(actions,hero){let raises=0,after=false,opened=false;
+ for(const a of actions){if(a.seat===hero&&raises===1&&(a.kind==='call'||a.kind==='raise'))after=true;if(a.seat===hero&&raises===0&&a.kind==='raise')opened=true;if(a.kind==='raise'||a.kind==='bet')raises++;}return after||opened&&raises>=2?'after':raises===1?'vsopen':null;}
+function gradeSplit(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||!Number.isInteger(g.hero))return null;return chartLineSplit(g.actions,g.hero);}
+const gradeFolds=o=>/^fold\b/i.test(o?.label||'');
+// The frequency a chart grade is judged by: the chosen action's, or facing an open, how often the chart continues at all.
+function gradeFrequency(g){const f=g.referenceFrequency;if(gradeSplit(g)!=='vsopen'||!Array.isArray(g.options)||!g.options[g.choice]||gradeFolds(g.options[g.choice])||!Number.isFinite(f))return f;
+ return Math.max(f,g.options.reduce((s,o)=>s+(!gradeFolds(o)&&Number.isFinite(o.f)?o.f:0),0));}
+// The charts' 3-bets are linear, so facing an open they fold every hand a solver uses as a 3-bet bluff or a speculative
+// flat (suited connectors, suited broadways, small suited aces). Continuing with one of those where the chart folds is
+// not graded: pairs, suited aces, suited K9+, suited broadways, and suited connectors and one-gappers from 54s and 64s up.
+function gradeBluffHand(cls){if(!/^[2-9TJQKA]{2}[so]?$/.test(cls||''))return false;const R='23456789TJQKA',hi=R.indexOf(cls[0]),lo=R.indexOf(cls[1]);if(hi===lo)return true;if(cls[2]!=='s')return false;
+ return cls[0]==='A'||cls[0]==='K'&&lo>=7||lo>=8||hi-lo<=2&&lo>=2;}
+function gradeOffChart(g){return gradeSplit(g)==='vsopen'&&!!g.options?.[g.choice]&&!gradeFolds(g.options[g.choice])&&Number.isFinite(g.referenceFrequency)&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05)&&gradeBluffHand(comboOf(g.hand||''));}
+// The charts' realization model underpays suited connectors and one-gappers below T9s when opening first in: the
+// 6-max cutoff folds 76s, 75s and 97s while opening 87s and 65s, and a refit that keeps them in order only pulled
+// 87s down (tools/preflop/order-check.cjs, PR #276). Until measured open lines fix the charts, a first-in decision
+// with one of those hands, open or fold, is not graded. One-gappers run up to J9s: 7-9 handed 50/100bb cash charts
+// fold J9s while opening T8s (order-check, 2026-11-11).
+function gradeOpenConnector(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions)||g.actions.some(a=>a.kind==='raise'||a.kind==='bet'))return false;
+ const c=comboOf(g.hand||''),R='23456789TJQKA',hi=R.indexOf(c[0]),lo=R.indexOf(c[1]);return c[2]==='s'&&hi-lo>=1&&hi-lo<=2&&hi<=R.indexOf(hi-lo===2?'J':'9');}
+// Kicker order: a hand should not fold (mostly) where the same hand with a lower kicker plays (K8o folds, K7o continues),
+// nor a suited connector or one-gapper where a lower one of the same gap plays (76s folds, 65s continues). Real solvers
+// are close to monotone there; a breach of 50 points or more is noise in the chart's fit, and either hand may be the wrong
+// one, so neither is graded at that node (first in, or facing an open). tools/spot-trust/audit.cjs lists every breach.
+// classes: the node's action mix per hand class (result.handMix.classes), fold: the fold action's index.
+const ORDER_PAIRS=(()=>{const R='AKQJT98765432',out=[];for(let i=0;i<13;i++)for(let j=i+1;j<13;j++)for(const s of ['s','o'])for(let k=j+1;k<13;k++)if(!(i===0&&s==='s'&&k>=9))out.push([R[i]+R[j]+s,R[i]+R[k]+s]);
+ for(const gap of [1,2])for(let i=1;i+gap<13;i++)for(let k=i+1;k+gap<13;k++)out.push([R[i]+R[i+gap]+'s',R[k]+R[k+gap]+'s']);return out;})();
+function chartOrderBreach(classes,cls,fold){if(!classes||!(fold>=0)||!classes[cls])return false;const cont=c=>Array.isArray(classes[c])?1-(classes[c][fold]||0):null;
+ for(const [hi,lo] of ORDER_PAIRS){if(hi!==cls&&lo!==cls)continue;const a=cont(hi),b=cont(lo);if(a!==null&&b!==null&&b-a>=.5)return true;}return false;}
+// Two chart families are not graded at all (spot trust audit, tools/spot-trust/audit.cjs): PLO preflop (hand-group charts
+// never checked against an outside reference) and the big blind facing a limp (the limp trees' realization model raises
+// 31-59% there, likely too often, with no outside reference). Read from the saved line and variant, so older grades
+// follow the same rule. chartLimped: nobody has raised, someone limped, and the hero has not acted yet.
+function chartLimped(actions,hero){return actions.some(a=>a.kind==='call')&&!actions.some(a=>a.kind==='raise'||a.kind==='bet'||a.seat===hero&&a.kind!=='fold');}
+function gradeUnreliableChart(g){if(!g||g.street!==0||!g.referenceSource||!Array.isArray(g.actions))return false;return/^PLO/i.test(g.variant||g.config?.variant||'')||Number.isInteger(g.hero)&&chartLimped(g.actions,g.hero);}
+function gradeOrderBreach(g){return!!g?.orderBreach&&gradeSplit(g)!=='after';}
+// A solve grades only when every player still in the hand has a range from a chart, a library or an earlier solve.
+// Heads-up rivers solve on the device even when no chart covers how the hand got there; the solver then assumes every
+// legal hand (or the bots' learned guess) for each player, so its answer is shown but never graded, rated or a leak.
+// Read from the stored solve, so older grades follow the same rule.
+const GUESSED_RANGE=/^(All legal hands|History-conditioned starting range|Estimated preflop range)$/;
+function gradeGuessedRanges(g){const r=g?.solve?.rangeAssumptions;return Array.isArray(r)&&r.some(x=>x&&!x.folded&&GUESSED_RANGE.test(String(x.range||'')));}
+// A solver grade with a measured bb loss that counts; and a chart (or frequency-only) grade that counts.
+function gradeSolved(g){return!!g?.rated&&Number.isFinite(g.loss)&&!gradeGuessedRanges(g);}
+function gradeChart(g){return!!g?.referenceSource&&!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&Number.isFinite(g.referenceFrequency);}
+// Whether a decision is graded at all: only these move the rating, count as leaks or score in the hand report.
+function gradeCounts(g){return gradeChart(g)||gradeSolved(g);}
+// No chart tree has overcalls (one flat per open keeps every flop heads-up), so a seat facing an open and a flat gets fold
+// or squeeze from the chart, and since PokerPreflop borrows its call from the flat against the open alone (approximate).
+// Neither is graded; older grades, made when the chart offered no call at all, are found from the saved line and options.
+function gradeOvercall(g){if(gradeSplit(g)!=='vsopen')return false;let raised=false,flat=false;for(const a of g.actions){if(a.kind==='raise'||a.kind==='bet')raised=true;else if(raised&&a.kind==='call'&&a.seat!==g.hero)flat=true;}
+ return flat&&(!!g.overcall||!(g.options||[]).some(o=>/^call\b/i.test(o?.label||'')));}
+function gradeApprox(g){return gradeSplit(g)==='after'||gradeUnreliableChart(g)||gradeOffChart(g)||gradeOpenConnector(g)||gradeOrderBreach(g)||gradeOvercall(g)||!!g?.approximate&&!(g.solve?.method==='postflop-library'&&g.solve.library?.standIn&&g.solve.library.sizesMatched!==false);}
+function gradeMistake(g){return g.peeked?true:g.referenceSource?!gradeApprox(g)&&!gradeGuessedRanges(g)&&!/chip-EV chart/.test(g.referenceSource.name||'')&&g.referenceFrequency!==null&&gradeFrequency(g)<(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05):!!(gradeSolved(g)&&g.loss>(g.units==='bb'?.05:0));}
+// A frequency-graded miss (chart or library) where you picked the right action at a size it rarely uses: another size of
+// the same action is one it plays at least 5% of the time. It earns half credit in the rating and the hand score.
+function gradeSizeOnly(g){if(!g||g.peeked||!g.referenceSource||!gradeMistake(g)||!Array.isArray(g.options))return false;const word=l=>String(l||'').split(' ')[0].toLowerCase(),mine=word(g.label||g.options[g.choice]?.label);
+ return!!mine&&['bet','raise'].includes(mine)&&g.options.some((o,i)=>i!==g.choice&&o.label!==g.label&&word(o.label)===mine&&Number.isFinite(o.f)&&o.f>=(typeof chartMistakeFrequency==='number'?chartMistakeFrequency:.05));}
+function gradeCost(g){return!g.peeked&&gradeSolved(g)&&g.units==='bb'&&g.loss>0?g.loss:0;}
 function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).length;let f=handDB.cache.get(row.id);if(f?.key===key)return f;
  const c=rec.config,hero=rec.hero??0,base=PokerStats.fromRecord(rec),pre=rec.actions.filter(a=>a.street===0),raises=pre.filter(a=>a.kind==='raise'||a.kind==='bet').length,
   pot=c.startStreet>0?'Postflop':raises>=3?'4-bet+':raises===2?'3-bet':raises===1?'SRP':pre.some(a=>a.kind==='call')?'Limped':'Walk',
@@ -58,7 +127,7 @@ function playProfiles(h){if(!h||$('controlAll')?.checked)return null;return Arra
 function seatStatsTable(){const key=state.histories.length+'|'+(state.histories[0]?.id||'');if(handDB.statsKey===key)return handDB.stats;const totals=new Map(),bump=(k,c)=>{if(!totals.has(k))totals.set(k,PokerStats.empty());PokerStats.add(totals.get(k),c);};
  for(const row of state.histories){let t;try{t=handFacts(row).tally}catch{continue}const rec=row.record;bump('you',t[rec.hero??0]);const seen=new Set();(rec.profiles||[]).forEach((p,i)=>{if(p&&p!=='you'&&t[i]){bump(p,seen.has(p)?{...t[i],hands:0}:t[i]);seen.add(p);}});}// a style in two seats pools its actions but counts each hand once
  handDB.statsKey=key;handDB.stats=totals;return totals;}
-function seatHUDHTML(seat){const h=state.hand;if(!h)return'';const id=seat===state.hero?'you':$('controlAll')?.checked?null:profileForSeat(seat);if(!id)return'';const t=seatStatsTable().get(id)||PokerStats.empty(),name=id==='you'?'You':PokerBots.personas[id]?.short||id;
+function seatHUDHTML(seat){const h=state.hand;if(!h)return'';if(friendGame())return FriendPlay.hudHTML(seat);const id=seat===state.hero?'you':$('controlAll')?.checked?null:profileForSeat(seat);if(!id)return'';const t=seatStatsTable().get(id)||PokerStats.empty(),name=id==='you'?'You':PokerBots.personas[id]?.short||id;
  return'<div class="hud-head"><b>'+esc(name)+'</b><span>'+t.hands+' hand'+(t.hands===1?'':'s')+'</span></div>'+hudGridHTML(t);}
 function initSeatHUD(){const root=$('table');if(!root||root._hud)return;root._hud=true;const pop=document.createElement('div');pop.className='hud-pop';pop.hidden=true;pop.setAttribute('role','tooltip');document.body.append(pop);let shown=-1,pinned=false;
  const hide=()=>{pop.hidden=true;shown=-1;pinned=false;},show=node=>{const seat=+node.dataset.seat,html=seatHUDHTML(seat);if(!html)return hide();pop.innerHTML=html;pop.hidden=false;shown=seat;const r=(node.querySelector('.player')||node).getBoundingClientRect(),w=pop.offsetWidth,ht=pop.offsetHeight,x=Math.min(innerWidth-w-8,Math.max(8,r.left+r.width/2-w/2)),y=r.top-ht-8>8?r.top-ht-8:Math.min(innerHeight-ht-8,r.bottom+8);pop.style.left=x+'px';pop.style.top=y+'px';};

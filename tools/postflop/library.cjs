@@ -110,6 +110,11 @@ for(let i=3;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=p
 
 function loadCharts(file){const raw=fs.readFileSync(file),json=JSON.parse(/\.gz$/.test(file)?zlib.gunzipSync(raw):raw);return json.format==='range-lab-preflop-bundle-v1'?json.packs:[json];}
 
+// Kicker chains (same high card and suitedness, kicker falling; suited wheel aces apart) and suited connector and
+// one-gapper chains, as in tools/preflop/solve.cjs.
+const RANKS='AKQJT98765432',CHAINS=[];
+for(let i=0;i<12;i++)for(const s of ['s','o']){const hands=[...RANKS.slice(i+1)].map(k=>RANKS[i]+k+s);if(i===0&&s==='s')CHAINS.push(hands.slice(0,8),hands.slice(8));else CHAINS.push(hands);}
+for(const gap of [1,2])CHAINS.push([...RANKS].slice(1,13-gap).map((_,i)=>RANKS[i+1]+RANKS[i+1+gap]+'s'));
 // Replays the spot's line in its chart and returns the ranges, pot and stack at the flop.
 function prepare(id,packs){
  const def=SPOTS[id];if(!def)throw Error('Unknown spot '+id+'. Known: '+Object.keys(SPOTS).join(', '));
@@ -125,8 +130,20 @@ function prepare(id,packs){
  // the chart (5% of its combos or more) at least x of its combos (TexasSolver drops weights under
  // 0.005), so the solve also prices hands the chart plays another way here, such as a flat it
  // could 3-bet instead.
- const floor=Number(args.floor)||0,seen=floor?plays(packs,def.chart):null;
- const classes=(w,seat)=>{const o={};P.classes.forEach((c,i)=>{const x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];if(x>=.005)o[c]=seen?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
+ // --probe x gives every class at least x of its combos in both ranges. A flop solve only measures
+ // the hands in a range, so without it a class is measured only in the roles the chart already
+ // plays it: 87s as the in-position opener, 65s and 86s only as the big blind, 76s and 97s barely at
+ // all, and the calibration then keeps the formula's guess for them (the cutoff folding 76s while
+ // opening 87s and 65s). A 1% probe barely moves the strategies but prices every hand in both roles;
+ // calibrate.cjs --probe-weight counts those measurements.
+ // --border x gives a class outside a range (under 5% of its combos) at least x of its combos when the next
+ // stronger hand in its kicker or suited-connector chain is in the range (K8s next to K9s, 65s next to 76s).
+ // A 1% probe plays like a hidden hand and measures about 1.2-1.3 times better than the same hand really played
+ // there, so the hands at the edge of a range, the ones a refit could add, are measured at a weight the
+ // opponent has to respect.
+ const floor=Number(args.floor)||0,probe=Number(args.probe)||0,border=Number(args.border)||0,seen=floor?plays(packs,def.chart):null;
+ const edge=w=>{const out=new Set();if(!border)return out;const at=c=>w[P.classes.indexOf(c)]||0;for(const chain of CHAINS)for(let k=1;k<chain.length;k++)if(at(chain[k])<.05&&at(chain[k-1])>=.05)out.add(chain[k]);return out;};
+ const classes=(w,seat)=>{const o={},e=edge(w);P.classes.forEach((c,i)=>{let x=seen&&seen[seat]?.has(c)?Math.max(w[i],floor):w[i];x=Math.max(x,probe);if(e.has(c))x=Math.max(x,border);if(x>=.005)o[c]=seen||probe?Math.round(x*1e4)/1e4:Math.round(x*1000)/1000;});return o;};
  const live=h.living(),after=i=>(i-h.button+h.n)%h.n||h.n,[oop,ip]=live.slice().sort((a,b)=>after(a)-after(b));
  return{id,label:def.label,pack,range,pot:h.pot,stack:Math.min(h.stacks[ip],h.stacks[oop]),ip,oop,rangeIp:classes(range.seats[ip],ip),rangeOop:classes(range.seats[oop],oop)};
 }
@@ -148,7 +165,7 @@ function spec(spot,board){
 function run(input,dir){
  return new Promise((resolve,reject)=>{
   const file=path.join(dir,'input.txt');fs.writeFileSync(file,input);let iterations=0,exploitability=null,tail='';const started=Date.now();
-  const child=spawn(args.solver,['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir}),timer=setTimeout(()=>child.kill('SIGKILL'),Number(args.timeout)*1000);
+  const child=spawn(args.solver,['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,...args.evs?{TEXASSOLVER_EVS:args.evs}:{}}}),timer=setTimeout(()=>child.kill('SIGKILL'),Number(args.timeout)*1000);
   child.stdout.on('data',d=>{for(const l of String(d).split(/[\r\n]+/)){let m=l.match(/^Iter: (\d+)/);if(m)iterations=+m[1];m=l.match(/Total exploitability (-?[\d.]+)/);if(m)exploitability=+m[1];}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
   child.on('error',reject);
@@ -196,6 +213,8 @@ function classEvs(tree){
  return{ip:mean(tree.evs[ip]),oop:mean(tree.evs[oop])};
 }
 
+// A flop key's board classes: 'monotone' (one suit), 'trips' (one rank three times).
+function boardClasses(key){const r=[key[0],key[2],key[4]],u=[key[1],key[3],key[5]],c=[];if(u[0]===u[1]&&u[1]===u[2])c.push('monotone');if(r[0]===r[1]&&r[1]===r[2])c.push('trips');return c;}
 async function solve(){
  const treeFile=args.tree||path.join(args.out,'tree.json');if(fs.existsSync(treeFile))Object.assign(TREE,JSON.parse(fs.readFileSync(treeFile,'utf8')));
  const packs=loadCharts(args.charts),alias={'per-spot':PER_SPOT,'per-spot-6max':PER_SPOT_6MAX},auto=new Set(args.spots.split(',').flatMap(id=>alias[id]||[])),except=new Set((args.except||'').split(',')),ids=args.spots.split(',').flatMap(id=>alias[id]||[id]).filter(id=>!except.has(id)),flops=args.flops==='all'?F.all():F.subset(Number(args.flops)),tasks=[];
@@ -205,7 +224,13 @@ async function solve(){
   const dir=path.join(args.out,id);fs.mkdirSync(dir,{recursive:true});
   fs.writeFileSync(path.join(dir,'spot.json'),JSON.stringify({id,label:spot.label,chart:{name:spot.pack.name,key:spot.range.key},pot:spot.pot,stack:spot.stack,tree:TREE,rangeIp:spot.rangeIp,rangeOop:spot.rangeOop},null,1));
   console.log(spot.label+': pot '+G.bb(spot.pot)+' bb, stack '+G.bb(spot.stack)+' bb, '+flops.length+' flops');
-  for(const f of flops){
+  // --redo-boards monotone,trips re-solves only this spot's already solved flops of those board
+  // classes (e.g. after a solver fix that touched them), whatever --flops says, keeping their weights.
+  const boards=args['redo-boards']?new Set(args['redo-boards'].split(',')):null;
+  const list=boards?F.all().filter(f=>fs.existsSync(path.join(dir,f.key+'.json'))&&boardClasses(f.key).some(c=>boards.has(c))):flops;
+  if(boards)console.log(id+': '+list.length+' '+[...boards].join('/')+' flops to re-solve');
+  for(const f of list){
+   if(boards){let old=null;try{old=JSON.parse(fs.readFileSync(path.join(dir,f.key+'.json'),'utf8'));}catch{}tasks.push({id,spot,f,file:path.join(dir,f.key+'.json'),weight:old&&old.weight,redo:true,index:tasks.length});continue;}
    // Solved flops are skipped, unless --redo-above asks to re-solve those that
    // stopped above that exploitability (% of pot), for example with more iterations,
    // or --need-evs 1 asks for those saved without per-class EVs.
@@ -213,13 +238,13 @@ async function solve(){
    tasks.push({id,spot,f,file,index:ids.indexOf(id)*flops.length+flops.indexOf(f)});
   }
  }
- const one=async({id,spot,f,file})=>{
+ const one=async({id,spot,f,file,weight,redo})=>{
    // Another run writing to the same folder may have solved it meanwhile.
-   if(fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json.gz'))))return;
+   if(!redo&&fs.existsSync(file)&&!(Number(args['redo-above'])>0)&&args['need-evs']!=='1'&&!(args.turn==='1'&&!fs.existsSync(path.join(path.dirname(file),f.key+'.turn.json.gz'))))return;
    const work=fs.mkdtempSync(path.join(os.tmpdir(),'range-lab-lib-')),dump=path.join(work,'out.json');
    try{
     const s=spec(spot,f.cards.map(C.cardName)),input=L.input(s,{threads:Number(args.threads),output:'out.json'}),stats=await run(args.turn==='1'?input.replace('set_dump_rounds 1','set_dump_rounds 2'):input,work);
-    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs}:{}};
+    const tree=JSON.parse(fs.readFileSync(dump,'utf8')),evs=classEvs(tree),result={key:f.key,weight:weight||f.weight||f.count,...stats,nodes:nodes(tree),...evs?{evs,evsKind:tree.evs.kind||'best'}:{}};
     if(args.turn==='1'){const t=path.join(path.dirname(file),f.key+'.turn.json.gz');fs.writeFileSync(t+'.tmp',zlib.gzipSync(JSON.stringify({key:f.key,nodes:turnNodes(tree)})));fs.renameSync(t+'.tmp',t);}
     fs.writeFileSync(file+'.tmp',JSON.stringify(result));fs.renameSync(file+'.tmp',file);
     console.log(new Date().toISOString().slice(11,19)+' '+id+' '+f.key+': '+stats.iterations+' iterations, '+stats.exploitability+'% pot, '+Math.round(stats.seconds)+' s');
@@ -264,5 +289,5 @@ if(require.main===module){if(args.cmd==='solve')solve().catch(e=>{console.error(
 else if(args.cmd==='bundle')bundle();
 else if(args.cmd==='bundle-turn')bundleTurn();
 else if(args.cmd==='list')for(const [id,s]of Object.entries(SPOTS))console.log(id.padEnd(12)+s.label);
-else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x]');}
+else console.log('Usage: library.cjs solve|bundle|bundle-turn|list [--charts file] [--spots a,b] [--flops N|all] [--out dir] [--threads N] [--accuracy pct] [--iterations N] [--redo-above pct] [--redo-boards monotone,trips] [--need-evs 1] [--jobs N] [--timeout s] [--turn 1] [--floor x] [--probe x] [--border x] [--evs average]');}
 module.exports={SPOTS,TREE,PER_SPOT,PER_SPOT_6MAX,prepare,spec,nodes,turnNodes,args};

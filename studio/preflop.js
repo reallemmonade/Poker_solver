@@ -99,8 +99,26 @@
  const rank=a=>a.kind==='fold'?0:a.kind==='raise'||a.kind==='bet'?2:1;
  function ordered(actions,probs){const ix=actions.map((_,i)=>i).sort((i,j)=>rank(actions[i])-rank(actions[j])||(actions[i].target||0)-(actions[j].target||0));return[ix.map(i=>actions[i]),ix.map(i=>probs[i])];}
  function query(pack,hand,controlActions=[]){
-  if(hand.done||hand.street!==0||hand.family!==pack.family)return null;const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return null;const row=rowFor(pack,node,hand.holes[hand.actor]);if(!row)return null;const actions=node.actions.map(a=>({...a}));const [sorted,probs]=ordered(actions,actions.map((a,i)=>i<row.length?row[i]:null));
-  return{supported:true,referenceOnly:true,referenceVersion:1,actions:sorted,reference:probs,probs,trained:true,displayEligible:true,visits:0,updates:0,referenceSource:{kind:'imported-preflop',name:pack.name,...pack.source,packName:pack.name},referenceKey:pack.family+'|'+node.key,...node.reach!==undefined?{chartReach:node.reach,offPath:node.reach<OFF_PATH}:{},handClass:G.Core.handClass(hand.holes[hand.actor]),units:hand.config.mode==='cash'?'bb':'prize units',game:{seats:hand.n,stacks:hand.config.stacks.slice(),ante:hand.config.ante,rakePct:hand.config.rakePct,rakeCap:hand.config.rakeCap}};
+  if(hand.done||hand.street!==0||hand.family!==pack.family)return null;const node=pack.index.get(historyKey(hand));if(!node||offPath(pack,node))return null;let row=rowFor(pack,node,hand.holes[hand.actor]);if(!row)return null;const actions=node.actions.map(a=>({...a}));
+  const over=overcall(pack,node,hand),alt=over&&rowFor(pack,over.node,hand.holes[hand.actor]);if(alt){row=withCall(node,row,alt[over.pick]);actions.push({kind:'call',id:'pf-overcall',label:over.node.actions[over.pick].label||'Call'});}
+  const [sorted,probs]=ordered(actions,actions.map((a,i)=>i<row.length?row[i]:null));
+  // Exact-depth matches draw the range grids too (only nearest() did, so most preflop spots showed none).
+  const relative=i=>(i-hand.button+hand.n)%hand.n,grids=(pack.groups?ploRanges:chartRanges)(pack,node,hand,relative,node.actions.map((_,k)=>sorted.indexOf(actions[k])),sorted.length,pack.name);
+  if(alt&&grids.handMix)overcallMix(pack,node,over,grids.handMix,sorted);
+  const result={...grids,supported:true,referenceOnly:true,referenceVersion:1,actions:sorted,reference:probs,probs,trained:true,displayEligible:true,visits:0,updates:0,referenceSource:{kind:'imported-preflop',name:pack.name,...pack.source,packName:pack.name},referenceKey:pack.family+'|'+node.key,...node.reach!==undefined?{chartReach:node.reach,offPath:node.reach<OFF_PATH}:{},handClass:G.Core.handClass(hand.holes[hand.actor]),units:hand.config.mode==='cash'?'bb':'prize units',game:{seats:hand.n,stacks:hand.config.stacks.slice(),ante:hand.config.ante,rakePct:hand.config.rakePct,rakeCap:hand.config.rakeCap}};
+  if(alt){result.offTree=true;result.overcall=true;overcalls.set(result,over);result.referenceSource.name+=' · approximate: the chart has no overcalls, so Call is this seat\'s flat against the open alone';result.referenceKey+='|overcall';}
+  return result;
+ }
+ // Every chart tree lets only one player flat an open (so every flop is heads-up), so a seat facing an open and a flat
+ // gets only fold or squeeze from the chart although calling is legal. The call is borrowed from the nearest solved line,
+ // this seat's flat against the same open with the earlier flatters folded (borrowCall); the chart's squeeze is kept and
+ // the call comes out of its folds. The answer is approximate (offTree), so it is shown but never graded.
+ const overcalls=new WeakMap();
+ function overcall(pack,node,hand){if(node.actions.some(a=>a.kind==='call'))return null;const l=hand.legal();if(!(l.toCall>0)||l.callCost>=hand.stacks[hand.actor])return null;return borrowCall(pack,hand);}
+ function withCall(node,row,c){const f=node.actions.findIndex(a=>a.kind==='fold');if(f<0)return row;const out=row.slice(),call=Math.max(0,Math.min(c,out[f]));out[f]-=call;out.push(call);return out;}
+ function overcallMix(pack,node,over,mix,sorted){
+  const L=pack.groups?pack.groups.labels.length:classes.length,f=sorted.findIndex(a=>a.kind==='fold'),c=sorted.findIndex(a=>a.kind==='call');if(f<0||c<0)return;
+  for(let i=0;i<L;i++){const m=mix.classes[classes[i]];if(!m)continue;const r=rowAt(pack,over.node,i),call=Math.max(0,Math.min(r?r[over.pick]:0,m[f]));m[f]=Math.round((m[f]-call)*1000)/1000;m[c]=Math.round(call*1000)/1000;}
  }
  // Live sessions carry stacks between hands, so exact-depth matches are rare.
  // This falls back to the closest-depth pack of the same game (within a factor of 1.6,
@@ -133,9 +151,10 @@
  }
  function nearest(packs,hand,controlActions=[],tolerance=1.6){
   if(hand.done||hand.street!==0)return null;const n=hand.n,live=hand.living(),hero=hand.actor,others=live.filter(i=>i!==hero).map(i=>hand.initial[i]);if(!others.length)return null;
-  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];let best=null;
-  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null||best&&gap+f>=best.score)continue;best={pack,gap,chart,score:gap+f,rakeFree:f===1,tourney:f===2};}
-  if(!best)return null;const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
+  const depth=G.bb(Math.min(hand.initial[hero],Math.max(...others))),table={...hand.config,button:0},tableShape=[];const cands=[];
+  for(const pack of packs){const chart=Math.max(...pack.config.stacks),gap=Math.abs(Math.log(chart/depth));if(gap>Math.log(tolerance)+1e-9)continue;const f=fit(pack,G.normalize(table),tableShape);if(f===null)continue;cands.push({pack,gap,chart,score:gap+f,rakeFree:f===1,tourney:f===2});}
+  // The nearest chart answers first; when it has no answer for this line (no node, or one its players never reach), the next chart within the tolerance does.
+  cands.sort((a,b)=>a.score-b.score);for(const best of cands){const r=(()=>{const relative=i=>(i-hand.button+n)%n,proxy=new G.Hand(best.pack.config,{rng:G.rng(743)}),real=new G.Hand(hand.config,{rng:G.rng(743)});
   // A pot-limit maximum, an all-in covering the effective depth, or any raise the chart's stacks
   // cannot cover stands for the chart's largest raise (a full-stack jam counts even when a posted ante sits outside its target); other sizes (a short stack's all-in too) replay unchanged.
   const eff=Math.min(hand.initial[hero],Math.max(...others));
@@ -162,12 +181,14 @@
    try{hand.clone().act(x);}catch{return;}const j=actions.findIndex(b=>b.kind===x.kind&&b.target===x.target);if(at>=0)into[at]=j>=0?actions[j]:x;if(j>=0)reference[j]+=result.reference[i];else{actions.push(x);reference.push(result.reference[i]);}});
   const total=sum(reference);if(!(total>0)||actions.length<2)return null;result.actions=actions;result.reference=reference.map(p=>p/total);
   [result.actions,result.reference]=ordered(result.actions,result.reference);result.probs=result.reference;
-  if(!best.pack.groups)Object.assign(result,chartRanges(best.pack,node,hand,relative,into.map(x=>result.actions.indexOf(x)),result.actions.length,best.pack.name));
+  delete result.ploRange;Object.assign(result,(best.pack.groups?ploRanges:chartRanges)(best.pack,node,hand,relative,into.map(x=>result.actions.indexOf(x)),result.actions.length,best.pack.name));
+  const ov=overcalls.get(result);if(ov&&result.handMix)overcallMix(best.pack,node,ov,result.handMix,result.actions);
   // Sizes mapped beyond the 1.6x tolerance or a tightened range are approximate: shown with that label, never graded as mistakes.
   if(far||last&&last.seat!==hero&&last.k<1-1e-9){result.offTree=true;result.referenceSource.name+=' · approximate: off-tree size';}
   if(sizeMatch.length){result.sizeMatch=sizeMatch;result.referenceSource.name+=' · earlier raise sizes mapped to the chart\'s: '+sizeMatch.map(m=>m.actual+' → '+m.chart+' bb').join(', ');result.referenceKey+='|sizes:'+sizeMatch.map(m=>m.actual+'>'+m.chart).join(',');}
   const standIn=(best.pack.chipEV||best.tourney)&&shape(best.pack.config)!==shape(table);if(standIn){result.chipEVStandIn=true;result.referenceSource.name+=' · chip-EV chart: this table\'s payouts (ICM) are not modelled';}if(best.tourney&&(deadMoney(best.pack.config)!==deadMoney(table)||table.ante>0&&best.pack.config.anteMode!==table.anteMode)){result.anteStandIn=true;result.referenceSource.name+=' · chart ante differs from this table\'s';}if(best.rakeFree){result.rakeStandIn=true;result.referenceSource.name+=' · rake-free chart: this table\'s rake is not modelled';}
   result.depthMatch={chart:best.chart,actual:depth,depthDiffers:best.gap>1e-9,chipEV:standIn};result.referenceKey+='|depth:'+depth;return result;
+  })();if(r)return r;}return null;
  }
  // NLH: each live player's range at this node (the chart's frequency of every action they took on the
  // way, by hand class, scaled so the widest class is 1) and the actor's whole strategy by hand class,
@@ -179,6 +200,33 @@
   for(const seat of live){if(seat!==hand.actor&&!steps.some(([anc])=>anc.seat===relative(seat)))continue;const w=classes.map((_,i)=>{let r=1;for(const [anc,k]of steps)if(anc.seat===relative(seat)){const row=rowAt(pack,anc,i);r*=row?row[k]:0;}return r;}),peak=Math.max(...w);if(peak>0)rangeAssumptions.push({seat,range:classRangeText(w.map(x=>x/peak)),source});}
   const classMix={};classes.forEach((c,i)=>{const row=rowAt(pack,node,i);if(!row)return;const m=Array(size).fill(0);row.forEach((p,k)=>{if(index[k]>=0)m[index[k]]+=p;});const t=m.reduce((a,b)=>a+b,0);if(t>0)classMix[c]=m.map(x=>Math.round(x/t*1000)/1000);});
   return{rangeAssumptions,handMix:{seat:hand.actor,classes:classMix}};
+ }
+ // PLO: no 13x13 grid, so each live player's range is drawn as hand shapes, rows by structure (aces, two pair, pair,
+ // rundown, gapped, disconnected) and columns by suits (double-suited, single-suited, rainbow, 3+ of a suit). A cell's
+ // weight is how much of that shape the player holds here and the actor's cell is its combo-weighted action mix.
+ const PLO_ROWS=['Aces','Two pair','Pair','Rundown','Gapped','Disconnected'],PLO_COLS=['DS','SS','Rainbow','3+ suited'];let ploCellOf=null;
+ function ploShape(cs){
+  const r=cs.map(c=>c>>2),s=[0,1,2,3].map(x=>cs.filter(c=>(c&3)===x).length).sort((a,b)=>b-a),col=s[0]>=3?3:s[1]===2?0:s[0]===2?1:2;
+  const n={};for(const x of r)n[x]=(n[x]||0)+1;const c=Object.values(n).sort((a,b)=>b-a);
+  if((n[12]||0)>=2)return col;if(c[0]===2&&c[1]===2)return 4+col;if(c[0]>=2)return 8+col;
+  const d=new Set(r.flatMap(x=>x===12?[12,-1]:[x]));let conn=0;for(let lo=-1;lo<=8;lo++){let k=0;for(let x=lo;x<lo+5;x++)if(d.has(x))k++;conn=Math.max(conn,k);}
+  return(conn>=4?12:conn===3?16:20)+col;
+ }
+ function ploCells(pack){
+  if(pack.ploCells)return pack.ploCells;const P=ploClasses();ploCellOf??=P.reps.map(ploShape);const at=new Map();
+  for(let i=0;i<P.counts.length;i++){const k=pack.groups.of[i]*24+ploCellOf[i];at.set(k,(at.get(k)||0)+P.counts[i]);}
+  return pack.ploCells=[...at].map(([k,n])=>[Math.floor(k/24),k%24,n]);
+ }
+ function ploRanges(pack,node,hand,relative,index,size){
+  const steps=pathOf(pack,node);if(!steps)return{};const L=pack.groups.labels.length,cells=ploCells(pack),r3=x=>Math.round(x*1000)/1000,seats=[];
+  const reach=seat=>Array.from({length:L},(_,i)=>{let r=1;for(const [anc,k]of steps)if(anc.seat===relative(seat)){const row=rowAt(pack,anc,i);r*=row?row[k]:0;}return r;});
+  let actor=null;
+  for(const seat of hand.living()){if(seat!==hand.actor&&!steps.some(([anc])=>anc.seat===relative(seat)))continue;const r=reach(seat),held=Array(24).fill(0),all=Array(24).fill(0);let n=0,t=0;
+   for(const [g,c,k]of cells){held[c]+=k*r[g];all[c]+=k;n+=k*r[g];t+=k;}if(!(n>0))continue;seats.push({seat,w:held.map((x,c)=>all[c]?r3(x/all[c]):0),share:r3(n/t)});if(seat===hand.actor)actor=r;}
+  if(!actor)return{};const mix=Array.from({length:24},()=>Array(size).fill(0));
+  for(const [g,c,k]of cells){const row=rowAt(pack,node,g);if(!row)continue;row.forEach((p,a)=>{if(index[a]>=0)mix[c][index[a]]+=p*k*actor[g];});}
+  const cards=hand.holes[hand.actor];
+  return{ploRange:{rows:PLO_ROWS,cols:PLO_COLS,seat:hand.actor,hero:cards?.length===4?ploShape(cards):-1,seats,mix:mix.map(m=>{const t=m.reduce((a,b)=>a+b,0);return t>0?m.map(x=>r3(x/t)):null;})}};
  }
  // Postflop starting ranges from a chart: replays the preflop line in the
  // closest-depth chart of the same game and multiplies, for every hand class

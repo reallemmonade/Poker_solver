@@ -5,6 +5,8 @@
 //  1. A job sent to the cloud is solved by the --once worker, which pushes progress, the answer and what it cost;
 //     the Mac bridge on the same account leaves it alone.
 //  2. A cloud job cancelled from the phone stops the worker at its next progress check, and it exits.
+//  3. A cloud job that runs into its price cap (--cap) is told to stop a little before it and still answers, marked
+//     capped, with what it cost next to its quote on the answer; the worker exits before the cap.
 // Needs TexasSolver built (tools/local-solver/install-linux.sh).
 //   node tools/cloud/test-cloud.cjs
 const fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process');
@@ -23,9 +25,9 @@ function spot(street,ranges){let seed=11;const rng=()=>(seed=(seed*16807)%214748
  const options=S.options({ranges:[ranges,ranges],rangeMode:'auto',forceLocal:true,localAccuracy:street===3?.5:.05,localIterations:street===3?200:5000,bridgeMilliseconds:1.8e6,approximate:false});
  return{observed:{config:h.config,actor:h.actor,heroCards:h.holes[h.actor],board:h.board,actions:h.actionLog},options};}
 function job(id,street,ranges){const {observed,options}=spot(street,ranges);return{v:1,status:'queued',key:id+'-key',rowId:'spot-'+id,baseKey:id,observed,options,extraAction:null,seconds:30,seed:30,device:'test',street,kind:'nlh',learned:false,createdAt:Date.now(),target:'modal',rate:.441};}
-async function cloud(token,user,id,value,cursor){const t=Date.now();await call('POST','/api/sync',{rows:[{store:'meta',id,t,data:{id,value}}]},token);
+async function cloud(token,user,id,value,cursor,extra=[]){const t=Date.now();await call('POST','/api/sync',{rows:[{store:'meta',id,t,data:{id,value}}]},token);
  const file=path.join(work,id+'.json');fs.writeFileSync(file,JSON.stringify({id,job:value,t,cursor,link:{api,token,user}}));
- return run(['tools/local-solver/server.cjs','--name','modal','--rate','0.441','--once',file,'--port',String(port+400+Math.floor(Math.random()*90)),'--threads','4'],{CITRUS_BRIDGE_LINK:path.join(work,id+'-link.json')});}
+ return run(['tools/local-solver/server.cjs','--name','modal','--rate','0.441','--once',file,'--port',String(port+400+Math.floor(Math.random()*90)),'--threads','4',...extra],{CITRUS_BRIDGE_LINK:path.join(work,id+'-link.json')});}
 (async()=>{
  try{
   run(['server.cjs'],{PORT:String(port),ACCOUNTS_IN_MEMORY:'1',RENDER:''});
@@ -50,6 +52,15 @@ async function cloud(token,user,id,value,cursor){const t=Date.now();await call('
   const t0=Date.now(),exit=await Promise.race([new Promise(r=>flop.on('exit',r)),sleep(40000).then(()=>'timeout')]);
   ok(exit!=='timeout','the worker stopped '+Math.round((Date.now()-t0)/1000)+' s after the cancel');
   ok((await metaRow(token,'solvejob-flop'))?.status==='cancelled','the job stays cancelled');
+  // Cap: a flop that takes minutes to reach its target, with a 45-second cap: it is told to stop at 25 s and must still answer.
+  const capJob={...job('capped',1,'AA,KK,QQ,JJ,TT,99,88,AK,AQ,AJ,KQ,QJs,JTs,T9s,98s,87s'),estimate:.0037,cap:.0055},c0=Date.now();
+  const capped=await cloud(token,user.id,'solvejob-capped',capJob,(await rows(token)).cursor,['--started',String(c0),'--cap',process.env.CAP||'45']);
+  const capExit=await Promise.race([new Promise(r=>capped.on('exit',r)),sleep(300000).then(()=>'timeout')]),secs=(Date.now()-c0)/1000;
+  const capDone=await metaRow(token,'solvejob-capped'),capAnswer=(await rows(token)).all.find(x=>x.store==='solves'&&x.id==='spot-capped')?.data?.result;
+  ok(capExit===0&&secs<(+process.env.CAP||45)+1,'the capped worker exited within its cap ('+Math.round(secs)+' s, exit '+capExit+')'+(capExit===0?'':'\n'+capped.log()));
+  if(capDone?.status!=='done')console.log(capped.log().slice(-3000));ok(capDone?.status==='done'&&capDone.capped===true&&capDone.cost>0&&capDone.cost<=.0055+1e-9,'the capped job answered, marked capped, at no more than its cap ($'+capDone?.cost+', '+capDone?.status+')');
+  ok(capAnswer?.supported===true&&capAnswer.solve?.cloud?.capped===true&&capAnswer.solve.cloud.estimate===.0037&&capAnswer.solve.cloud.cost===capDone?.cost,'the capped answer says what it cost next to its quote '+JSON.stringify(capAnswer?.solve?.cloud));
+  ok(/Stopped early at iteration/.test(capped.log()),'TexasSolver stopped early on the stop file and dumped its strategy so far');
  }catch(e){fail++;console.log('FAIL '+e.stack);}
  finally{for(const k of kids)try{k.kill('SIGKILL')}catch{}fs.rmSync(work,{recursive:true,force:true});}
  console.log(fail?fail+' check(s) failed.':'All cloud checks passed.');process.exit(fail?1:0);

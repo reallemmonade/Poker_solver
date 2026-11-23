@@ -9,11 +9,13 @@
 // player's net result from the solve's start: chips won from the pot minus chips put
 // in since then, so the three players' values sum to the starting pot.
 //
-// Card removal. Each player's cards are removed exactly against the board and against
-// each opponent's range. The two opponents' ranges are treated as independent of each
-// other given the player's own hand (their overlap is not removed), which turns every
-// three-way showdown into products of two one-opponent sweeps. Exploitability is a best
-// response for each player under that same model.
+// Card removal. Exact (exact_removal 1, the default): a player's cards, the board and the
+// two opponents' hands never share a card. Every leaf starts from the product of two
+// one-opponent sums and takes out the pairs of opponent hands that share a card with each
+// other, by inclusion-exclusion over the shared card (struct Pair). With exact_removal 0
+// the two opponents' ranges are treated as independent of each other given the player's
+// own hand (their overlap is not removed), which is faster: two one-opponent sweeps per
+// showdown. Exploitability is a best response for each player under the same model.
 //
 // Chance. Every turn and river card is enumerated, with exact suit isomorphism when the
 // board and all three ranges are symmetric. When the full tree would not fit the memory
@@ -25,6 +27,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -101,7 +104,7 @@ struct Cfg {
   vector<int> board; double pot = 0, stack = 0, minBet = 1, thr = .67;
   vector<pair<array<int, 2>, double>> range[3];
   vector<double> bet[3][3], raise[3][3]; int cap[3] = {1, 1, 1}; bool lead[3][3], allin[3] = {true, true, true};
-  vector<Step> path; int threads = 4, maxIt = 300, every = 10, turnCards = 0, riverCards = 0, runouts = 0; double acc = .5, timeLimit = 1e9, memMB = 1e9; string out = "result.json"; bool iso = true, autoSample = true; double alpha = 3, beta = 0, gamma = 4; bool current = false;
+  vector<Step> path; int threads = 4, maxIt = 300, every = 10, turnCards = 0, riverCards = 0, runouts = 0; double acc = .5, timeLimit = 1e9, memMB = 1e9; string out = "result.json"; bool iso = true, autoSample = true, exact = true; double alpha = 3, beta = 0, gamma = 4; bool current = false;
 };
 static vector<double> nums(const string& s) { vector<double> v; string t; stringstream ss(s); while (getline(ss, t, ',')) if (!t.empty()) { char* e; double x = strtod(t.c_str(), &e); if (*e || !isfinite(x) || x <= 0 || x > 100) fail("Invalid size list: " + s); v.push_back(x); } return v; }
 static int streetIdx(const string& s) { if (s == "flop") return 0; if (s == "turn") return 1; if (s == "river") return 2; fail("Invalid street: " + s); }
@@ -159,6 +162,7 @@ static Cfg readCfg(const char* file) {
     else if (k == "turn_cards") { need(1); c.turnCards = (int)numIn(a[0], 0, 49); }
     else if (k == "river_cards") { need(1); c.riverCards = (int)numIn(a[0], 0, 48); }
     else if (k == "runouts") { need(1); c.runouts = (int)numIn(a[0], 0, 2352); }
+    else if (k == "exact_removal") { need(1); c.exact = a[0] != "0"; }
     else if (k == "auto_sample") { need(1); c.autoSample = a[0] != "0"; }
     else if (k == "current") { need(1); c.current = a[0] != "0"; }
     else if (k == "dcfr") { need(3); c.alpha = numIn(a[0], 0, 100); c.beta = numIn(a[1], -100, 100); c.gamma = numIn(a[2], 0, 100); }
@@ -184,6 +188,48 @@ struct Acc {
   inline void add(const Cb& o, double w) { a0 += w; a1[o.c[0]] += w; a1[o.c[1]] += w; }
   inline void clear(const Cb& o) { a1[o.c[0]] = 0; a1[o.c[1]] = 0; }
   inline double q(const Cb& h) const { return a0 - a1[h.c[0]] - a1[h.c[1]]; }
+};
+// Exact removal against both opponents at once. For p's combo h = {x, y}, the weight of pairs (one combo
+// of opponent 0, one of opponent 1) that share no card with h or with each other is
+//   A(h) * B(h) - [ sum over cards c outside h of Ac(h) * Bc(h) - I(h) ]
+// A(h), B(h): each opponent's weight clear of h (as Acc::q). Ac(h): opponent 0's weight on combos that hold
+// c and are clear of h, n1[0][c] - w0{c,x} - w0{c,y}; Bc(h) likewise. A pair sharing one card is counted once
+// in the sum and a pair of identical combos twice, so I(h), the identical pairs clear of h, comes off once.
+// Multiplied out, the sum needs only totals kept as combos are added: per card (n1, P, I1) and per pair of
+// cards (G, for a combo {c,x} of one opponent against {c,y} of the other), so a showdown can add combos in
+// rank order and read any of p's combos in between. A combo may be added with a negative weight to take it out.
+struct Pair {
+  // n0, n1: side s's total and per-card weight. S: sum over c of n1[0][c] * n1[1][c]. I0, I1[c]: weight of
+  // identical pairs, in all and per card. used: the cards side s has touched. row[s][c][d]: side s's weight
+  // on combo {c,d}. P[s][e]: sum over c of n1[s][c] * row[1-s][c][e]. G[d][e] + G[e][d]: sum over c of
+  // row[0][c][d] * row[1][c][e] + row[0][c][e] * row[1][c][d] (each new pair goes to the row of the combo
+  // being added). The rows are floats padded to 56, so the three row updates of add() vectorize; they hold
+  // small corrections to A * B (float rounding there is about 1e-8 of A * B, the size of a float regret's
+  // own rounding). A combo whose cards the other side has not touched needs no row update.
+  double n0[2], n1[2][52], I1[52], S, I0; u64 used[2]; float P[2][56], row[2][52][56], G[52][56];
+  Pair() { memset((void*)this, 0, sizeof *this); }
+  inline void add(int s, const Cb& x, double w) {
+    int o = s ^ 1, c = x.c[0], d = x.c[1]; float wf = w;
+    n0[s] += w; n1[s][c] += w; n1[s][d] += w; used[s] |= 1ull << c | 1ull << d; row[s][c][d] += wf; row[s][d][c] += wf;
+    if (!((used[o] >> c | used[o] >> d) & 1)) return;
+    const float *__restrict rc = row[o][c], *__restrict rd = row[o][d]; float *__restrict ps = P[s], *__restrict gc = G[c], *__restrict gd = G[d];
+    S += w * (n1[o][c] + n1[o][d]);
+#pragma GCC ivdep
+    for (int e = 0; e < 56; e++) { ps[e] += wf * (rc[e] + rd[e]); gd[e] += wf * rc[e]; gc[e] += wf * rd[e]; }
+    P[o][d] += n1[o][c] * w; P[o][c] += n1[o][d] * w;
+    double i = w * rc[d]; I0 += i; I1[c] += i; I1[d] += i;
+  }
+  inline void wipe() {
+    for (int s = 0; s < 2; s++) for (u64 m = used[s]; m; m &= m - 1) { int c = __builtin_ctzll(m); memset(row[s][c], 0, sizeof row[s][c]); memset(G[c], 0, sizeof G[c]); }
+    memset((void*)this, 0, offsetof(Pair, row));
+  }
+  // Values under a ten-millionth of A * B are float noise around zero (no compatible pair): exactly zero.
+  inline double q(const Cb& h) const {
+    int x = h.c[0], y = h.c[1]; const double *a = n1[0], *b = n1[1]; double ah = row[0][x][y], bh = row[1][x][y];
+    double A = n0[0] - a[x] - a[y] + ah, B = n0[1] - b[x] - b[y] + bh;
+    double sum = S - a[x] * b[x] - a[y] * b[y] - P[0][x] - P[0][y] + bh * (a[x] + a[y]) - P[1][x] - P[1][y] + ah * (b[x] + b[y]) + I1[x] + I1[y] - 2 * ah * bh + G[x][y] + G[y][x];
+    double v = A * B - sum + I0 - I1[x] - I1[y] + ah * bh; return v > 1e-7 * max(A * B, 0.) ? v : 0;
+  }
 };
 
 // ---------- thread pool: fork-join, so chance nodes can split their cards at every level.
@@ -365,7 +411,7 @@ static void prepBoards() {
 }
 
 // ---------- per-thread scratch
-struct Scratch { Acc acc; vector<float> buf; size_t top = 0; float* get(size_t n) { n = (n + 7) & ~7ull; if (top + n > buf.size()) fail("Internal scratch overflow."); float* r = buf.data() + top; top += n; return r; } double* getd(size_t n) { return (double*)get(2 * n); } };
+struct Scratch { Acc acc; Pair pair; vector<float> buf; size_t top = 0; float* get(size_t n) { n = (n + 7) & ~7ull; if (top + n > buf.size()) fail("Internal scratch overflow."); float* r = buf.data() + top; top += n; return r; } double* getd(size_t n) { return (double*)get(2 * n); } };
 static vector<Scratch*> SCR; static size_t SCRATCH_FLOATS;
 static Scratch& scr() { return *SCR[TID]; }
 struct Frame { Scratch& s; size_t t; Frame() : s(scr()), t(s.top) {} ~Frame() { s.top = t; } };
@@ -410,17 +456,69 @@ static void stats(int board, int p, int o, const float* ro, double* L, double* L
 // leaf child of p's own node shares both; leaf children of an opponent's node share the
 // third player's.
 struct Sums {
-  double *L[3] = {}, *LT[3] = {}, *All[3] = {}; int have[3] = {-2, -2, -2};  // -2 none, -1 All only, else the board
-  void drop(int o) { have[o] = -2; }
+  double *L[3] = {}, *LT[3] = {}, *All[3] = {}, *X = nullptr; int have[3] = {-2, -2, -2}; bool haveX = false;  // have: -2 none, -1 All only, else the board. X: exact removal's weight of both opponents together
+  void drop(int o) { have[o] = -2; haveX = false; }
   void need(Frame& f, int p, Reach R, int o, int brd) {
     if (!All[o]) All[o] = f.s.getd(N[p]);
     if (brd >= 0) { if (have[o] == brd) return; if (!L[o]) { L[o] = f.s.getd(N[p]); LT[o] = f.s.getd(N[p]); } stats(brd, p, o, R[o], L[o], LT[o], All[o]); have[o] = brd; }
     else if (have[o] == -2) { compat(p, o, R[o], All[o]); have[o] = -1; }
   }
 };
+// Weight of the two opponents' combos that each of p's combos can face: both clear of it and, with exact
+// removal, of each other.
+static void both(int p, const float* ra, const float* rb, double* out) {
+  int o[2] = {(p + 1) % 3, (p + 2) % 3}; const float* r[2] = {ra, rb};
+  if (!cfg.exact) { vector<double> t(N[p]); compat(p, o[0], ra, out); compat(p, o[1], rb, t.data()); for (int h = 0; h < N[p]; h++) out[h] *= t[h]; return; }
+  Pair& Q = scr().pair; int big = N[o[1]] > N[o[0]];  // the larger range first: the first side's combos need no row updates
+  for (int s : {big, big ^ 1}) for (int k = 0; k < N[o[s]]; k++) if (r[s][k] > 0) Q.add(s, CB[o[s]][k], r[s][k]);
+  for (int h = 0; h < N[p]; h++) out[h] = Q.q(CB[p][h]);
+  Q.wipe();
+}
+// Leaf values with exact removal. A showdown sweeps p's combos in rank order, adding each opponent's combos
+// as they are beaten (a folded opponent's all at the start). With F the weight of compatible pairs among the
+// combos added so far, a rank group reads F with both opponents' lower hands (p wins), with opponent 0's
+// ties added (F10), with opponent 1's (F01) and with both (F11) for the chops, and at the end with every
+// combo (X, what p's chips in the pot are weighed by).
+static void leafExact(const Node& n, int p, Reach R, Sums& S, Frame& f, float* out) {
+  int o[2] = {(p + 1) % 3, (p + 2) % 3}, H = N[p]; double pot = cfg.pot + n.x[0] + n.x[1] + n.x[2], xp = n.x[p];
+  bool alive = n.alive >> p & 1, in[2] = {(bool)(n.alive >> o[0] & 1), (bool)(n.alive >> o[1] & 1)};
+  if (!S.X) S.X = f.s.getd(H);
+  if (!alive || n.type == FOLD) {
+    if (!S.haveX) { both(p, R[o[0]], R[o[1]], S.X); S.haveX = true; }
+    double v = alive ? pot - xp : -xp; for (int h = 0; h < H; h++) out[h] = v * S.X[h]; return;
+  }
+  Frame g; Pair& Q = g.s.pair; const Board& bd = BD[n.aux]; const auto &ip = bd.idx[p], &rp = bd.rk[p]; size_t np = ip.size(), j[2] = {0, 0}, i = 0, t0[2] = {0, 0}, t1[2] = {0, 0};
+  double *F00 = g.s.getd(H), *F10 = g.s.getd(H), *F01 = g.s.getd(H), *F11 = g.s.getd(H), *V = g.s.getd(H); bool tie[2] = {false, false};
+  memset(V, 0, sizeof(double) * H); memset(S.X, 0, sizeof(double) * H);
+  for (int s = 0; s < 2; s++) if (!in[s]) for (int k = 0; k < N[o[s]]; k++) if (R[o[s]][k] > 0) Q.add(s, CB[o[s]][k], R[o[s]][k]);
+  auto span = [&](int s, double sign) { for (size_t u = t0[s]; u < t1[s]; u++) { int k = bd.idx[o[s]][u]; if (R[o[s]][k] > 0) Q.add(s, CB[o[s]][k], sign * R[o[s]][k]); } };
+  while (i < np) {
+    uint16_t r = rp[i]; size_t e = i; while (e < np && rp[e] == r) e++;
+    for (int s = 0; s < 2; s++) if (in[s]) {
+      const auto &iq = bd.idx[o[s]], &rq = bd.rk[o[s]]; const float* ro = R[o[s]]; size_t u = j[s];
+      for (; u < iq.size() && rq[u] < r; u++) if (ro[iq[u]] > 0) Q.add(s, CB[o[s]][iq[u]], ro[iq[u]]);
+      t0[s] = u; tie[s] = false; for (; u < iq.size() && rq[u] == r; u++) tie[s] |= ro[iq[u]] > 0; t1[s] = j[s] = u;
+    }
+    auto read = [&](double* F) { for (size_t k = i; k < e; k++) F[k - i] = Q.q(CB[p][ip[k]]); };
+    read(F00);
+    if (tie[0]) { span(0, 1); read(F10); }
+    if (tie[1]) { span(1, 1); read(F11); }
+    if (tie[0] && tie[1]) { span(0, -1); read(F01); span(0, 1); }  // opponent 1's ties without opponent 0's: take those out and put them back
+    for (size_t k = i; k < e; k++) {
+      size_t z = k - i; double w = F00[z], ta = tie[0] ? F10[z] - w : 0, tb = !tie[1] ? 0 : tie[0] ? F01[z] - w : F11[z] - w, tab = tie[0] && tie[1] ? F11[z] - F10[z] - F01[z] + w : 0;
+      V[ip[k]] = pot * (w + .5 * (max(0., ta) + max(0., tb)) + max(0., tab) / 3);
+    }
+    i = e;
+  }
+  for (int s = 0; s < 2; s++) if (in[s]) for (size_t u = j[s]; u < bd.idx[o[s]].size(); u++) { int k = bd.idx[o[s]][u]; if (R[o[s]][k] > 0) Q.add(s, CB[o[s]][k], R[o[s]][k]); }
+  for (size_t k = 0; k < np; k++) S.X[ip[k]] = Q.q(CB[p][ip[k]]);
+  for (int h = 0; h < H; h++) out[h] = V[h] - xp * S.X[h];
+  Q.wipe(); S.haveX = true;
+}
 static inline bool leafFor(const Node& n, int p) { return n.type == FOLD || n.type == SHOW || !(n.alive >> p & 1); }
 // Value of a leaf for p, or of any node after p folded (p loses what it put in).
 static void leafValue(const Node& n, int p, Reach R, Sums& S, Frame& f, float* out) {
+  if (cfg.exact) return leafExact(n, p, R, S, f, out);
   int a = (p + 1) % 3, b = (p + 2) % 3, H = N[p]; double pot = cfg.pot + n.x[0] + n.x[1] + n.x[2], xp = n.x[p];
   bool show = n.type == SHOW && n.alive >> p & 1, ia = n.alive >> a & 1, ib = n.alive >> b & 1;
   S.need(f, p, R, a, show && ia ? n.aux : -1); S.need(f, p, R, b, show && ib ? n.aux : -1);
@@ -495,8 +593,7 @@ static void walk(int ni, const Ctx& X, Reach R, float* out) {
     if (X.m == EV) {
       if (X.record && n.cur) {
         Rec& r = REC[ni]; r.v.assign(vals, vals + (size_t)A * Np);
-        vector<double> ca(Np), cb(Np); compat(p, (p + 1) % 3, R[(p + 1) % 3], ca.data()); compat(p, (p + 2) % 3, R[(p + 2) % 3], cb.data());
-        r.norm.resize(Np); for (int h = 0; h < Np; h++) r.norm[h] = ca[h] * cb[h];
+        vector<double> z(Np); both(p, R[(p + 1) % 3], R[(p + 2) % 3], z.data()); r.norm.assign(z.begin(), z.end());
       }
       return;
     }
@@ -553,7 +650,7 @@ static double estimateMB() {
   double nodes = T.size() * (double)sizeof(Node) + KID.size() * 4. + ACTS.size() * sizeof(Act), store = STORE * 4.;
   double boards = BOARDS.size() * 4. * (N[0] + N[1] + N[2]);
   double chance = 0; for (auto& c : CH) chance += c.deals.size() * sizeof(Deal) + c.slots.size() + sizeof(Chance);
-  double scratch = cfg.threads * (SCRATCH_FLOATS * 4. + 200000.) + 49. * 5 * NMAX * 4;
+  double scratch = cfg.threads * (SCRATCH_FLOATS * 4. + 200000. + sizeof(Pair)) + 49. * 5 * NMAX * 4;
   double perms = PERM[0].size() * 4. * (N[0] + N[1] + N[2]);
   return (nodes + store + boards + chance + scratch + perms + BN[52][5] * 2.) / 1048576 + 30;
 }
@@ -589,7 +686,7 @@ static void buildTree() {
 
 static double seconds(chrono::steady_clock::time_point t0) { return chrono::duration<double>(chrono::steady_clock::now() - t0).count(); }
 static void walkRoot(const Ctx& X, float* out) { Reach R = {W[0].data(), W[1].data(), W[2].data()}; if (X.m != CFR) R[X.p] = nullptr; walk(0, X, R, out); }
-static double Z[3];  // each player's weight of compatible deals, under its own removal model
+static double Z[3];  // each player's weight of compatible deals (the same for all three with exact removal)
 static double total(int p, const float* v) { double s = 0; for (int h = 0; h < N[p]; h++) s += W[p][h] * v[h]; return s / Z[p]; }
 // Each player's gain from a best response against the others' average strategies; the
 // reported exploitability is their mean, in percent of the starting pot.
@@ -673,9 +770,8 @@ int main(int argc, char** argv) {
     pool.start(cfg.threads);
     prepBoards(); printf("Boards ready: %.1f s\n", seconds(t0)); fflush(stdout);
     for (int p = 0; p < 3; p++) {
-      vector<double> ca(N[p]), cb(N[p]); int a = (p + 1) % 3, b = (p + 2) % 3;
-      compat(p, a, W[a].data(), ca.data()); compat(p, b, W[b].data(), cb.data());
-      Z[p] = 0; for (int h = 0; h < N[p]; h++) Z[p] += W[p][h] * ca[h] * cb[h];
+      vector<double> z(N[p]); both(p, W[(p + 1) % 3].data(), W[(p + 2) % 3].data(), z.data());
+      Z[p] = 0; for (int h = 0; h < N[p]; h++) Z[p] += W[p][h] * z[h];
       if (Z[p] <= 0) fail("The three ranges have no compatible combos.");
     }
     double br[3] = {0, 0, 0}, ev[3] = {0, 0, 0}, ex = -1; int it = 0;
@@ -692,8 +788,8 @@ int main(int argc, char** argv) {
     vector<double> rootEV[3];
     for (int p = 0; p < 3; p++) {
       vector<float> v(N[p]); walkRoot({p, EV, 0, true}, v.data()); ev[p] = total(p, v.data());
-      vector<double> ca(N[p]), cb(N[p]); compat(p, (p + 1) % 3, W[(p + 1) % 3].data(), ca.data()); compat(p, (p + 2) % 3, W[(p + 2) % 3].data(), cb.data());
-      rootEV[p].resize(N[p]); for (int h = 0; h < N[p]; h++) { double z = ca[h] * cb[h]; rootEV[p][h] = z > 1e-12 ? v[h] / z : NAN; }
+      vector<double> zs(N[p]); both(p, W[(p + 1) % 3].data(), W[(p + 2) % 3].data(), zs.data());
+      rootEV[p].resize(N[p]); for (int h = 0; h < N[p]; h++) { double z = zs[h]; rootEV[p][h] = z > 1e-12 ? v[h] / z : NAN; }
     }
     struct rusage ru; getrusage(RUSAGE_SELF, &ru);
 #ifdef __APPLE__
@@ -704,8 +800,8 @@ int main(int argc, char** argv) {
     FILE* f = fopen(cfg.out.c_str(), "w"); if (!f) fail("Cannot write " + cfg.out);
     string bs; for (int c : cfg.board) bs += cardName(c);
     char chance[160]; if (!TURNS && !RIVERS) snprintf(chance, sizeof chance, "every turn and river card"); else snprintf(chance, sizeof chance, "%s turn cards and %s river cards per turn", TURNS ? to_string(TURNS).c_str() : "all", RIVERS ? to_string(RIVERS).c_str() : "all");
-    fprintf(f, "{\"version\":1,\"game\":\"NLH3\",\"board\":\"%s\",\"pot\":%.6g,\"stack\":%.6g,\"iterations\":%d,\"seconds\":%.2f,\"exploitability\":%.4f,\"bestResponse\":[%.4f,%.4f,%.4f],\"ev\":[%.4f,%.4f,%.4f],\"memoryEstimateMB\":%.0f,\"peakRssMB\":%.0f,\"threads\":%d,\"turnCards\":%d,\"riverCards\":%d,\"sampledRunouts\":%s,\"suitSymmetries\":%zu,\"chance\":\"%s\",\"nodes\":%zu,\"riverBoards\":%zu,",
-      bs.c_str(), cfg.pot, cfg.stack, it, seconds(t0), ex, br[0], br[1], br[2], ev[0], ev[1], ev[2], mb, rss, cfg.threads, TURNS, RIVERS, TURNS || RIVERS ? "true" : "false", max((size_t)1, SIG.size()), chance, T.size(), BOARDS.size());
+    fprintf(f, "{\"version\":1,\"game\":\"NLH3\",\"exactRemoval\":%s,\"board\":\"%s\",\"pot\":%.6g,\"stack\":%.6g,\"iterations\":%d,\"seconds\":%.2f,\"exploitability\":%.4f,\"bestResponse\":[%.4f,%.4f,%.4f],\"ev\":[%.4f,%.4f,%.4f],\"memoryEstimateMB\":%.0f,\"peakRssMB\":%.0f,\"threads\":%d,\"turnCards\":%d,\"riverCards\":%d,\"sampledRunouts\":%s,\"suitSymmetries\":%zu,\"chance\":\"%s\",\"nodes\":%zu,\"riverBoards\":%zu,",
+      cfg.exact ? "true" : "false", bs.c_str(), cfg.pot, cfg.stack, it, seconds(t0), ex, br[0], br[1], br[2], ev[0], ev[1], ev[2], mb, rss, cfg.threads, TURNS, RIVERS, TURNS || RIVERS ? "true" : "false", max((size_t)1, SIG.size()), chance, T.size(), BOARDS.size());
     fprintf(f, "\"combos\":[");
     for (int p = 0; p < 3; p++) { fprintf(f, "%s[", p ? "," : ""); for (int h = 0; h < N[p]; h++) fprintf(f, "%s\"%s\"", h ? "," : "", comboName(CB[p][h]).c_str()); fprintf(f, "]"); }
     fprintf(f, "],\"weights\":[");

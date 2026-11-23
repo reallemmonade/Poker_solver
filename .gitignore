@@ -1,10 +1,12 @@
 *
 !/.gitignore
 !/README.md
+!/CLAUDE.md
 !/render.yaml
 !/.github/
 !/.github/workflows/
 !/.github/workflows/cloud-solver.yml
+!/.github/workflows/flop-library.yml
 !/server.cjs
 !/accounts.cjs
 !/package.json
@@ -21,6 +23,8 @@
 !/tools/local-solver/install-linux.sh
 !/tools/local-solver/start.command
 !/tools/local-solver/check-bridge.cjs
+!/tools/local-solver/check-tree.cjs
+!/tools/local-solver/check-tree-mw.cjs
 !/tools/local-solver/spot-worker.cjs
 !/tools/local-solver/queue.cjs
 !/tools/local-solver/queue-worker.cjs
@@ -61,9 +65,19 @@
 !/tools/calibration/level2.sh
 !/tools/calibration/level2-sync.sh
 !/tools/split-libraries.cjs
+!/tools/update-flop-libraries.cjs
+!/tools/hand-trace.cjs
+!/tools/funky-spots.cjs
+!/tools/spot-trust/
+!/tools/spot-trust/audit.cjs
+!/tools/solve-flow/
+!/tools/solve-flow/run.cjs
+!/tools/solve-flow/fake-texassolver.cjs
+!/tools/solve-flow/fast-mw-solver.cjs
 !/tools/cloud/
 !/tools/cloud/modal_app.py
 !/tools/cloud/test-cloud.cjs
+!/tools/cloud/costs.cjs
 !/tools/chart-bots/
 !/tools/chart-bots/README.md
 !/tools/chart-bots/lib.cjs
@@ -78,12 +92,17 @@
 !/tools/postflop/flops.cjs
 !/tools/postflop/check.cjs
 !/tools/postflop/check-turn.cjs
+!/tools/postflop/balance-check.cjs
 !/tools/postflop/plo-library.cjs
 !/tools/postflop/run-plo-library.command
 !/tools/postflop/run-library.command
 !/tools/postflop/charts-100bb.json.gz
+!/tools/postflop/trees/
+!/tools/postflop/trees/*.json
 !/studio/
 !/studio/app.js
+!/studio/hand-trace.js
+!/studio/funky-spots.js
 !/studio/accounts.js
 !/studio/verify-accounts.cjs
 !/studio/action-bar.js
@@ -94,7 +113,7 @@
 !/studio/build-friends.cjs
 !/studio/evidence-ui.js
 !/studio/friends.html
-!/studio/friends.js
+!/studio/friend-play.js
 !/studio/game.js
 !/studio/history.js
 !/studio/hand-stats.js
@@ -105,7 +124,9 @@
 !/studio/rating.js
 !/studio/performance.js
 !/studio/hand-report.js
+!/studio/hand-grade.js
 !/studio/guess-gate.js
+!/studio/spot-why.js
 !/studio/settings-ui.js
 !/studio/verify-rating.cjs
 !/studio/index.html
@@ -118,6 +139,7 @@
 !/studio/make-icons.cjs
 !/studio/interface.js
 !/studio/looks.js
+!/studio/tab-glide.js
 !/studio/interface.css
 !/studio/verify-interface.cjs
 !/studio/verify-import.cjs
@@ -156,3 +178,15 @@
 /studio/render-site/
 # Chart bot reports (tools/chart-bots) are never committed.
 /out/
+# iPhone/Mac app shell (native/): everything but node_modules and Xcode build output.
+!/native/
+!/native/**
+/native/node_modules/
+/native/ios/App/output/
+/native/ios/App/build/
+/native/ios/App/App/public/
+/native/ios/App/App/capacitor.config.json
+/native/ios/App/App/config.xml
+/native/ios/capacitor-cordova-ios-plugins/
+**/xcuserdata/
+**/DerivedData/

@@ -58,15 +58,38 @@ A flop decision is answered from the library only when all of these hold:
 - The hand's preflop line maps to the spot's chart line in the same chart. The chart is chosen by the nearest depth, and raises map to the nearest chart size.
 - The flop is the same up to suits. Otherwise the nearest solved flop with the same suit pattern and pairing stands in: the closest one by card ranks and the gaps between them, with your cards moved onto it (a board rank becomes the stand-in's rank, any other rank keeps its place between the board ranks). The answer says it is a stand-in and names the flop. The library always holds a flop of each suit pattern and pairing, so every flop gets an answer, if a rougher one.
 - The stack-to-pot ratio is within a factor of 1.5. Chip amounts scale to the hand's pot.
-- Each flop bet or raise is within a factor of 1.5 of a solved size. The answer says when a nearest size stands in.
+- Each flop bet or raise maps to a solved size: between two solved sizes to the nearer one (pseudo-harmonic mapping), beyond them to the smallest or largest, an all-in to the all-in. The answer says when a nearest size stands in, is shown as approximate and is not graded. The defence against such a bet is priced for the real size, keeping the solved hand order: between two solved sizes its fold share lies on the line between their two fold shares (by the bluff's break-even share, bet / (bet + pot)); above the largest solved size it tightens toward MDF, but never folds more than the library does to the all-in; below the smallest it widens by the break-even ratio. Measured on the bundled libraries by predicting each 2/3-pot node from its 1/3 and 1.5x neighbours, the line misses the solved fold share by 1.8 points on average.
 - Your hand is in the solved range.
 - Both players' chart ranges still match the ranges the library was solved for. A chart re-solved under the same name gets no library answers until the library is rebuilt from it.
 
-Otherwise the app solves the spot as before: in the browser, or with TexasSolver on your computer, using ranges from the same chart. TexasSolver reports no action EVs, so library answers show frequencies and are not graded.
+Otherwise the app solves the spot as before: in the browser, or with TexasSolver on your computer, using ranges from the same chart.
+
+**Grading.** Library answers hold frequencies only, so they are graded on frequency: an action the library plays 5% or more of the time is correct. A live TexasSolver solve also carries each action's EV and is graded on the EV lost ([tools/local-solver/README.md](../local-solver/README.md), "Action EVs").
+
+**What a library needs to grade on EV.** The solver already writes the EVs (`action_evs` on every flop decision of a dump made with the current `texassolver-evs.patch`); the library does not keep them. To keep them:
+
+- **Re-solve every flop.** Saved flops (`postflop-work/<spot>/<flop>.json`) hold packed frequencies, not the dump, so the EVs cannot be added afterwards. `solve --need-evs 1` already re-solves flops saved without per-class EVs; the same switch can cover action EVs.
+- **Store them.** `nodes()` in `library.cjs` packs each node's mix as one byte per combo and action. EVs need one more table per node: for example each combo's best EV as 16 bits plus each action's gap to it as one byte on a square-root scale, with the node's `action_evs_reach`. That roughly doubles a `.cpl` file; `PostflopLibrary.validate` and `tools/split-libraries.cjs` must accept the new field.
+- **Scale them.** A library answer is scaled to the hand's pot (the stack-to-pot ratio may differ by up to 1.5 times), so its EVs are scaled by the same factor and are approximate when the ratio or a bet size differs. Stand-in flops and nearest-size answers (`standIn`, `sizesMatched: false`) should stay on frequency.
+- **Hand them to the app.** `query()` in `studio/postflop-library.js` should fill what a live solve fills: `mean` (bb from the decision), `loss` and `best` through `PokerLocalSolver.actionEVs`, and `solve.evAvailable`, `evKind`, `converged`, `evTolerance` and `evReach`. The grading side already accepts a `postflop-library` answer with those fields (`solverEV` in `studio/trainer.js`); without them nothing changes.
+- **Turn files** (`--turn 1`) would need EVs for decisions after the turn card too. The patch only writes them before the next card; extending it means keeping the EVs by dealt card in `BestResponse::actionBestResponse` and applying the suit swaps the strategy dump applies.
 
 **Flop reports** (under the import controls) average each flop's strategy over the acting player's range. For example, they show how often BB checks, or how often BTN c-bets after a check, on each solved flop.
 
 **Turn strategies:** `solve --turn 1` also keeps, next to each flop, the turn's first decisions on the check-check, bet-call and check-bet-call flop lines, two actions deep (`<flop>.turn.json.gz`; the solver dumps two streets, which needs no more solving). `bundle-turn --out postflop-work` packs them into one `turn-<spot>.ctl` per spot, with each flop compressed on its own. Import a `.ctl` file like a library: the app stores its flops apart and unpacks one only when a hand of that spot reaches its turn. Turn decisions on those lines then come from it, and live solves of the turn and river start from both players' ranges narrowed by their own flop and turn actions with the solved frequencies. A 6-max 100bb flop takes about 0.7 MB. `check-turn.cjs --turn turn-<spot>.ctl --charts <bundle>` checks a file the way `check.cjs` checks a library, and `studio/verify-import.cjs <charts> <library> <turn file>` imports one in the app.
+
+## Balance gate
+
+`balance-check.cjs` checks a library before it ships, the way `tools/preflop/balance-check.cjs` gates charts. It reads bundles, split spot files (`studio/libraries/flops/*.json.gz`) or a solve folder:
+
+```
+node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --md balance.md   # exits 2 if a spot fails
+node tools/postflop/balance-check.cjs ~/smart-work/flop-v6b --mark            # then bundle as usual
+```
+
+Per spot: exploitability, tables (rows sum to 255, the root covers the range), the first bet's fold rate against its alpha, top-3% hands folding to a normal-sized first bet (over 5% fails), and the share of air in first bets (warns under 3% or over 85%). Exploitability is measured per flop, so a flop above 2% pot is ungraded on its own; the spot fails as a whole only when its weighted mean is above 3% (above 1.5%, or over 10% of flops above 2%, it passes in part: only those flops lose grading). A first-bet line whose fold rate is 25+ points over alpha (10+ warns) loses grading on that line only (`gate.lines`: `BET` facing a donk, `CHECK/BET` facing a bet after a check). A flop with a top-3% hand folding most of the time also fails on its own. Folders with flops but no `spot.json` are listed as skipped. Exits 2 when anything fails or is skipped.
+
+`--mark` writes the verdict into the files (`spot.gate` with `fail`, `flops` and `lines`, kept by `bundle` and `bundle-turn`). The app still shows a failed spot's or flop's answers but does not grade them; the hand trace logs `not graded (flop library failed balance check: …)`.
 
 ## PLO
 

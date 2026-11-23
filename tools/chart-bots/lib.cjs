@@ -96,30 +96,45 @@ function loadFlops(lib,filter=()=>true){
 // settings are read back from the pack's settings text (export.cjs writes them), so a v6
 // library with other settings is modelled with its own. Per-class calibrated playability is
 // not stored in packs: pass --calibration file.json, or the shape rule stands in (noted).
+// The calibration is used only for a pack whose text says it was calibrated: a library mixes
+// calibrated charts with older ones solved on the shape rule (NLH MTT 9-handed 100bb), and a
+// calibration laid over one of those puts its rows far from balance. The 3-bet-pot fit and the
+// per-line fits are likewise modelled only when the pack's text names them.
 function modelOptions(raw,{calibration=null,override={}}={}){
- const c=raw.config,s=raw.source?.settings||'',notes=[];
- const spec={seats:c.seats,stack:Math.max(...c.stacks),format:c.mode==='icm'?'mtt':'cash',game:c.variant==='PLO4'?'plo':'nlh',rake:c.rakePct||0,rakeCap:c.rakeCap??3,limp:/small blind completing/.test(s)?1:0,calibration:c.variant==='PLO4'?null:calibration};
+ let approximate=0;const c=raw.config,s=raw.source?.settings||'',notes=[],plo=c.variant==='PLO4',calibrated=!plo&&/playability per hand class, calibrated to /.test(s);
+ const spec={seats:c.seats,stack:Math.max(...c.stacks),format:c.mode==='icm'?'mtt':'cash',game:plo?'plo':'nlh',rake:c.rakePct||0,rakeCap:c.rakeCap??3,limp:/small blind completing/.test(s)?1:0,calibration:calibrated?calibration:null};
  const o=E.game(spec);const num=(re,f)=>{const m=s.match(re);if(m)f(m.map(Number),m);return!!m;};
- num(/open ([\d.]+)bb \(SB ([\d.]+)bb\), 3-bet ([\d.]+)x in position or ([\d.]+)x from the blinds plus ([\d.]+)x per caller, 4-bet ([\d.]+)x(?:, 5-bet ([\d.]+)x)?/,m=>{o.open=m[1];o.sbOpen=m[2];o.threeBetIP=m[3];o.threeBetOOP=m[4];o.squeezePerCaller=m[5];o.fourBet=m[6];if(m[7])o.fiveBet=m[7];});
+ // Sizes: one number, or a small and a big size ("3x or 4x").
+ const X='([\\d.]+x(?: or [\\d.]+x)?)',sizes=v=>{const a=v.split(' or ').map(parseFloat);return a.length>1?a:a[0];};
+ const sized=s.match(new RegExp('open ([\\d.]+)bb \\(SB ([\\d.]+)bb\\), 3-bet '+X+' in position or '+X+' from the blinds plus ([\\d.]+)x per caller, 4-bet '+X+'(?:, 5-bet ([\\d.]+)x)?'));
+ if(sized){o.open=+sized[1];o.sbOpen=+sized[2];o.threeBetIP=sizes(sized[3]);o.threeBetOOP=sizes(sized[4]);o.squeezePerCaller=+sized[5];o.fourBet=sizes(sized[6]);if(sized[7])o.fiveBet=+sized[7];}
+ else if(!plo&&!/push or fold/i.test(s))notes.push('Settings text has no raise sizes this code can read; today\'s tools/preflop sizes assumed.');
  num(/raise to ([\d.]+)% of the stack or more is all-in/,m=>o.jamShare=m[1]/100);
  num(/raises to ([\d.]+)bb\)/,m=>o.isoRaise=m[1]);
  num(/a call that leaves under ([\d.]+)x the pot behind/,m=>o.callSPR=m[1]);
  num(/grew ([\d.]+)x by the river/,m=>o.rakeGrowth=m[1]);
- num(/stack-to-pot ratio falls from ([\d.]+) to ([\d.]+)/,m=>{o.flopSPR=m[1];o.allInSPR=m[2];});
+ // The sentence ends "to 0.5.": the number must not swallow the full stop (it read as NaN, which
+ // switched the all-in blend off and put every short-stack chart far from its claimed NashConv).
+ num(/stack-to-pot ratio falls from (\d+(?:\.\d+)?) to (\d+(?:\.\d+)?)/,m=>{o.flopSPR=m[1];o.allInSPR=m[2];});
  const main=s.match(/flop pots pay an equity-realization share \(odds to the power ([\d.]+), in position x([\d.]+), out of position x([\d.]+), last raiser x([\d.]+), playability (\{[^}]*\}|by hand shape|per hand class, calibrated to [^;)]*)/);
  if(main){o.sharpness=+main[1];o.realization=+(main[2]-1).toFixed(6);o.initiative=+(main[4]-1).toFixed(6);
   if(main[5].startsWith('{'))o.playability=JSON.parse(main[5]);
-  else if(/calibrated/.test(main[5])&&!o.playTable)notes.push('Pack is calibrated per hand class, but the calibration file is not in the pack; pass --calibration to model it exactly. The shape playability rule stands in, so EVs and gains are approximate.');}
+  else if(calibrated&&!o.playTable)approximate=notes.push('Pack is calibrated per hand class, but the calibration file is not in the pack; pass --calibration to model it exactly. The shape playability rule stands in, so EVs and gains are approximate.');
+  else if(calibrated&&!s.includes('calibrated to '+o.calibrated+')'))approximate=notes.push(`The --calibration file is not the one this pack names (the file: ${o.calibrated}), so EVs and gains are approximate.`);}
  else notes.push('Settings text has no realization clause; tools/preflop defaults assumed.');
  const re=s.match(/3-bet pots and bigger have their own fit \(odds to the power ([\d.]+), in position x([\d.]+), out of position x([\d.]+), last raiser x([\d.]+)/);
  if(re)o.reraised={...(o.reraised||{}),sharpness:+re[1],realization:+(re[2]-1).toFixed(6),initiative:+(re[4]-1).toFixed(6)};
+ else if(!plo)o.reraised=null;
+ // Per-line fits: the text says how many lines have one (buildModel checks the file gives as many).
+ const lines=s.match(/(\d+) preflop lines have a fit of their own/);if(!lines)o.spots=null;
  const nc=s.match(/NashConv ([\d.]+) bb\/hand/);
- return{options:{...o,...override},claimedNashConv:nc?+nc[1]:null,notes};
+ return{options:{...o,...override},claimedNashConv:nc?+nc[1]:null,notes,ownLines:lines?+lines[1]:0,approximate:!!approximate};
 }
 const hkey=h=>h.map(e=>e.seat+e.kind[0]+(e.kind==='raise'?e.to:'')).join('/');
 // A Solver over the chart's game with every node's averaged strategy set to the chart's rows.
 function buildModel(raw,opts={}){
- const {options,claimedNashConv,notes}=modelOptions(raw,opts),S=new Solver(options),K=S.K,byKey=new Map();
+ const {options,claimedNashConv,notes,ownLines,approximate:approx}=modelOptions(raw,opts),S=new Solver(options),K=S.K,byKey=new Map();let approximate=approx;
+ if(options.playTable&&S.spotCount!==ownLines)approximate=!!notes.push(`Pack has ${ownLines} preflop lines with a fit of their own, the calibration file gives ${S.spotCount} for this chart; pass the file the chart was built with.`);
  for(const n of raw.nodes)byKey.set(hkey(n.history),n);
  const unmatched=[],used=new Set();
  for(const node of S.tree.nodes){
@@ -136,7 +151,7 @@ function buildModel(raw,opts={}){
  const extra=raw.nodes.filter(n=>!used.has(n)).map(n=>hkey(n.history));
  if(unmatched.length)notes.push(`${unmatched.length} tree nodes have no matching chart node (played uniformly here); the rebuilt tree may differ from the chart's.`);
  if(extra.length)notes.push(`${extra.length} chart nodes are not in the rebuilt tree.`);
- S.byId=S.tree.nodes;return{solver:S,options,claimedNashConv,notes,unmatched,extra,K,classes:S.m.classes,weight:S.m.weight};
+ S.byId=S.tree.nodes;return{solver:S,options,claimedNashConv,notes,approximate,unmatched,extra,K,classes:S.m.classes,weight:S.m.weight};
 }
 // A copy of a model with other realization settings (same tree, same chart rows).
 function variantModel(base,override){

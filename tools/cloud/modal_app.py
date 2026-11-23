@@ -13,11 +13,24 @@ and goes into CLOUD_SOLVER.url in studio/spot-ui.js.
 
 Price (Modal's list price, November 2026): 8 physical cores at $0.0000131 per core-second plus 8 GiB at $0.00000222
 per GiB-second, so about $0.44 an hour. RATE must match it; the worker multiplies it by its own run time.
+
+Big jobs (job.size == "big": preflop lines that can reach a three-way flop, hours on a Mac) get a 32-core container
+(BIG_RATE, about $1.64 an hour) that solves 8 of their 3-way flops at once, so they finish in tens of minutes. Their
+price per solve is about the same as on 8 cores; only the wait shrinks. studio/spot-ui.js CLOUD_SOLVER.big must match.
+The preflop three-way equity table (about 2 minutes to build) is kept on a Modal Volume, so it's built once.
+
+Price cap: the phone shows each solve's quote as an estimate ("~39¢", job.estimate) and sends a cap with it (job.cap,
+1.5x the quote). The worker is billed from this function's start (--started) and stops at the cap (--cap seconds,
+at least CAP_FLOOR so a cold start can't sink a sub-cent solve): a little before it, the solve is told to stop and
+still answers with what it has (marked capped); at the cap the job ends whatever it has. A last guard here kills the
+worker shortly after. Each finished job keeps its quote (estimate) and what it cost (cost), so tools/cloud/costs.cjs
+can check quotes against real bills.
 """
 import json
 import os
 import subprocess
 import tempfile
+import time
 import urllib.request
 
 import modal
@@ -25,6 +38,12 @@ import modal
 CORES = 8
 MEMORY_MB = 8192
 RATE = round(CORES * 0.0000131 * 3600 + MEMORY_MB / 1024 * 0.00000222 * 3600, 3)
+BIG_CORES = 32
+BIG_MEMORY_MB = 16384
+BIG_RATE = round(BIG_CORES * 0.0000131 * 3600 + BIG_MEMORY_MB / 1024 * 0.00000222 * 3600, 3)
+BIG_HOURS = 6
+CAP_RATIO = 1.5
+CAP_FLOOR = 120
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 IGNORE = ["render-site", "**/*.png", "**/node_modules", "**/TexasSolver", "**/.cmake-venv", "**/plo_solver", "**/mw_solver", "**/equity3"]
 
@@ -42,20 +61,75 @@ image = (
 )
 app = modal.App("guava-solver", image=image)
 secret = modal.Secret.from_name("guava-cloud")
+cache = modal.Volume.from_name("guava-solver-cache", create_if_missing=True)
+CACHE = "/cache"
 ALLOWED_APIS = ("https://range-lab-live-rooms.onrender.com",)
 
 
-@app.function(cpu=CORES, memory=MEMORY_MB, timeout=3600, secrets=[secret])
+@app.function(cpu=CORES, memory=MEMORY_MB, timeout=3600, secrets=[secret], volumes={CACHE: cache})
 def solve(job: dict):
     """One job, start to finish, on this container's cores."""
+    run_job(job, CORES, MEMORY_MB, RATE, 3300)
+
+
+@app.function(cpu=BIG_CORES, memory=BIG_MEMORY_MB, timeout=BIG_HOURS * 3600, secrets=[secret], volumes={CACHE: cache})
+def solve_big(job: dict):
+    """A preflop line that reaches three-way flops: 8 flops at a time on 32 cores."""
+    run_job(job, BIG_CORES, BIG_MEMORY_MB, BIG_RATE, BIG_HOURS * 3600 - 300)
+
+
+def cap_seconds(job: dict, rate: float, timeout: int) -> int:
+    """The job's price cap in seconds of this machine: its cap (or 1.5x its quote) at this rate, CAP_FLOOR at least."""
+    spec = job.get("job") or {}
+    try:
+        dollars = float(spec.get("cap") or 0) or float(spec.get("estimate") or 0) * CAP_RATIO
+    except (TypeError, ValueError):
+        dollars = 0
+    seconds = dollars / rate * 3600 if dollars > 0 and rate > 0 else timeout
+    return int(min(timeout, max(CAP_FLOOR, seconds)))
+
+
+def run_job(job: dict, cores: int, memory_mb: int, rate: float, timeout: int):
+    started = int(time.time() * 1000)
+    cap = cap_seconds(job, rate, timeout)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "job.json")
         with open(path, "w") as f:
             json.dump(job, f)
-        subprocess.run(
-            ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(RATE), "--once", path,
-             "--threads", str(CORES * 2), "--memory", str(int(MEMORY_MB * 0.8)), "--timeout", "3300"],
-            cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json")}, check=False)
+        print("Cloud solve", job["id"], "for", job["link"]["user"], "on", cores, "cores, capped at", cap, "s")
+        table = os.path.join(CACHE, "equity3.bin")
+        had_table = os.path.exists(table)
+        try:
+            run = subprocess.run(
+                ["node", "tools/local-solver/server.cjs", "--name", "modal", "--rate", str(rate), "--once", path,
+                 "--threads", str(cores * 2), "--parallel", str(max(1, cores // 4)), "--memory", str(int(memory_mb * 0.8)),
+                 "--timeout", str(timeout), "--started", str(started), "--cap", str(cap)],
+                cwd="/app", env={**os.environ, "CITRUS_BRIDGE_LINK": os.path.join(tmp, "link.json"), "CITRUS_EQUITY3": table},
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=cap + 30)
+        except subprocess.TimeoutExpired as e:
+            out = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            print(out[-4000:])
+            fail(job, "It reached its price cap before it had an answer.", cost=round(rate * (time.time() * 1000 - started) / 3.6e6, 5))
+            return
+        print(run.stdout[-4000:])
+        if not had_table and os.path.exists(table):
+            cache.commit()
+        # The worker reports its own failures on the job. If it crashed before it could, say so here, so the phone
+        # shows why instead of waiting.
+        if run.returncode != 0:
+            lines = [l for l in run.stdout.strip().splitlines() if l.strip()]
+            fail(job, "The cloud worker stopped" + (": " + lines[-1][:200] if lines else "."))
+
+
+def fail(job: dict, message: str, cost: float = 0):
+    link, value = job["link"], {**job["job"], "status": "failed", "message": message, "worker": "modal", **({"cost": cost, "capped": True} if cost else {})}
+    row = {"store": "meta", "id": job["id"], "t": int(job.get("t") or 0) + 5000, "data": {"id": job["id"], "value": value}}
+    req = urllib.request.Request(link["api"] + "/api/sync", data=json.dumps({"rows": [row]}).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + link["token"]})
+    try:
+        urllib.request.urlopen(req, timeout=60).read()
+    except Exception as e:
+        print("Could not report the failure:", e)
 
 
 def account_user(api: str, token: str):
@@ -76,7 +150,7 @@ def web():
 
     @api.get("/")
     def info():
-        return {"ok": True, "rate": RATE, "threads": CORES * 2}
+        return {"ok": True, "rate": RATE, "threads": CORES * 2, "big": {"rate": BIG_RATE, "threads": BIG_CORES * 2}}
 
     @api.post("/solve")
     async def start(request: Request):
@@ -85,8 +159,12 @@ def web():
         token = auth[7:] if auth.startswith("Bearer ") else ""
         origin = str(body.get("api", "")).rstrip("/")
         job_id, job = str(body.get("id", "")), body.get("job")
-        if origin not in ALLOWED_APIS or not token or not job_id.startswith("solvejob-") or not isinstance(job, dict):
-            raise HTTPException(400, "Malformed cloud solve.")
+        if origin not in ALLOWED_APIS:
+            raise HTTPException(400, "Cloud solves only run for the main Guava Poker server. Update the app and try again.")
+        if not token:
+            raise HTTPException(401, "Sign in again.")
+        if not job_id.startswith("solvejob-") or not isinstance(job, dict):
+            raise HTTPException(400, "This solve request was incomplete. Update the app and try again.")
         try:
             user = account_user(origin, token)
         except Exception:
@@ -95,8 +173,9 @@ def web():
             raise HTTPException(403, "This account can't start cloud solves.")
         if job.get("target") != "modal":
             raise HTTPException(400, "This job isn't for the cloud.")
-        solve.spawn({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
+        worker = solve_big if job.get("size") == "big" and job.get("kind") == "preflop" else solve
+        await worker.spawn.aio({"id": job_id, "job": job, "t": int(body.get("t") or 0), "cursor": int(body.get("cursor") or 0),
                      "link": {"api": origin, "token": token, "user": user["id"]}})
-        return {"started": True, "rate": RATE}
+        return {"started": True, "rate": BIG_RATE if worker is solve_big else RATE}
 
     return api

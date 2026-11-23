@@ -6,7 +6,9 @@ const {parentPort,workerData}=require('worker_threads'),fs=require('fs'),path=re
 const S=require('../../studio/spot-solver.js');
 const {observed,options,extraAction,url,learned}=workerData,sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // The learned flop's answer, as the app's own library lookup gives it, or null. Ranges come from the same built-in
-// charts the app uses (studio/libraries), so only an exact flop of a spot whose ranges still match answers.
+// charts the app uses (studio/libraries), so only an exact flop of a spot whose ranges still match answers. A flop learned
+// with the library's own tree bets only 33% when that library does (the v4 flops): it never answers a job, since the app
+// sends a flop job to the Mac or cloud exactly to get every size (33%, 67%, 150% and all-in), so TexasSolver solves it.
 function learnedAnswer(){
  if(!learned||extraAction||observed.board.length!==3||observed.config.variant!=='NLH')return null;
  const Learn=require('./learn.cjs'),lib=Learn.library();if(!lib)return null;
@@ -16,7 +18,7 @@ function learnedAnswer(){
  const hand=G.replay(c,observed.actions,{holes:{[observed.actor]:observed.heroCards},runout:observed.board});
  if(hand.actor!==observed.actor||hand.board.join()!==observed.board.join())return null;
  const q=Lib.query([lib],P.postflopRanges(packs,c,observed.actions),hand);
- return q&&!q.solve.library.standIn?q:null;
+ return q&&!q.solve.library.standIn&&!q.solve.library.fewerSizes?q:null;
 }
 (async()=>{
  try{
