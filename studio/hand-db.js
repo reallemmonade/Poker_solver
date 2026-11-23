@@ -1,3 +1,4 @@
+function miniHoleHTML(cards){const sym={c:'♣',d:'♦',h:'♥',s:'♠'};return[0,2].map(i=>{const r=cards[i],su=cards[i+1];return'<span class="pcard suit-'+su+' '+('dh'.includes(su)?'red':'')+'"><span class="pip">'+esc(r)+'<i>'+(sym[su]||'')+'\uFE0E</i></span></span>'}).join('');}
 'use strict';
 // Saved hands as a small database: each hand is reduced once to the facts the History filters, insights,
 // Library search and seat stats read. Facts are cached per hand and refreshed when a late assessment arrives.
@@ -20,7 +21,7 @@ function handFacts(row){const rec=row.record,key=row.id+'|'+(rec.grading||[]).le
   grades=(rec.grading||[]).filter(g=>g.hero===undefined||g.hero===hero),mistakes=grades.filter(gradeMistake),combo=comboOf(rec.holes?.[hero]||''),pos=G.positions(c.seats,c.button)[hero]||'Seat '+(hero+1),
   net=base.net?Math.round(base.net[hero]*100)/100:null;
  f={key,id:row.id,at:row.createdAt,assisted:rec.assisted!==false,hero,pos,combo,group:rec.holes?.[hero]?.length===4?handGroup(combo):'Other',seats:c.seats,mode:c.mode,depth:c.stacks[hero],pot,ended,line,net,showdown:atShowdown,
-  mistakes:mistakes.length,cost:mistakes.reduce((s,g)=>s+gradeCost(g),0),grades,base,tally:PokerStats.tally(base)};
+  holes:rec.holes?.[hero]||'',mistakes:mistakes.length,cost:mistakes.reduce((s,g)=>s+gradeCost(g),0),grades,base,tally:PokerStats.tally(base)};
  f.tags=[pos,combo,pot.replace(/[\s-]/g,''),ended,net===null?'':net>0?'won':net<0?'lost':'even',atShowdown?'showdown':'',f.mistakes?'mistake mistakes':'',f.group,c.seats===2?'hu headsup':c.seats+'max',line].join(' ').toLowerCase();
  handDB.cache.set(row.id,f);return f;}
 function factsOf(rows){const out=[];for(const r of rows){try{out.push(handFacts(r))}catch{}}return out;}
@@ -40,7 +41,7 @@ function renderHandDB(box){if(!box)return;
  for(const k of ['result','sort'])box.querySelector('[data-hdb="'+k+'"]').value=handDB.filter[k];
  const rows=handDBFiltered(),rate=bbPer100(rows);box.querySelector('.hdb-bar').hidden=!all.length;
  box.querySelector('.hdb-sum').textContent=all.length?rows.length+' hand'+(rows.length===1?'':'s')+(rate===null?'':' · '+signedBB(rate)+' bb/100'):'';
- box.querySelector('.hdb-list').innerHTML=all.length?rows.slice(0,handDB.shown).map(f=>'<button type="button" class="hdb-row" data-open-hand="'+esc(f.id)+'"><b>'+esc(f.combo||'–')+'</b><span>'+esc(f.pos+' · '+f.pot+(f.line?' · '+f.line:''))+'</span>'+(f.assisted?'<i class="hdb-help" title="Assisted · not in leaks"></i>':'')+(f.mistakes?'<i class="hdb-flag" title="'+f.mistakes+' mistake'+(f.mistakes>1?'s':'')+'"></i>':'')+'<em class="'+(f.net>0?'hdb-up':f.net<0?'hdb-down':'')+'">'+signedBB(f.net)+'</em></button>').join('')||'<p class="help">No hands match.</p>':'<p class="help">Finished hands show up here.</p>';
+ box.querySelector('.hdb-list').innerHTML=all.length?rows.slice(0,handDB.shown).map(f=>'<button type="button" class="hdb-row" data-open-hand="'+esc(f.id)+'"><span class="hdb-cards">'+(f.holes&&f.holes.length===4?miniHoleHTML(f.holes):'<b>'+esc(f.combo||'–')+'</b>')+'</span><span>'+esc(f.pos+' · '+f.pot+(f.line?' · '+f.line:''))+'</span>'+(f.assisted?'<i class="hdb-help" title="Assisted · not in leaks"></i>':'')+(f.mistakes?'<i class="hdb-flag" title="'+f.mistakes+' mistake'+(f.mistakes>1?'s':'')+'"></i>':'')+'<em class="'+(f.net>0?'hdb-up':f.net<0?'hdb-down':'')+'">'+signedBB(f.net)+'</em></button>').join('')||'<p class="help">No hands match.</p>':'<p class="help">Finished hands show up here.</p>';
  box.querySelector('.hdb-more').hidden=rows.length<=handDB.shown;box.querySelector('.hdb-insights').hidden=!all.length;
  if(box.querySelector('.hdb-insights').open)box.querySelector('.hdb-body').innerHTML=insightsHTML(rows);}
 // Results swing by ±100 bb/100 over a few hundred hands, so leaks are ranked by solver-measured mistake cost, which settles far sooner.
