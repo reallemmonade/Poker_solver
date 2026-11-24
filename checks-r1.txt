@@ -1,0 +1,32 @@
+== measurements: res/m-r1.json.gz
+3-bet    oop utg-sb-3bet-big  in-range 0.583 -> 0.583  extra classes   -    extra share of opp range 0.0%  whole range 0.501
+
+Means by pot type and side:
+srp ip         15 lines: in-range 0.580 -> 0.580, extra classes NaN, extra opp range 0.0%, whole range 0.575
+srp oop        15 lines: in-range 0.417 -> 0.417, extra classes NaN, extra opp range 0.0%, whole range 0.423
+3-bet ip       30 lines: in-range 0.550 -> 0.550, extra classes NaN, extra opp range 0.0%, whole range 0.530
+3-bet oop      30 lines: in-range 0.515 -> 0.515, extra classes NaN, extra opp range 0.0%, whole range 0.473
+4-bet ip       8 lines: in-range 1.008 -> 1.008, extra classes NaN, extra opp range 0.0%, whole range 0.668
+4-bet oop      8 lines: in-range 0.356 -> 0.356, extra classes NaN, extra opp range 0.0%, whole range 0.339
+limp/srp ip    1 lines: in-range 0.382 -> 0.382, extra classes NaN, extra opp range 0.0%, whole range 0.387
+limp/srp oop   1 lines: in-range 0.603 -> 0.603, extra classes NaN, extra opp range 0.0%, whole range 0.606
+A side's whole-range mean share; ip and oop of one line should add to about 1 (zero-sum flop), up to card removal.
+== balance
+res/charts-r1.json.gz
+  FAIL CO vs HJ open: 3-bet 11.6% (ref 8), call 11.6% (ref 5) -- call 11.6% vs 5%
+       3-bet/call %: 99 0/100 77 0/100 55 100/0 AJs 100/0 A5s 100/0 A4s 100/0 KJs 0/100 T9s 0/100
+  FAIL BTN vs HJ open: 3-bet 11.5% (ref 8), call 31.0% (ref 8) -- call 31.0% vs 8%
+       3-bet/call %: 99 0/100 77 0/100 55 99/1 AJs 100/0 A5s 100/0 A4s 72/28 KJs 0/100 T9s 0/100
+  FAIL BTN vs CO open: 3-bet 14.2% (ref 10), call 21.3% (ref 9) -- call 21.3% vs 9%
+       3-bet/call %: 99 8/93 77 0/100 55 100/0 AJs 100/0 A5s 98/2 A4s 32/68 KJs 88/12 T9s 0/100
+  FAIL SB vs BTN open: 3-bet 25.1% (ref 13), call 48.2% (ref 5) -- 3-bet 25.1% vs 13%; call 48.2% vs 5%; no suited wheel ace 3-bets 25% (A5s 0%, A4s 0%)
+       3-bet/call %: 99 100/0 77 100/0 55 0/100 AJs 0/100 A5s 0/100 A4s 0/100 KJs 0/100 T9s 0/0
+  FAIL BB vs BTN open: 3-bet 31.7% (ref 13), call 52.3% (ref 32) -- 3-bet 31.7% vs 13%
+       3-bet/call %: 99 100/0 77 100/0 55 0/100 AJs 99/1 A5s 0/100 A4s 0/100 KJs 0/100 T9s 0/0
+  FAIL BB vs SB open: 3-bet 22.9% (ref 17), call 71.8% (ref 39) -- 3-bet 22.9% vs 17%
+       3-bet/call %: 99 100/0 77 0/100 55 0/100 AJs 100/0 A5s 0/100 A4s 54/46 KJs 97/3 T9s 0/100
+== order
+FAIL NLH cash 6-handed 100bb (Citrus Poker CFR+ model): 3 (seat 0: J9o < J8o, seat 0: 64s < 53s, seat 1: 63o < 62o)
+1 chart(s) open out of kicker order.
+== settle vs input chart
+settle: 33 nodes, mean change 40.61%, largest 81.44% at 3:fold:0/4:fold:0/5:fold:0/0:raise:250/1:fold:0
