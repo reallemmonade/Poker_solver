@@ -172,18 +172,21 @@ class Solver{
  // like any other (no discount, no cap). Then kicker and connector order, as in factors() below.
  measuredZeroSum(base,node,entry){
   const K=this.K,cls=this.m.classes,C=this.M.C,oop=node.players[1],names=node.aggressor===oop?['ipCaller','oopRaiser']:['ip','oop'],S=base[names[0]];
-  const comb=cls.map(c=>c.length===2?6:c[2]==='s'?4:12),vec=o=>Float64Array.from(cls,c=>o?.[c]||0);
+  const W=this.m.weight,vec=o=>Float64Array.from(cls,c=>o?.[c]||0);
+  // Shares are fractions of the pot: the in-position class i takes p(i,j) = A(i,j)/C(i,j) against j and the
+  // out-of-position class j the rest. C is not symmetric (C(i,j) is j's compatible share given i, so it scales with
+  // j's combos): each side's mean is weighted by its own row of C, and the pair weight w(i)C(i,j) is symmetric.
   // Each measurement: ranges and targets per side, and per class the formula's mean share and the compatible
-  // opponent mass against the other side's range. Targets are scaled so that, weighted by that mass, the two sides
+  // opponent mass against the other side's range. Targets are scaled so that, weighted by pair, the two sides
   // add up to the pot, as the model's shares do.
   const data=entry.measured.map(m=>{const rI=vec(m.rangeIp),rO=vec(m.rangeOop),tI=new Float64Array(K).fill(NaN),tO=new Float64Array(K).fill(NaN);
    const sI=new Float64Array(K),mI=new Float64Array(K),sO=new Float64Array(K),mO=new Float64Array(K);let T=0;
-   for(let i=0;i<K;i++)for(let j=0;j<K;j++){const x=i*K+j,c=C[x];if(!(c>0))continue;if(rO[j]){mI[i]+=rO[j]*c;sI[i]+=rO[j]*S[x];}if(rI[i]){mO[j]+=rI[i]*c;sO[j]+=rI[i]*(c-S[x]);}T+=rI[i]*rO[j]*c;}
+   for(let i=0;i<K;i++)for(let j=0;j<K;j++){const x=i*K+j,c=C[x],co=C[j*K+i];if(!(c>0))continue;if(rO[j]){mI[i]+=rO[j]*c;sI[i]+=rO[j]*S[x];}if(rI[i]){mO[j]+=rI[i]*co;sO[j]+=rI[i]*co*(1-S[x]/c);}T+=W[i]*rI[i]*rO[j]*c;}
    let got=0,model=0;
    for(let i=0;i<K;i++){if(mI[i]>0)sI[i]/=mI[i];if(mO[i]>0)sO[i]/=mO[i];
     const a=m.ip?.[cls[i]],b=m.oop?.[cls[i]];
-    if(typeof a==='number'&&mI[i]>0){tI[i]=a;got+=rI[i]*mI[i]*a;}else model+=rI[i]*mI[i]*sI[i];
-    if(typeof b==='number'&&mO[i]>0){tO[i]=b;got+=rO[i]*mO[i]*b;}else model+=rO[i]*mO[i]*sO[i];}
+    if(typeof a==='number'&&mI[i]>0){tI[i]=a;got+=W[i]*rI[i]*mI[i]*a;}else model+=W[i]*rI[i]*mI[i]*sI[i];
+    if(typeof b==='number'&&mO[i]>0){tO[i]=b;got+=W[i]*rO[i]*mO[i]*b;}else model+=W[i]*rO[i]*mO[i]*sO[i];}
    const k=got>0?(T-model)/got:1;for(let i=0;i<K;i++){tI[i]*=k;tO[i]*=k;}
    return{rI,rO,tI,tO,sI,sO,mI,mO};});
   // Least squares over every measured class of both sides and every measurement, equal weights, in the shifts
@@ -194,7 +197,7 @@ class Solver{
   for(const d of data){
    const A=new Float64Array(K*K),B=new Float64Array(K*K),mi=new Float64Array(K),mo=new Float64Array(K),yI=new Float64Array(K),yO=new Float64Array(K);
    for(let i=0;i<K;i++){if(d.tI[i]===d.tI[i]){mi[i]=1;yI[i]=d.tI[i]-d.sI[i];}if(d.tO[i]===d.tO[i]){mo[i]=1;yO[i]=d.tO[i]-d.sO[i];}}
-   for(let i=0;i<K;i++)for(let j=0;j<K;j++){const c=C[i*K+j];if(!(c>0))continue;if(mi[i])A[i*K+j]=d.rO[j]*c/d.mI[i];if(mo[j])B[j*K+i]=d.rI[i]*c/d.mO[j];}
+   for(let i=0;i<K;i++)for(let j=0;j<K;j++){const c=C[i*K+j];if(!(c>0))continue;if(mi[i])A[i*K+j]=d.rO[j]*c/d.mI[i];if(mo[j])B[j*K+i]=d.rI[i]*C[j*K+i]/d.mO[j];}
    // H_uu += MI + B'B, H_vv += A'A + MO, H_uv += -(A + B') (rows of A and B are already masked), g likewise.
    for(let i=0;i<K;i++){H[i*N+i]+=mi[i];H[(K+i)*N+K+i]+=mo[i];g[i]+=yI[i];g[K+i]+=yO[i];}
    for(let p=0;p<K;p++)for(let q=0;q<K;q++){let bb=0,aa=0;for(let r=0;r<K;r++){bb+=B[r*K+p]*B[r*K+q];aa+=A[r*K+p]*A[r*K+q];}H[p*N+q]+=bb;H[(K+p)*N+K+q]+=aa;
@@ -210,7 +213,7 @@ class Solver{
   const u=z.subarray(0,K),v=z.subarray(K);
   // A class's mean share against measurement d's opponent range at the current shifts (linear in them).
   const shareIp=(d,i)=>{if(!(d.mI[i]>0))return NaN;let vb=0;for(let j=0;j<K;j++){const r=d.rO[j];if(r)vb+=r*C[i*K+j]*v[j];}return d.sI[i]+u[i]-vb/d.mI[i];};
-  const shareOop=(d,j)=>{if(!(d.mO[j]>0))return NaN;let ub=0;for(let i=0;i<K;i++){const r=d.rI[i];if(r)ub+=r*C[i*K+j]*u[i];}return d.sO[j]+v[j]-ub/d.mO[j];};
+  const shareOop=(d,j)=>{if(!(d.mO[j]>0))return NaN;let ub=0;for(let i=0;i<K;i++){const r=d.rI[i];if(r)ub+=r*C[j*K+i]*u[i];}return d.sO[j]+v[j]-ub/d.mO[j];};
   // Kicker and connector order against the last measurement's ranges: pool violators (weights: own range,
   // almost none for unmeasured classes), then shift each class to its pooled share.
   const last=data[data.length-1];
@@ -225,7 +228,7 @@ class Solver{
    for(let i=0;i<K;i++){const cur=f(last,i);if(cur===cur)w[i]+=share[i]-cur;}
   });
   const A=new Float64Array(K*K),B=new Float64Array(K*K);
-  for(let i=0;i<K;i++)for(let j=0;j<K;j++){const x=i*K+j,c=C[x];if(!(c>0))continue;const a=S[x]+c*(u[i]-v[j]);A[x]=a;B[j*K+i]=c-a;}
+  for(let i=0;i<K;i++)for(let j=0;j<K;j++){const x=i*K+j,c=C[x];if(!(c>0))continue;const a=S[x]+c*(u[i]-v[j]);A[x]=a;B[j*K+i]=C[j*K+i]*(1-a/c);}
   return{...base,[names[0]]:A,[names[1]]:B};
  }
  // One side's per-class factors for a measured line. entry = {measured, step, prior}: without step the
