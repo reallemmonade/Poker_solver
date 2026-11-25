@@ -11,6 +11,7 @@
 #     (level2.cjs fit --zero-sum 1), builds the chart, runs the balance, order and settle checks, and pushes
 #     m-r<round>.json.gz, cal-r<round>.json, charts-r<round>.json.gz and checks-r<round>.txt to level2-runs/<name>.
 #     Below 95% it uploads the merged flops only: run the same round again with resume_run=<this run's id>.
+# overcall=1 lets one more player call a flatted open (three-way pots), so flats pay for the players behind them.
 # Nothing here ships a chart: a chart is copied into studio/libraries only by a pull request, after both checks pass.
 name: Level 2 preflop round
 on:
@@ -23,6 +24,7 @@ on:
       flops: {description: 'Boards per line (tools/postflop/flops.cjs subset)', default: '120'}
       iterations: {default: '150'}
       border: {default: '0.25'}
+      overcall: {description: 'Players who may overcall a flatted open (1: three-way pots, 0: heads-up only)', default: '1'}
       resume_run: {description: 'Run id of this round whose flops-merged artifact to continue from', default: ''}
 permissions:
   contents: write
@@ -33,7 +35,7 @@ env:
 jobs:
   prep:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     outputs:
       shards: ${{ steps.p.outputs.shards }}
     steps:
@@ -45,7 +47,7 @@ jobs:
         run: |
           mkdir -p in
           if [ "$ROUND" = 1 ]; then
-            node tools/preflop/library.cjs --out build --games nlh --limp 1 --seats 6 --formats cash --depths 100 --calibration tools/calibration/set2-100bb.json --iterations 2000 --jobs 1
+            node tools/preflop/library.cjs --out build --games nlh --limp 1 --overcall ${{ inputs.overcall }} --seats 6 --formats cash --depths 100 --calibration tools/calibration/set2-100bb.json --iterations 2000 --jobs 1
             cp build/preflop-library.json.gz in/charts.json.gz
           else
             git fetch --depth 1 origin "$BRANCH"
@@ -117,7 +119,7 @@ jobs:
           node tools/preflop/level2.cjs extract --work out --chart "$CHART" --out res/m-r$ROUND.json.gz
           m=$(ls res/m-r*.json.gz | sort -V | paste -sd, -)
           node tools/preflop/level2.cjs fit --measure "$m" --base tools/calibration/set2-100bb.json --keep 99 --zero-sum 1 --out res/cal-r$ROUND.json
-          node tools/preflop/library.cjs --out build --games nlh --limp 1 --seats 6 --formats cash --depths 100 --calibration res/cal-r$ROUND.json --iterations 2000 --jobs 1
+          node tools/preflop/library.cjs --out build --games nlh --limp 1 --overcall ${{ inputs.overcall }} --seats 6 --formats cash --depths 100 --calibration res/cal-r$ROUND.json --iterations 2000 --jobs 1
           cp build/preflop-library.json.gz res/charts-r$ROUND.json.gz
           { echo "== measurements: $m"; node tools/preflop/level2.cjs compare --a res/m-r$ROUND.json.gz --b res/m-r$ROUND.json.gz | tail -12
             echo "== balance"; node tools/preflop/balance-check.cjs res/charts-r$ROUND.json.gz || true
