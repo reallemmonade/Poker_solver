@@ -62,7 +62,8 @@ function createQueue({port,threads,busy,status=()=>null,learn=null,learnPreflop=
  function solve(job){
   return new Promise(resolve=>{
    const worker=new Worker(path.join(__dirname,'queue-worker.cjs'),{workerData:{observed:job.observed,options:job.options,extraAction:job.extraAction,url:'http://127.0.0.1:'+port,learned:!!learn}});let out=null;
-   current={stop(){out={cancelled:true};fetch('http://127.0.0.1:'+port+'/cancel',{method:'POST'}).catch(()=>{});worker.terminate();}};
+   // The worker ends only once the bridge has killed this solve: a /cancel landing after the next job started would kill that one.
+   current={stop(){if(out?.cancelled)return;out={cancelled:true};fetch('http://127.0.0.1:'+port+'/cancel',{method:'POST'}).catch(()=>{}).finally(()=>worker.terminate());}};
    worker.on('message',m=>{out=m;});worker.on('error',e=>{out={error:e.message};});worker.on('exit',()=>{current=null;resolve(out||{error:'The solve stopped without an answer.'});});
   });
  }
