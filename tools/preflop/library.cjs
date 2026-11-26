@@ -13,7 +13,7 @@
 // every other chart of that bundle over unchanged (matched by name up to " (").
 const fs=require('fs'),path=require('path'),os=require('os'),{execFile}=require('child_process'),P=require('../../studio/preflop.js');
 
-const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,every:500,games:'nlh,plo',rake:0,rakeCap:3,limp:0,depths:'',seats:'',formats:'',calibration:'',base:''};
+const args={out:'preflop-library',jobs:Math.max(1,os.cpus().length),iterations:2000,every:500,games:'nlh,plo',rake:0,rakeCap:3,limp:0,overcall:0,depths:'',seats:'',formats:'',calibration:'',base:''};
 for(let i=2;i<process.argv.length;i+=2){const k=process.argv[i].replace(/^--/,''),v=process.argv[i+1];args[k]=['out','games','depths','seats','formats','calibration','base'].includes(k)?v:Number(v);}
 const raked=args.rake>0,SEATS=args.seats?args.seats.split(',').map(Number):[2,3,4,5,6,7,8,9],DEPTHS=args.depths?args.depths.split(',').map(Number):raked?[50,100,150,200]:[10,20,50,100,150,200,500,1000],FORMATS=args.formats?args.formats.split(','):raked?['cash']:['cash','mtt'],tag=raked?`-rake${args.rake}-cap${args.rakeCap}`:'';
 fs.mkdirSync(args.out,{recursive:true});
@@ -30,7 +30,7 @@ let running=0;const report=[];
 function next(){
  if(!queue.length){if(!running)finish();return;}
  const s=queue.shift();running++;const t=Date.now();
- execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,...raked?['--rake',String(args.rake),'--rakeCap',String(args.rakeCap)]:[],...args.limp?['--limp','1']:[],...args.calibration&&s.game==='nlh'?['--calibration',args.calibration]:[],'--iterations',String(args.iterations),'--every',String(Math.min(args.every,args.iterations)),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
+ execFile(process.execPath,[path.join(__dirname,'export.cjs'),'--game',s.game,'--seats',String(s.seats),'--stack',String(s.stack),'--format',s.format,...raked?['--rake',String(args.rake),'--rakeCap',String(args.rakeCap)]:[],...args.limp?['--limp','1']:[],...args.overcall>0&&s.game==='nlh'?['--overcall',String(args.overcall)]:[],...args.calibration&&s.game==='nlh'?['--calibration',args.calibration]:[],'--iterations',String(args.iterations),'--every',String(Math.min(args.every,args.iterations)),'--out',file(s)],{maxBuffer:1e7},(error,stdout)=>{
   running--;const line=stdout.trim().split('\n').slice(-2).join(' | ');
   console.log(`${path.basename(file(s))} ${((Date.now()-t)/60000).toFixed(1)} min ${error?'FAILED '+error.message:line}`);
   next();

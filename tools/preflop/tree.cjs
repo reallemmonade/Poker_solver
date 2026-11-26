@@ -1,5 +1,5 @@
 'use strict';
-// Trimmed preflop betting tree. Pots that reach the flop are always heads-up:
+// Trimmed preflop betting tree. Pots that reach the flop are heads-up (unless overcall is set):
 // at most one player flats an open (or, with limp, the small blind completes when
 // folded to), and after a 3-bet only the player who made
 // the previous raise may continue. A player who flatted the open may continue
@@ -32,6 +32,10 @@ function defaults(raw={}){
   // Facing a 4-bet or more, flatting is dropped (all-in or fold) when the call would leave
   // less than callSPR times the pot behind.
   callSPR:2.5,
+  // overcall: how many more players may call an open that was already flatted (1: three-way pots), so a flat
+  // pays for the players left to act behind it (they can overcall as well as squeeze). Three-way flops are paid
+  // from the three-way equity table (solve.cjs, tools/preflop/equity3.cpp). 0 keeps every flop heads-up.
+  overcall:0,
   // Cash rake (percent of the pot, capped in bb), taken only from pots that see a flop. A flop
   // pot is raked as if it grew rakeGrowth times by the river; all-in pots as they stand.
   rake:0,rakeCap:3,rakeGrowth:2,
@@ -93,7 +97,7 @@ function build(raw){
    const limp=o.limp&&actor===sbSeat&&s.folded.every((f,i)=>f||i===sbSeat||i===bbSeat);
    return[fold,...limp?[call]:[],...raises(s,actor)];
   }
-  if(s.level===1)return s.callers===0?[fold,call,...raises(s,actor)]:[fold,...raises(s,actor)];
+  if(s.level===1)return s.callers===0||s.callers<=o.overcall&&!s.allIn?[fold,call,...raises(s,actor)]:[fold,...raises(s,actor)];
   if(actor!==s.prevRaiser&&!(s.level===2&&actor===s.caller&&s.folded[s.prevRaiser]))return[];
   const up=raises(s,actor),pot=sum(s.bets)+sum(dead)+s.bet-s.bets[actor];
   if(s.level>=3&&up.length&&Math.min(cap[actor],cap[s.raiser])-s.bet<o.callSPR*pot)return[fold,...up];
@@ -154,8 +158,8 @@ function build(raw){
   const inv=bets.map((b,i)=>b+dead[i]),pot=sum(inv);
   if(live.length===1)return{type:'fold',winner:live[0],inv,pot};
   if(live.length>2){
-   if(!o.force)throw Error('Trimmed tree reached a '+live.length+'-way pot.');
-   // Three or more players see the flop (forced lines only): everyone matches the bet; players in postflop order.
+   if(!o.force&&!o.overcall)throw Error('Trimmed tree reached a '+live.length+'-way pot.');
+   // Three or more players see the flop (forced lines, or overcalls): everyone matches the bet; players in postflop order.
    const top=Math.max(...live.map(i=>bets[i]));for(const i of live)bets[i]=Math.min(top,cap[i]);
    const inv=bets.map((b,i)=>b+dead[i]),pot=sum(inv),players=live.slice().sort((x,y)=>postflopRank(n,x)-postflopRank(n,y));
    if(live.length>3)return{type:'many',players,inv,pot,key:lineKey(s.history)};
