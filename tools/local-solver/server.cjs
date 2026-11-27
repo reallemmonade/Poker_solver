@@ -80,14 +80,17 @@ function solve(spec,learning=false){
   const started=Date.now(),child=spawn(bin,own?[file]:['-i',file,'--resource_dir',path.join(path.dirname(args.solver),'resources')],{cwd:dir,env:{...process.env,TEXASSOLVER_STOP_FILE:stopFile,...wantEvs?{}:{TEXASSOLVER_ACTION_EVS:'off'}}});
   const mine=job={child,started,iterations:0,exploitability:null,cancelled:false,closed:null,learning};let log='',tail='';mine.closed=new Promise(r=>child.on('close',r));
   const soft=setTimeout(()=>{try{fs.writeFileSync(stopFile,'');}catch{}},time.soft*1000);
-  const timer=setTimeout(()=>child.kill('SIGKILL'),time.hard*1000);child.on('close',()=>clearTimeout(soft));
+  let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},time.hard*1000);child.on('close',()=>clearTimeout(soft));
   child.stdout.on('data',d=>{log=(log+d).slice(-20000);for(const line of String(d).split(/[\r\n]+/)){let m=line.match(/^Iter: (\d+)/);if(m)mine.iterations=+m[1];m=line.match(/Total exploitability (-?[\d.]+)/);if(m)mine.exploitability=+m[1];if(/^Stopped early/.test(line))console.log(name+': '+line.trim());}});
   child.stderr.on('data',d=>{tail=(tail+d).slice(-2000);});
   child.on('error',error=>{clearTimeout(timer);if(job===mine)job=null;reject(Error('Could not start '+name+' at '+bin+': '+error.message+(own?'. Run tools/local-solver/install-mac.sh first.':'')));});
-  child.on('close',code=>{
+  child.on('close',(code,signal)=>{
    clearTimeout(timer);if(Date.now()>=stopAt-5000)capHit=true;const seconds=(Date.now()-started)/1000,{iterations,exploitability,cancelled}=mine;if(job===mine)job=null;
    try{
-    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];throw Error(cancelled?'The solve was cancelled.':code===null||code===137?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
+    if(code!==0||!fs.existsSync(out)){const what=(tail.match(/what\(\):\s*(.*)/)||tail.match(/Error: (.*)/)||[])[1];// Which stop it was, so a failed solve says why: our own time limit, the system ending it (on a Mac that is
+    // almost always memory pressure), or a crash.
+    const killed=signal==='SIGKILL'||code===137;if(!cancelled&&(signal||code===137))console.log(name+' ended by '+(signal||'SIGKILL')+(timedOut?' at the time limit':'')+' after '+seconds.toFixed(1)+' s.'+(tail.trim()?' Last output: '+tail.trim().slice(-300):''));
+    throw Error(cancelled?'The solve was cancelled.':timedOut?'The solve was stopped at the time limit ('+Math.round(time.hard)+' s).':killed?'The solve was stopped by this computer (likely out of memory).':signal?name+' crashed ('+signal+').':code===null?'The solve was stopped (time limit or out of memory).':name+' failed'+(what?': '+what.replace(/\.$/,''):' (exit '+code+')')+'.');}
     // The dump goes to the app whole. When the app asked for them, a TexasSolver built with texassolver-evs.patch puts
     // each hand's EV for each action on every node of the street ("action_evs"), which the app grades on
     // (studio/local-solver.js actionEVs); a build from before that has none, and its answers grade on frequency.
